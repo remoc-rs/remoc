@@ -4,6 +4,8 @@ version = "0.0.0"
 edition = "2024"
 publish = false
 
+[workspace]
+
 [dependencies]
 remoc = { path = "../remoc", default-features = false, features = ["rch", "default-codec-postbag"] }
 serde = { version = "1.0", features = ["derive"] }

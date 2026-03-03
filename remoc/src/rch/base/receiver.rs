@@ -5,10 +5,12 @@ use futures::{
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
+    any::Any,
     cell::RefCell,
     collections::HashMap,
     error::Error,
     fmt,
+    io::Read,
     marker::PhantomData,
     panic,
     rc::{Rc, Weak},
@@ -17,13 +19,12 @@ use tracing::Instrument;
 
 use super::{super::DEFAULT_MAX_ITEM_SIZE, BIG_DATA_CHUNK_QUEUE, io::ChannelBytesReader};
 use crate::{
-    chmux::{self, AnyStorage, Received, RecvChunkError},
+    chmux::{self, AnyStorage, DataBuf, Received, RecvChunkError},
     codec::{self, DeserializationError, StreamingUnavailable},
     exec::{
         self,
         task::{self, JoinHandle},
     },
-    rch::base::io::IoReader,
 };
 
 /// An error that occurred during receiving from a remote endpoint.
@@ -178,13 +179,8 @@ impl PortDeserializer {
 ///
 /// Values may be or contain any channel from this crate.
 pub struct Receiver<T, Codec = codec::Default> {
-    receiver: chmux::Receiver,
-    recved: Option<Option<Received>>,
-    data: DataSource<T>,
-    item: Option<T>,
-    port_deser: Option<PortDeserializer>,
-    default_max_ports: Option<usize>,
-    max_item_size: usize,
+    inner: RecvInner,
+    _t: PhantomData<T>,
     _codec: PhantomData<Codec>,
 }
 
@@ -194,95 +190,213 @@ impl<T, Codec> fmt::Debug for Receiver<T, Codec> {
     }
 }
 
-/// Result of feeding received chunks to the deserialization thread.
-enum FeedChunksResult {
-    /// All chunks have been fed successfully.
-    Done,
-    /// The current send operation was cancelled; restart.
-    Cancelled,
-    /// The chmux connection failed.
-    ChMux,
-    /// Maximum item size was exceeded.
-    MaxItemSizeExceeded,
+/// Function pointer type for type-erased deserialization.
+///
+/// Only this small function gets monomorphized per (T, Codec) pair.
+type DeserializeFn = fn(&mut dyn Read) -> Result<Box<dyn Any + Send>, DeserializationError>;
+
+/// Deserialization for a specific (T, Codec) pair.
+fn deserialize_erased<T, Codec>(reader: &mut dyn Read) -> Result<Box<dyn Any + Send>, DeserializationError>
+where
+    T: DeserializeOwned + Send + 'static,
+    Codec: codec::Codec,
+{
+    let item: T = <Codec as codec::Codec>::deserialize(reader)?;
+    Ok(Box::new(item))
 }
 
-/// Non-generic: feed received data chunks from chmux to the deserialization thread.
-///
-/// Separated from the generic `Receiver::recv` to avoid monomorphization.
-#[inline(never)]
-async fn feed_recv_chunks(
-    receiver: &mut chmux::Receiver,
-    tx: &tokio::sync::mpsc::Sender<Result<Bytes, ()>>,
-    total: &mut usize,
-    max_item_size: usize,
-) -> FeedChunksResult {
-    loop {
-        let tx_permit = match tx.reserve().await {
-            Ok(tx_permit) => tx_permit,
-            _ => return FeedChunksResult::Done,
-        };
-
-        match receiver.recv_chunk().await {
-            Ok(Some(chunk)) => {
-                *total += chunk.remaining();
-                if *total > max_item_size {
-                    return FeedChunksResult::MaxItemSizeExceeded;
-                }
-                tx_permit.send(Ok(chunk));
-            }
-            Ok(None) => return FeedChunksResult::Done,
-            Err(RecvChunkError::Cancelled) => return FeedChunksResult::Cancelled,
-            Err(RecvChunkError::ChMux) => return FeedChunksResult::ChMux,
-        }
-    }
-}
-
-/// Non-generic: receive port requests and spawn callbacks from deserialized objects.
-///
-/// Separated from the generic `Receiver::recv` to avoid monomorphization.
-///
-/// Returns `Ok(None)` on success, `Ok(Some(received))` if the received message
-/// was not port requests (requires restart), or `Err` on failure.
-#[inline(never)]
-async fn receive_and_connect_ports(
-    receiver: &mut chmux::Receiver,
-    pds: &mut PortDeserializer,
-    default_max_ports: usize,
-) -> Result<Option<Option<Received>>, RecvError> {
-    if !pds.expected.is_empty() {
-        receiver.set_max_ports(pds.expected.len() + default_max_ports);
-
-        let requests = match receiver.recv_any().await? {
-            Some(chmux::Received::Requests(requests)) => requests,
-            other => return Ok(Some(other)),
-        };
-
-        for request in requests {
-            if let Some((local_port, callback)) = pds.expected.remove(&request.id()) {
-                exec::spawn(callback(local_port, request).in_current_span());
-            }
-        }
-
-        if !pds.expected.is_empty() {
-            return Err(RecvError::MissingPorts(pds.expected.keys().copied().collect()));
-        }
-    }
-
-    for task in pds.tasks.drain(..) {
-        exec::spawn(task.in_current_span());
-    }
-
-    Ok(None)
-}
-
-enum DataSource<T> {
+/// Non-generic data source for deserialization.
+enum DataSource {
     None,
-    Buffered(Option<chmux::DataBuf>),
+    Buffered(Option<DataBuf>),
     Streamed {
         tx: Option<tokio::sync::mpsc::Sender<Result<Bytes, ()>>>,
-        task: JoinHandle<Result<(T, PortDeserializer), DeserializationError>>,
+        task: JoinHandle<Result<(Box<dyn Any + Send>, PortDeserializer), DeserializationError>>,
         total: usize,
     },
+}
+
+/// Non-generic inner state of a [`Receiver`].
+struct RecvInner {
+    receiver: chmux::Receiver,
+    recved: Option<Option<Received>>,
+    data: DataSource,
+    item: Option<Box<dyn Any + Send>>,
+    port_deser: Option<PortDeserializer>,
+    default_max_ports: Option<usize>,
+    max_item_size: usize,
+    deserialize: DeserializeFn,
+}
+
+/// Non-generic: perform the entire receive operation using type-erased deserialization.
+///
+/// This function is shared across all (T, Codec) pairs, avoiding monomorphization
+/// of the large async state machine.
+#[inline(never)]
+async fn recv_erased(inner: &mut RecvInner) -> Result<Option<Box<dyn Any + Send>>, RecvError> {
+    if inner.default_max_ports.is_none() {
+        inner.default_max_ports = Some(inner.receiver.max_ports());
+    }
+
+    'restart: loop {
+        if inner.item.is_none() {
+            // Receive data or start streaming it.
+            if let DataSource::None = &inner.data {
+                if inner.recved.is_none() {
+                    inner.recved = Some(inner.receiver.recv_any().await?);
+                }
+
+                if let Some(Some(Received::Chunks)) = &inner.recved
+                    && !exec::are_threads_available().await
+                {
+                    return Err(RecvError::Deserialize(DeserializationError::new(StreamingUnavailable)));
+                }
+
+                inner.data = match inner.recved.take().unwrap() {
+                    Some(Received::Data(data)) => DataSource::Buffered(Some(data)),
+                    Some(Received::Chunks) => {
+                        // Start deserialization thread.
+                        let allocator = inner.receiver.port_allocator();
+                        let handle_storage = inner.receiver.storage();
+                        let (tx, rx) = tokio::sync::mpsc::channel(BIG_DATA_CHUNK_QUEUE);
+                        let deser_fn = inner.deserialize;
+                        let task = task::spawn_blocking(move || {
+                            let mut cbr = ChannelBytesReader::new(rx);
+                            let pds_ref = PortDeserializer::start(allocator, handle_storage);
+                            let item = deser_fn(&mut cbr)?;
+                            let pds = PortDeserializer::finish(pds_ref);
+                            Ok((item, pds))
+                        });
+                        DataSource::Streamed { tx: Some(tx), task, total: 0 }
+                    }
+                    Some(Received::Requests(_)) => continue 'restart,
+                    None => return Ok(None),
+                };
+            }
+
+            // Deserialize data.
+            match &mut inner.data {
+                DataSource::None => unreachable!(),
+
+                DataSource::Buffered(None) => {
+                    inner.data = DataSource::None;
+                    continue 'restart;
+                }
+
+                // Deserialize data from buffer.
+                DataSource::Buffered(Some(data)) => {
+                    if data.remaining() > inner.max_item_size {
+                        inner.data = DataSource::None;
+                        return Err(RecvError::MaxItemSizeExceeded);
+                    }
+
+                    let pds_ref = PortDeserializer::start(
+                        inner.receiver.port_allocator(),
+                        inner.receiver.storage(),
+                    );
+                    let item = (inner.deserialize)(&mut data.reader())
+                        .map_err(RecvError::Deserialize)?;
+                    let pds = PortDeserializer::finish(pds_ref);
+                    inner.data = DataSource::None;
+                    inner.item = Some(item);
+                    inner.port_deser = Some(pds);
+                }
+
+                // Observe deserialization of streamed data.
+                DataSource::Streamed { tx, task, total } => {
+                    // Feed received data chunks to deserialization thread.
+                    let tx_taken = tx.take();
+                    let total_ref = total;
+                    if let Some(tx_ref) = &tx_taken {
+                        loop {
+                            let tx_permit = match tx_ref.reserve().await {
+                                Ok(tx_permit) => tx_permit,
+                                _ => break,
+                            };
+
+                            match inner.receiver.recv_chunk().await {
+                                Ok(Some(chunk)) => {
+                                    *total_ref += chunk.remaining();
+                                    if *total_ref > inner.max_item_size {
+                                        inner.data = DataSource::None;
+                                        return Err(RecvError::MaxItemSizeExceeded);
+                                    }
+                                    tx_permit.send(Ok(chunk));
+                                }
+                                Ok(None) => break,
+                                Err(RecvChunkError::Cancelled) => {
+                                    inner.data = DataSource::None;
+                                    continue 'restart;
+                                }
+                                Err(RecvChunkError::ChMux) => {
+                                    inner.data = DataSource::None;
+                                    return Err(RecvError::Receive(chmux::RecvError::ChMux));
+                                }
+                            }
+                        }
+                    }
+                    drop(tx_taken);
+
+                    // Get deserialized item.
+                    match task.await {
+                        Ok(Ok((item, pds))) => {
+                            inner.item = Some(item);
+                            inner.port_deser = Some(pds);
+                            inner.data = DataSource::None;
+                        }
+                        Ok(Err(err)) => {
+                            inner.data = DataSource::None;
+                            return Err(RecvError::Deserialize(err));
+                        }
+                        Err(err) => {
+                            inner.data = DataSource::None;
+                            match err.try_into_panic() {
+                                Ok(payload) => panic::resume_unwind(payload),
+                                Err(err) => {
+                                    return Err(RecvError::Deserialize(DeserializationError::new(err)));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Connect received ports.
+        let pds = inner.port_deser.as_mut().unwrap();
+        if !pds.expected.is_empty() {
+            inner.receiver.set_max_ports(pds.expected.len() + inner.default_max_ports.unwrap());
+
+            let requests = match inner.receiver.recv_any().await? {
+                Some(chmux::Received::Requests(requests)) => requests,
+                other => {
+                    // Current send operation has been aborted and this is data from
+                    // next send operation, so we restart.
+                    inner.recved = Some(other);
+                    inner.data = DataSource::None;
+                    inner.item = None;
+                    inner.port_deser = None;
+                    continue 'restart;
+                }
+            };
+
+            for request in requests {
+                if let Some((local_port, callback)) = pds.expected.remove(&request.id()) {
+                    exec::spawn(callback(local_port, request).in_current_span());
+                }
+            }
+
+            if !pds.expected.is_empty() {
+                return Err(RecvError::MissingPorts(pds.expected.keys().copied().collect()));
+            }
+        }
+
+        for task in pds.tasks.drain(..) {
+            exec::spawn(task.in_current_span());
+        }
+
+        return Ok(Some(inner.item.take().unwrap()));
+    }
 }
 
 impl<T, Codec> Receiver<T, Codec>
@@ -293,156 +407,27 @@ where
     /// Creates a base remote receiver from a [chmux] receiver.
     pub fn new(receiver: chmux::Receiver) -> Self {
         Self {
-            receiver,
-            recved: None,
-            data: DataSource::None,
-            item: None,
-            port_deser: None,
-            default_max_ports: None,
-            max_item_size: DEFAULT_MAX_ITEM_SIZE,
+            inner: RecvInner {
+                receiver,
+                recved: None,
+                data: DataSource::None,
+                item: None,
+                port_deser: None,
+                default_max_ports: None,
+                max_item_size: DEFAULT_MAX_ITEM_SIZE,
+                deserialize: deserialize_erased::<T, Codec>,
+            },
+            _t: PhantomData,
             _codec: PhantomData,
         }
     }
 
     /// Receive an item from the remote endpoint.
     pub async fn recv(&mut self) -> Result<Option<T>, RecvError> {
-        if self.default_max_ports.is_none() {
-            self.default_max_ports = Some(self.receiver.max_ports());
-        }
-
-        'restart: loop {
-            if self.item.is_none() {
-                // Receive data or start streaming it.
-                if let DataSource::None = &self.data {
-                    if self.recved.is_none() {
-                        self.recved = Some(self.receiver.recv_any().await?);
-                    }
-
-                    if let Some(Some(Received::Chunks)) = &self.recved
-                        && !exec::are_threads_available().await
-                    {
-                        return Err(RecvError::Deserialize(DeserializationError::new(StreamingUnavailable)));
-                    }
-
-                    self.data = match self.recved.take().unwrap() {
-                        Some(Received::Data(data)) => DataSource::Buffered(Some(data)),
-                        Some(Received::Chunks) => {
-                            // Start deserialization thread.
-                            let allocator = self.receiver.port_allocator();
-                            let handle_storage = self.receiver.storage();
-                            let (tx, rx) = tokio::sync::mpsc::channel(BIG_DATA_CHUNK_QUEUE);
-                            let task = task::spawn_blocking(move || {
-                                let mut cbr = ChannelBytesReader::new(rx);
-
-                                let pds_ref = PortDeserializer::start(allocator, handle_storage);
-                                let item = <Codec as codec::Codec>::deserialize(IoReader::Channel(&mut cbr))?;
-                                let pds = PortDeserializer::finish(pds_ref);
-
-                                Ok((item, pds))
-                            });
-                            DataSource::Streamed { tx: Some(tx), task, total: 0 }
-                        }
-                        Some(Received::Requests(_)) => continue 'restart,
-                        None => return Ok(None),
-                    };
-                }
-
-                // Deserialize data.
-                match &mut self.data {
-                    DataSource::None => unreachable!(),
-
-                    DataSource::Buffered(None) => {
-                        self.data = DataSource::None;
-                        continue 'restart;
-                    }
-
-                    // Deserialize data from buffer.
-                    DataSource::Buffered(Some(data)) => {
-                        if data.remaining() > self.max_item_size {
-                            self.data = DataSource::None;
-                            return Err(RecvError::MaxItemSizeExceeded);
-                        }
-
-                        let pdf_ref =
-                            PortDeserializer::start(self.receiver.port_allocator(), self.receiver.storage());
-                        let item_res =
-                            <Codec as codec::Codec>::deserialize(IoReader::DataBuf(&mut data.reader()));
-                        self.data = DataSource::None;
-                        self.item = Some(item_res?);
-                        self.port_deser = Some(PortDeserializer::finish(pdf_ref));
-                    }
-
-                    // Observe deserialization of streamed data.
-                    DataSource::Streamed { tx, task, total } => {
-                        // Feed received data chunks to deserialization thread (non-generic).
-                        if let Some(tx_ref) = &tx {
-                            match feed_recv_chunks(&mut self.receiver, tx_ref, total, self.max_item_size).await
-                            {
-                                FeedChunksResult::Done => (),
-                                FeedChunksResult::Cancelled => {
-                                    self.data = DataSource::None;
-                                    continue 'restart;
-                                }
-                                FeedChunksResult::ChMux => {
-                                    self.data = DataSource::None;
-                                    return Err(RecvError::Receive(chmux::RecvError::ChMux));
-                                }
-                                FeedChunksResult::MaxItemSizeExceeded => {
-                                    self.data = DataSource::None;
-                                    return Err(RecvError::MaxItemSizeExceeded);
-                                }
-                            }
-                        }
-                        *tx = None;
-
-                        // Get deserialized item.
-                        match task.await {
-                            Ok(Ok((item, pds))) => {
-                                self.item = Some(item);
-                                self.port_deser = Some(pds);
-                                self.data = DataSource::None;
-                            }
-                            Ok(Err(err)) => {
-                                self.data = DataSource::None;
-                                return Err(RecvError::Deserialize(err));
-                            }
-                            Err(err) => {
-                                self.data = DataSource::None;
-                                match err.try_into_panic() {
-                                    Ok(payload) => panic::resume_unwind(payload),
-                                    Err(err) => {
-                                        return Err(RecvError::Deserialize(DeserializationError::new(err)));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Connect received ports (non-generic).
-            let pds = self.port_deser.as_mut().unwrap();
-            match receive_and_connect_ports(
-                &mut self.receiver,
-                pds,
-                self.default_max_ports.unwrap(),
-            )
-            .await
-            {
-                Ok(None) => (),
-                Ok(Some(other)) => {
-                    // Current send operation has been aborted and this is data from
-                    // next send operation, so we restart.
-                    self.recved = Some(other);
-                    self.data = DataSource::None;
-                    self.item = None;
-                    self.port_deser = None;
-                    continue 'restart;
-                }
-                Err(err) => return Err(err),
-            }
-
-            return Ok(Some(self.item.take().unwrap()));
+        match recv_erased(&mut self.inner).await {
+            Ok(Some(any)) => Ok(Some(*any.downcast::<T>().expect("item type mismatch in recv"))),
+            Ok(None) => Ok(None),
+            Err(err) => Err(err),
         }
     }
 
@@ -451,18 +436,18 @@ where
     /// This stops the remote endpoint from sending more data, but allows already sent data
     /// to be received.
     pub async fn close(&mut self) {
-        self.receiver.close().await
+        self.inner.receiver.close().await
     }
 
     /// The maximum allowed size in bytes of an item to be received.
     ///
     /// The default value is [DEFAULT_MAX_ITEM_SIZE].
     pub fn max_item_size(&self) -> usize {
-        self.max_item_size
+        self.inner.max_item_size
     }
 
     /// Sets the maximum allowed size in bytes of an item to be received.
     pub fn set_max_item_size(&mut self, max_item_size: usize) {
-        self.max_item_size = max_item_size;
+        self.inner.max_item_size = max_item_size;
     }
 }

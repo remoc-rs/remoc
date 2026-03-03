@@ -1,6 +1,7 @@
 use futures::{FutureExt, Sink};
 use serde::{Deserialize, Serialize};
 use std::{
+    any::Any,
     convert::TryFrom,
     error::Error,
     fmt,
@@ -293,6 +294,32 @@ const fn default_max_item_size() -> u64 {
     u64::MAX
 }
 
+/// Spawns a non-generic task that monitors for channel closure and drops
+/// the type-erased strong reference to the sender.
+#[inline(never)]
+fn spawn_close_monitor(
+    tx: Box<dyn Any + Send>,
+    mut closed_rx: tokio::sync::watch::Receiver<Option<ClosedReason>>,
+    mut dropped_rx: tokio::sync::mpsc::Receiver<()>,
+) {
+    exec::spawn(async move {
+        loop {
+            tokio::select! {
+                res = closed_rx.changed() => {
+                    match res {
+                        Ok(()) if closed_rx.borrow().is_some() => break,
+                        Ok(()) => (),
+                        Err(_) => break,
+                    }
+                },
+                _ = dropped_rx.recv() => break,
+            }
+        }
+
+        drop(tx);
+    });
+}
+
 impl<T, Codec, const BUFFER: usize> Sender<T, Codec, BUFFER>
 where
     T: Send + 'static,
@@ -300,11 +327,11 @@ where
     /// Creates a new sender.
     pub(crate) fn new(
         tx: tokio::sync::mpsc::Sender<SendReq<T>>,
-        mut closed_rx: tokio::sync::watch::Receiver<Option<ClosedReason>>,
+        closed_rx: tokio::sync::watch::Receiver<Option<ClosedReason>>,
         remote_send_err_rx: tokio::sync::watch::Receiver<Option<RemoteSendError>>,
     ) -> Self {
         let tx = Arc::new(tx);
-        let (dropped_tx, mut dropped_rx) = tokio::sync::mpsc::channel(1);
+        let (dropped_tx, dropped_rx) = tokio::sync::mpsc::channel(1);
 
         let this = Self {
             tx: Arc::downgrade(&tx),
@@ -316,22 +343,9 @@ where
         };
 
         // Drop strong reference to sender when channel is closed.
-        exec::spawn(async move {
-            loop {
-                tokio::select! {
-                    res = closed_rx.changed() => {
-                        match res {
-                            Ok(()) if closed_rx.borrow().is_some() => break,
-                            Ok(()) => (),
-                            Err(_) => break,
-                        }
-                    },
-                    _ = dropped_rx.recv() => break,
-                }
-            }
-
-            drop(tx);
-        });
+        // Use type-erased Box<dyn Any> to avoid monomorphizing the monitoring task per T.
+        let erased: Box<dyn Any + Send> = Box::new(tx);
+        spawn_close_monitor(erased, closed_rx, dropped_rx);
 
         this
     }

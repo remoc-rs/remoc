@@ -1,6 +1,6 @@
 use futures::FutureExt;
 use serde::{Deserialize, Serialize};
-use std::{error::Error, fmt, marker::PhantomData, sync::Mutex};
+use std::{any::Any, error::Error, fmt, marker::PhantomData, sync::Mutex};
 
 use super::{
     super::{
@@ -100,8 +100,12 @@ impl From<RemoteSendError> for SendError {
 ///
 /// Instances are created by the [channel](super::channel) function.
 pub struct Sender<T, Codec = codec::Default> {
-    inner: Option<SenderInner<T, Codec>>,
-    successor_tx: Mutex<Option<tokio::sync::oneshot::Sender<SenderInner<T, Codec>>>>,
+    /// Type-erased inner to avoid monomorphizing Drop per (T, Codec).
+    /// Always contains `Box<SenderInner<T, Codec>>`.
+    inner: Option<Box<dyn Any + Send + Sync>>,
+    #[allow(clippy::type_complexity)]
+    successor_tx: Mutex<Option<tokio::sync::oneshot::Sender<Box<dyn Any + Send + Sync>>>>,
+    _phantom: PhantomData<(T, Codec)>,
 }
 
 impl<T, Codec> fmt::Debug for Sender<T, Codec> {
@@ -139,8 +143,19 @@ const fn default_max_item_size() -> u64 {
 
 impl<T, Codec> Sender<T, Codec>
 where
-    T: Send + 'static,
+    T: Send + Sync + 'static,
+    Codec: Send + Sync + 'static,
 {
+    /// Downcast helper: immutable reference to the inner.
+    fn inner_ref(&self) -> &SenderInner<T, Codec> {
+        self.inner.as_ref().unwrap().downcast_ref::<SenderInner<T, Codec>>().unwrap()
+    }
+
+    /// Downcast helper: mutable reference to the inner.
+    fn inner_mut(&mut self) -> &mut SenderInner<T, Codec> {
+        self.inner.as_mut().unwrap().downcast_mut::<SenderInner<T, Codec>>().unwrap()
+    }
+
     /// Creates a new sender.
     pub(crate) fn new(
         tx: tokio::sync::watch::Sender<Result<T, RecvError>>,
@@ -153,9 +168,9 @@ where
             remote_send_err_rx: Mutex::new(remote_send_err_rx),
             current_err: Mutex::new(None),
             max_item_size,
-            _codec: PhantomData,
+            _codec: PhantomData::<Codec>,
         };
-        Self { inner: Some(inner), successor_tx: Mutex::new(None) }
+        Self { inner: Some(Box::new(inner)), successor_tx: Mutex::new(None), _phantom: PhantomData::<(T, Codec)> }
     }
 
     /// Sends a value over this channel, notifying all receivers.
@@ -167,7 +182,7 @@ where
     /// Thus, the reporting of an error may be delayed and this function may
     /// return errors caused by previous invocations.
     pub fn send(&self, value: T) -> Result<(), SendError> {
-        match self.inner.as_ref().unwrap().tx.send(Ok(value)) {
+        match self.inner_ref().tx.send(Ok(value)) {
             Ok(()) => Ok(()),
             Err(_) => match self.error() {
                 Some(err) => Err(err),
@@ -187,7 +202,7 @@ where
     where
         F: FnOnce(&mut T),
     {
-        self.inner.as_ref().unwrap().tx.send_modify(move |v| func(v.as_mut().unwrap()))
+        self.inner_ref().tx.send_modify(move |v| func(v.as_mut().unwrap()))
     }
 
     /// Sends a new value via the channel, notifying all receivers and returning the
@@ -196,32 +211,32 @@ where
     /// This method never fails, even if all receivers have been dropped or become
     /// disconnected.
     pub fn send_replace(&self, value: T) -> T {
-        self.inner.as_ref().unwrap().tx.send_replace(Ok(value)).unwrap()
+        self.inner_ref().tx.send_replace(Ok(value)).unwrap()
     }
 
     /// Returns a reference to the most recently sent value.
     pub fn borrow(&self) -> Ref<'_, T> {
-        Ref(self.inner.as_ref().unwrap().tx.borrow())
+        Ref(self.inner_ref().tx.borrow())
     }
 
     /// Completes when all receivers have been dropped or the connection failed.
     pub async fn closed(&self) {
-        self.inner.as_ref().unwrap().tx.closed().await
+        self.inner_ref().tx.closed().await
     }
 
     /// Returns whether all receivers have been dropped or the connection failed.
     pub fn is_closed(&self) -> bool {
-        self.inner.as_ref().unwrap().tx.is_closed()
+        self.inner_ref().tx.is_closed()
     }
 
     /// Creates a new receiver subscribed to this sender.
     pub fn subscribe(&self) -> Receiver<T, Codec> {
-        let inner = self.inner.as_ref().unwrap();
+        let inner = self.inner_ref();
         Receiver::new(inner.tx.subscribe(), inner.remote_send_err_tx.clone(), None)
     }
 
     fn update_error(&self) {
-        let inner = self.inner.as_ref().unwrap();
+        let inner = self.inner_ref();
         let mut current_err = inner.current_err.lock().unwrap();
         if current_err.is_some() {
             return;
@@ -241,7 +256,7 @@ where
     pub fn error(&self) -> Option<SendError> {
         self.update_error();
 
-        let inner = self.inner.as_ref().unwrap();
+        let inner = self.inner_ref();
         let current_err = inner.current_err.lock().unwrap();
         current_err.clone().map(|err| err.into())
     }
@@ -250,7 +265,7 @@ where
     pub fn clear_error(&mut self) {
         self.update_error();
 
-        let inner = self.inner.as_ref().unwrap();
+        let inner = self.inner_ref();
         let mut current_err = inner.current_err.lock().unwrap();
         *current_err = None;
     }
@@ -279,19 +294,21 @@ where
 
     /// Maximum allowed item size in bytes.
     pub fn max_item_size(&self) -> usize {
-        self.inner.as_ref().unwrap().max_item_size
+        self.inner_ref().max_item_size
     }
 
     /// Sets the maximum allowed item size in bytes.
     pub fn set_max_item_size(&mut self, max_item_size: usize) {
-        self.inner.as_mut().unwrap().max_item_size = max_item_size;
+        self.inner_mut().max_item_size = max_item_size;
     }
 }
 
 impl<T, Codec> Drop for Sender<T, Codec> {
     fn drop(&mut self) {
-        if let Some(successor_tx) = self.successor_tx.lock().unwrap().take() {
-            let _ = successor_tx.send(self.inner.take().unwrap());
+        if let Some(inner) = self.inner.take() {
+            if let Some(successor_tx) = self.successor_tx.lock().unwrap().take() {
+                let _ = successor_tx.send(inner);
+            }
         }
     }
 }
@@ -308,15 +325,15 @@ where
     {
         let max_item_size = self.max_item_size();
 
-        // Prepare channel for takeover.
-        let (successor_tx, successor_rx) = tokio::sync::oneshot::channel();
+        // Prepare channel for takeover using type-erased oneshot.
+        let (successor_tx, successor_rx) = tokio::sync::oneshot::channel::<Box<dyn Any + Send + Sync>>();
         *self.successor_tx.lock().unwrap() = Some(successor_tx);
 
         let port = PortSerializer::connect(move |connect| {
             async move {
                 // Sender has been dropped after sending, so we receive its channels.
                 let SenderInner { tx, remote_send_err_rx, current_err, .. } = match successor_rx.await {
-                    Ok(inner) => inner,
+                    Ok(inner) => *inner.downcast::<SenderInner<T, Codec>>().expect("type mismatch in watch Sender successor"),
                     Err(_) => return,
                 };
                 let remote_send_err_rx = remote_send_err_rx.into_inner().unwrap();
@@ -338,7 +355,7 @@ where
         })?;
 
         // Encode chmux port number in transport type and serialize it.
-        let data = self.inner.as_ref().unwrap().tx.borrow().clone();
+        let data = self.inner_ref().tx.borrow().clone();
         let transported = TransportedSender::<T, Codec> {
             port,
             data,

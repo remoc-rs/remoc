@@ -15,7 +15,7 @@ authors = [
 [workspace]
 resolver = "2"
 members = ["remoc", "remoc_macro"]
-exclude = ["examples"]
+exclude = ["examples", "bench_compile"]
 
 
 # for WASI on the web (wasm32-wasip1-threads target with `js` feature):

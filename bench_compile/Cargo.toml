@@ -1,0 +1,16 @@
+[package]
+name = "remoc-compile-bench"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+remoc = { path = "../remoc", default-features = false, features = ["rch", "default-codec-postbag"] }
+serde = { version = "1.0", features = ["derive"] }
+tokio = { version = "1.43", features = ["macros", "rt", "rt-multi-thread", "net", "io-util"] }
+tokio-util = { version = "0.7", features = ["codec", "compat"] }
+bytes = "1"
+
+[[bin]]
+name = "remoc_channels"
+path = "src/remoc_channels.rs"

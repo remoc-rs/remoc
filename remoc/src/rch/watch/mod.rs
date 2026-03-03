@@ -93,9 +93,9 @@ where
 /// Creates a new watch channel, returning the sender and receiver.
 ///
 /// The sender and receiver may be sent to remote endpoints via channels.
-pub fn channel<T, Codec>(init: T) -> (Sender<T, Codec>, Receiver<T, Codec>)
+pub fn channel<T, Codec: Send + Sync + 'static>(init: T) -> (Sender<T, Codec>, Receiver<T, Codec>)
 where
-    T: RemoteSend,
+    T: RemoteSend + Sync,
 {
     let (tx, rx) = tokio::sync::watch::channel(Ok(init));
     let (remote_send_err_tx, remote_send_err_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -187,10 +187,10 @@ pub trait WatchExt<T, Codec, const MAX_ITEM_SIZE: usize> {
     ) -> (Sender<T, Codec>, Receiver<T, Codec, NEW_MAX_ITEM_SIZE>);
 }
 
-impl<T, Codec, const MAX_ITEM_SIZE: usize> WatchExt<T, Codec, MAX_ITEM_SIZE>
+impl<T, Codec: Send + Sync + 'static, const MAX_ITEM_SIZE: usize> WatchExt<T, Codec, MAX_ITEM_SIZE>
     for (Sender<T, Codec>, Receiver<T, Codec, MAX_ITEM_SIZE>)
 where
-    T: Send + 'static,
+    T: Send + Sync + 'static,
 {
     fn with_max_item_size<const NEW_MAX_ITEM_SIZE: usize>(
         self,

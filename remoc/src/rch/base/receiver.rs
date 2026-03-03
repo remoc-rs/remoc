@@ -194,6 +194,87 @@ impl<T, Codec> fmt::Debug for Receiver<T, Codec> {
     }
 }
 
+/// Result of feeding received chunks to the deserialization thread.
+enum FeedChunksResult {
+    /// All chunks have been fed successfully.
+    Done,
+    /// The current send operation was cancelled; restart.
+    Cancelled,
+    /// The chmux connection failed.
+    ChMux,
+    /// Maximum item size was exceeded.
+    MaxItemSizeExceeded,
+}
+
+/// Non-generic: feed received data chunks from chmux to the deserialization thread.
+///
+/// Separated from the generic `Receiver::recv` to avoid monomorphization.
+#[inline(never)]
+async fn feed_recv_chunks(
+    receiver: &mut chmux::Receiver,
+    tx: &tokio::sync::mpsc::Sender<Result<Bytes, ()>>,
+    total: &mut usize,
+    max_item_size: usize,
+) -> FeedChunksResult {
+    loop {
+        let tx_permit = match tx.reserve().await {
+            Ok(tx_permit) => tx_permit,
+            _ => return FeedChunksResult::Done,
+        };
+
+        match receiver.recv_chunk().await {
+            Ok(Some(chunk)) => {
+                *total += chunk.remaining();
+                if *total > max_item_size {
+                    return FeedChunksResult::MaxItemSizeExceeded;
+                }
+                tx_permit.send(Ok(chunk));
+            }
+            Ok(None) => return FeedChunksResult::Done,
+            Err(RecvChunkError::Cancelled) => return FeedChunksResult::Cancelled,
+            Err(RecvChunkError::ChMux) => return FeedChunksResult::ChMux,
+        }
+    }
+}
+
+/// Non-generic: receive port requests and spawn callbacks from deserialized objects.
+///
+/// Separated from the generic `Receiver::recv` to avoid monomorphization.
+///
+/// Returns `Ok(None)` on success, `Ok(Some(received))` if the received message
+/// was not port requests (requires restart), or `Err` on failure.
+#[inline(never)]
+async fn receive_and_connect_ports(
+    receiver: &mut chmux::Receiver,
+    pds: &mut PortDeserializer,
+    default_max_ports: usize,
+) -> Result<Option<Option<Received>>, RecvError> {
+    if !pds.expected.is_empty() {
+        receiver.set_max_ports(pds.expected.len() + default_max_ports);
+
+        let requests = match receiver.recv_any().await? {
+            Some(chmux::Received::Requests(requests)) => requests,
+            other => return Ok(Some(other)),
+        };
+
+        for request in requests {
+            if let Some((local_port, callback)) = pds.expected.remove(&request.id()) {
+                exec::spawn(callback(local_port, request).in_current_span());
+            }
+        }
+
+        if !pds.expected.is_empty() {
+            return Err(RecvError::MissingPorts(pds.expected.keys().copied().collect()));
+        }
+    }
+
+    for task in pds.tasks.drain(..) {
+        exec::spawn(task.in_current_span());
+    }
+
+    Ok(None)
+}
+
 enum DataSource<T> {
     None,
     Buffered(Option<chmux::DataBuf>),
@@ -293,46 +374,20 @@ where
 
                     // Observe deserialization of streamed data.
                     DataSource::Streamed { tx, task, total } => {
-                        enum FeedError {
-                            RecvChunkError(RecvChunkError),
-                            MaxItemSizeExceeded,
-                        }
-
-                        // Feed received data chunks to deserialization thread.
-                        if let Some(tx) = &tx {
-                            let res = loop {
-                                let tx_permit = match tx.reserve().await {
-                                    Ok(tx_permit) => tx_permit,
-                                    _ => {
-                                        break Ok(());
-                                    }
-                                };
-
-                                match self.receiver.recv_chunk().await {
-                                    Ok(Some(chunk)) => {
-                                        *total += chunk.remaining();
-                                        if *total > self.max_item_size {
-                                            break Err(FeedError::MaxItemSizeExceeded);
-                                        }
-
-                                        tx_permit.send(Ok(chunk));
-                                    }
-                                    Ok(None) => break Ok(()),
-                                    Err(err) => break Err(FeedError::RecvChunkError(err)),
-                                }
-                            };
-
-                            match res {
-                                Ok(()) => (),
-                                Err(FeedError::RecvChunkError(RecvChunkError::Cancelled)) => {
+                        // Feed received data chunks to deserialization thread (non-generic).
+                        if let Some(tx_ref) = &tx {
+                            match feed_recv_chunks(&mut self.receiver, tx_ref, total, self.max_item_size).await
+                            {
+                                FeedChunksResult::Done => (),
+                                FeedChunksResult::Cancelled => {
                                     self.data = DataSource::None;
                                     continue 'restart;
                                 }
-                                Err(FeedError::RecvChunkError(RecvChunkError::ChMux)) => {
+                                FeedChunksResult::ChMux => {
                                     self.data = DataSource::None;
                                     return Err(RecvError::Receive(chmux::RecvError::ChMux));
                                 }
-                                Err(FeedError::MaxItemSizeExceeded) => {
+                                FeedChunksResult::MaxItemSizeExceeded => {
                                     self.data = DataSource::None;
                                     return Err(RecvError::MaxItemSizeExceeded);
                                 }
@@ -365,47 +420,26 @@ where
                 }
             }
 
-            // Connect received ports.
+            // Connect received ports (non-generic).
             let pds = self.port_deser.as_mut().unwrap();
-            if !pds.expected.is_empty() {
-                // Set port limit.
-                //
-                // Allow the reception of additional ports for forward compatibility,
-                // i.e. our deserializer may use an older version of the struct
-                // which is missing some ports that the remote endpoint sent.
-                self.receiver.set_max_ports(pds.expected.len() + self.default_max_ports.unwrap());
-
-                // Receive port requests from chmux.
-                let requests = match self.receiver.recv_any().await? {
-                    Some(chmux::Received::Requests(requests)) => requests,
-                    other => {
-                        // Current send operation has been aborted and this is data from
-                        // next send operation, so we restart.
-                        self.recved = Some(other);
-                        self.data = DataSource::None;
-                        self.item = None;
-                        self.port_deser = None;
-                        continue 'restart;
-                    }
-                };
-
-                // Call port callbacks from received objects, ignoring superfluous requests for
-                // forward compatibility.
-                for request in requests {
-                    if let Some((local_port, callback)) = pds.expected.remove(&request.id()) {
-                        exec::spawn(callback(local_port, request).in_current_span());
-                    }
+            match receive_and_connect_ports(
+                &mut self.receiver,
+                pds,
+                self.default_max_ports.unwrap(),
+            )
+            .await
+            {
+                Ok(None) => (),
+                Ok(Some(other)) => {
+                    // Current send operation has been aborted and this is data from
+                    // next send operation, so we restart.
+                    self.recved = Some(other);
+                    self.data = DataSource::None;
+                    self.item = None;
+                    self.port_deser = None;
+                    continue 'restart;
                 }
-
-                // But error on ports that we expect but that are missing.
-                if !pds.expected.is_empty() {
-                    return Err(RecvError::MissingPorts(pds.expected.keys().copied().collect()));
-                }
-            }
-
-            // Spawn registered tasks.
-            for task in pds.tasks.drain(..) {
-                exec::spawn(task.in_current_span());
+                Err(err) => return Err(err),
             }
 
             return Ok(Some(self.item.take().unwrap()));

@@ -226,6 +226,61 @@ impl PortSerializer {
     }
 }
 
+/// Non-generic: stream serialized chunks over chmux.
+///
+/// Separated from the generic `Sender::send` to avoid monomorphization.
+#[inline(never)]
+async fn send_chunks_from_stream(
+    sender: &mut chmux::Sender,
+    mut rx: tokio::sync::mpsc::Receiver<BytesMut>,
+    max_item_size: usize,
+) -> Result<(), SendErrorKind> {
+    let mut sc = sender.send_chunks();
+    let mut total = 0;
+    while let Some(chunk) = rx.recv().await {
+        total += chunk.len();
+        if total > max_item_size {
+            return Err(SendErrorKind::MaxItemSizeExceeded);
+        }
+        sc = sc.send(chunk.freeze()).await.map_err(SendErrorKind::Send)?;
+    }
+    sc.finish().await.map_err(SendErrorKind::Send)
+}
+
+/// Non-generic: connect ports obtained during serialization and spawn callbacks.
+///
+/// Separated from the generic `Sender::send` to avoid monomorphization.
+#[inline(never)]
+async fn connect_ports_and_spawn(
+    sender: &mut chmux::Sender,
+    ps: PortSerializer,
+) -> Result<(), chmux::SendError> {
+    let PortSerializer { requests, tasks, .. } = ps;
+
+    let mut ports = Vec::new();
+    let mut callbacks = Vec::new();
+    for (port, callback) in requests {
+        ports.push(PortReq::new(port));
+        callbacks.push(callback);
+    }
+
+    let connects = if ports.is_empty() {
+        Vec::new()
+    } else {
+        sender.connect(ports, true).await?
+    };
+
+    for (callback, connect) in callbacks.into_iter().zip(connects.into_iter()) {
+        exec::spawn(callback(connect).in_current_span());
+    }
+
+    for task in tasks {
+        exec::spawn(task.in_current_span());
+    }
+
+    Ok(())
+}
+
 /// Sends arbitrary values to a remote endpoint.
 ///
 /// Values may be or contain any channel from this crate.
@@ -365,54 +420,24 @@ where
 
             None => {
                 // Stream data while serializing.
-                let (tx, mut rx) = tokio::sync::mpsc::channel(BIG_DATA_CHUNK_QUEUE);
-                let ser_task = Self::serialize_streaming(
-                    self.sender.port_allocator(),
-                    self.sender.storage(),
-                    item,
-                    tx,
-                    self.sender.chunk_size(),
-                );
-
-                enum SendTaskError {
-                    SendError(chmux::SendError),
-                    MaxItemSizeExceeded,
-                }
-
-                let mut sc = self.sender.send_chunks();
-                let max_item_size = self.max_item_size;
-                let send_task = async move {
-                    let mut total = 0;
-                    while let Some(chunk) = rx.recv().await {
-                        total += chunk.len();
-                        if total > max_item_size {
-                            return Err(SendTaskError::MaxItemSizeExceeded);
-                        }
-
-                        sc = sc.send(chunk.freeze()).await.map_err(SendTaskError::SendError)?;
-                    }
-                    Ok(sc)
-                };
+                let (tx, rx) = tokio::sync::mpsc::channel(BIG_DATA_CHUNK_QUEUE);
+                let allocator = self.sender.port_allocator();
+                let storage = self.sender.storage();
+                let chunk_size = self.sender.chunk_size();
+                let ser_task = Self::serialize_streaming(allocator, storage, item, tx, chunk_size);
+                let send_task = send_chunks_from_stream(&mut self.sender, rx, self.max_item_size);
 
                 match tokio::join!(ser_task, send_task) {
-                    (Ok((item, ps, size)), Ok(sc)) => {
-                        if let Err(err) = sc.finish().await {
-                            return Err(SendError::new(SendErrorKind::Send(err), item));
-                        }
-
+                    (Ok((item, ps, size)), Ok(())) => {
                         if size <= self.sender.max_data_size() {
                             self.big_data = (self.big_data - 1).max(-BIG_DATA_LIMIT);
                         }
 
                         (item, ps)
                     }
-                    (Ok((item, _, _)), Err(err)) | (Err((_, item)), Err(err)) => {
+                    (Ok((item, _, _)), Err(kind)) | (Err((_, item)), Err(kind)) => {
                         // When sending fails, the serialization task will either finish
                         // or fail due to rx being dropped.
-                        let kind = match err {
-                            SendTaskError::SendError(err) => SendErrorKind::Send(err),
-                            SendTaskError::MaxItemSizeExceeded => SendErrorKind::MaxItemSizeExceeded,
-                        };
                         return Err(SendError::new(kind, item));
                     }
                     (Err((err, item)), _) => {
@@ -424,41 +449,13 @@ where
             }
         };
 
-        let PortSerializer { requests, tasks, .. } = ps;
-
-        // Extract ports and connect callbacks.
-        let mut ports = Vec::new();
-        let mut callbacks = Vec::new();
-        for (port, callback) in requests {
-            ports.push(PortReq::new(port));
-            callbacks.push(callback);
+        // Connect ports obtained during serialization (non-generic).
+        if let Err(err) = connect_ports_and_spawn(&mut self.sender, ps).await {
+            return Err(SendError::new(SendErrorKind::Send(err), item));
         }
 
-        // Request connecting chmux ports.
-        let connects = if ports.is_empty() {
-            Vec::new()
-        } else {
-            match self.sender.connect(ports, true).await {
-                Ok(connects) => connects,
-                Err(err) => return Err(SendError::new(SendErrorKind::Send(err), item)),
-            }
-        };
-
-        // Ensure that item is dropped before calling connection callbacks.
+        // Ensure that item is dropped before connection callbacks run.
         drop(item);
-
-        // Call callbacks of BaseSenders and BaseReceivers with obtained
-        // chmux connect requests.
-        //
-        // We have to spawn a task for this to ensure cancellation safety.
-        for (callback, connect) in callbacks.into_iter().zip(connects.into_iter()) {
-            exec::spawn(callback(connect).in_current_span());
-        }
-
-        // Spawn registered tasks.
-        for task in tasks {
-            exec::spawn(task.in_current_span());
-        }
 
         Ok(())
     }

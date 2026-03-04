@@ -262,10 +262,7 @@ where
 /// of the large async state machine.
 #[inline(never)]
 async fn send_erased(
-    sender: &mut chmux::Sender,
-    item: Box<dyn ErasedSerialize>,
-    big_data: &mut i8,
-    max_item_size: usize,
+    sender: &mut chmux::Sender, item: Box<dyn ErasedSerialize>, big_data: &mut i8, max_item_size: usize,
 ) -> Result<(), (SendErrorKind, Box<dyn Any + Send>)> {
     // Determine if it is worthy to try buffered serialization.
     let data_ps = if *big_data <= 0 {

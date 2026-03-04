@@ -298,8 +298,7 @@ const fn default_max_item_size() -> u64 {
 /// the type-erased strong reference to the sender.
 #[inline(never)]
 fn spawn_close_monitor(
-    tx: Box<dyn Any + Send>,
-    mut closed_rx: tokio::sync::watch::Receiver<Option<ClosedReason>>,
+    tx: Box<dyn Any + Send>, mut closed_rx: tokio::sync::watch::Receiver<Option<ClosedReason>>,
     mut dropped_rx: tokio::sync::mpsc::Receiver<()>,
 ) {
     exec::spawn(async move {
@@ -326,8 +325,7 @@ where
 {
     /// Creates a new sender.
     pub(crate) fn new(
-        tx: tokio::sync::mpsc::Sender<SendReq<T>>,
-        closed_rx: tokio::sync::watch::Receiver<Option<ClosedReason>>,
+        tx: tokio::sync::mpsc::Sender<SendReq<T>>, closed_rx: tokio::sync::watch::Receiver<Option<ClosedReason>>,
         remote_send_err_rx: tokio::sync::watch::Receiver<Option<RemoteSendError>>,
     ) -> Self {
         let tx = Arc::new(tx);

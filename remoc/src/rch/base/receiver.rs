@@ -290,12 +290,9 @@ async fn recv_erased(inner: &mut RecvInner) -> Result<Option<Box<dyn Any + Send>
                         return Err(RecvError::MaxItemSizeExceeded);
                     }
 
-                    let pds_ref = PortDeserializer::start(
-                        inner.receiver.port_allocator(),
-                        inner.receiver.storage(),
-                    );
-                    let item = (inner.deserialize)(&mut data.reader())
-                        .map_err(RecvError::Deserialize)?;
+                    let pds_ref =
+                        PortDeserializer::start(inner.receiver.port_allocator(), inner.receiver.storage());
+                    let item = (inner.deserialize)(&mut data.reader()).map_err(RecvError::Deserialize)?;
                     let pds = PortDeserializer::finish(pds_ref);
                     inner.data = DataSource::None;
                     inner.item = Some(item);

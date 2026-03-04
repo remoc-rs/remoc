@@ -333,7 +333,9 @@ where
             async move {
                 // Sender has been dropped after sending, so we receive its channels.
                 let SenderInner { tx, remote_send_err_rx, current_err, .. } = match successor_rx.await {
-                    Ok(inner) => *inner.downcast::<SenderInner<T, Codec>>().expect("type mismatch in watch Sender successor"),
+                    Ok(inner) => *inner
+                        .downcast::<SenderInner<T, Codec>>()
+                        .expect("type mismatch in watch Sender successor"),
                     Err(_) => return,
                 };
                 let remote_send_err_rx = remote_send_err_rx.into_inner().unwrap();

@@ -116,5 +116,3 @@ impl io::Read for ChannelBytesReader {
         Ok(len)
     }
 }
-
-

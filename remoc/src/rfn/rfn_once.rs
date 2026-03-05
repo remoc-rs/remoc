@@ -117,9 +117,11 @@ where
 
                     Err(_) = keep_rx => (),
 
-                    Ok(RFnRequest {argument, result_tx}) = request_rx => {
-                        let result = fun(argument).await;
-                        let _ = result_tx.send(result);
+                    req_res = request_rx => {
+                        if let Ok(RFnRequest {argument, result_tx}) = req_res {
+                            let result = fun(argument).await;
+                            let _ = result_tx.send(result);
+                        }
                     }
                 }
             }

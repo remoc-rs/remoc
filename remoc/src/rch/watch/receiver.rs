@@ -153,6 +153,22 @@ pub(crate) struct TransportedReceiver<T, Codec> {
     max_item_size: u64,
 }
 
+impl<T, Codec> Receiver<T, Codec>
+where
+    T: RemoteSend + Sync + Clone,
+    Codec: codec::Codec,
+{
+    /// Creates a receiver that forwards values from the given local watch receiver.
+    ///
+    /// The returned receiver may be sent to remote endpoints via channels.
+    /// Any send errors that occur during forwarding are silently dropped; 
+    /// use [`forward`](super::forward) if you need to observe them.
+    pub fn forwarded(local_rx: tokio::sync::watch::Receiver<T>) -> Self {
+        let (_fwd, rx) = super::forward(local_rx);
+        rx
+    }
+}
+
 impl<T, Codec, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, MAX_ITEM_SIZE> {
     pub(crate) fn new(
         rx: tokio::sync::watch::Receiver<Result<T, RecvError>>,

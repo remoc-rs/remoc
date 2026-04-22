@@ -170,6 +170,48 @@ async fn forward() {
 
 #[cfg_attr(not(feature = "js"), tokio::test)]
 #[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn forwarded() {
+    crate::init();
+    let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<watch::Receiver<i16>>().await;
+
+    let start_value = 2;
+    let end_value = 32;
+
+    let (tx, local_rx) = tokio::sync::watch::channel(start_value);
+
+    println!("Forwarding local watch receiver via Receiver::forwarded");
+    let rx = watch::Receiver::forwarded(local_rx);
+    a_tx.send(rx).await.unwrap();
+    let mut rx = b_rx.recv().await.unwrap().unwrap();
+
+    let recv_task = exec::spawn(async move {
+        let mut value = *rx.borrow().unwrap();
+        assert_eq!(value, start_value);
+
+        while rx.changed().await.is_ok() {
+            value = *rx.borrow_and_update().unwrap();
+            println!("Received value change: {value}");
+        }
+
+        value = *rx.borrow_and_update().unwrap();
+        assert_eq!(value, end_value);
+    });
+
+    for value in start_value..=end_value {
+        tx.send(value).unwrap();
+        if value % 5 == 0 {
+            sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    drop(tx);
+
+    println!("Waiting for receive task");
+    recv_task.await.unwrap();
+}
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
 async fn modify_stream() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<watch::Receiver<i16>>().await;

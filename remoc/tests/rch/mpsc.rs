@@ -793,3 +793,64 @@ async fn reserve_closed() {
         Ok(_) => panic!("reserve should fail after channel is closed"),
     }
 }
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn forward_local() {
+    crate::init();
+    let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<mpsc::Receiver<i16>>().await;
+
+    println!("Creating local tokio mpsc channel");
+    let (local_tx, local_rx) = tokio::sync::mpsc::channel::<i16>(8);
+
+    println!("Forwarding local mpsc receiver over remote channel");
+    let (forward, rx) = mpsc::forward(local_rx);
+    a_tx.send(rx).await.unwrap();
+    let mut rx = b_rx.recv().await.unwrap().unwrap();
+
+    let send_task = exec::spawn(async move {
+        for i in 1..=100 {
+            local_tx.send(i).await.unwrap();
+        }
+    });
+
+    for i in 1..=100 {
+        let r = rx.recv().await.unwrap().unwrap();
+        assert_eq!(i, r, "forwarded value mismatch");
+    }
+
+    send_task.await.unwrap();
+
+    println!("Waiting for forward task");
+    forward.await.unwrap();
+}
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn forwarded_local() {
+    crate::init();
+    let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<mpsc::Receiver<i16>>().await;
+
+    let (local_tx, local_rx) = tokio::sync::mpsc::channel::<i16>(8);
+
+    println!("Forwarding local mpsc receiver via Receiver::forwarded");
+    let rx = mpsc::Receiver::forwarded(local_rx);
+    a_tx.send(rx).await.unwrap();
+    let mut rx = b_rx.recv().await.unwrap().unwrap();
+
+    let send_task = exec::spawn(async move {
+        for i in 1..=50 {
+            local_tx.send(i).await.unwrap();
+        }
+    });
+
+    for i in 1..=50 {
+        let r = rx.recv().await.unwrap().unwrap();
+        assert_eq!(i, r, "forwarded value mismatch");
+    }
+
+    send_task.await.unwrap();
+
+    println!("Closing local sender and expecting channel to end");
+    assert!(rx.recv().await.unwrap().is_none());
+}

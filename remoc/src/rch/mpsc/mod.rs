@@ -46,11 +46,18 @@
 //!
 
 use bytes::Buf;
+use futures::FutureExt;
 use serde::{Serialize, de::DeserializeOwned};
+use std::{
+    fmt,
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll, ready},
+};
 
 use super::{ClosedReason, RemoteSendError, Sending, base};
 use crate::{
-    RemoteSend, chmux, codec,
+    RemoteSend, chmux, codec, exec,
     rch::{BACKCHANNEL_MSG_CLOSE, BACKCHANNEL_MSG_ERROR},
 };
 
@@ -78,6 +85,72 @@ where
     let sender = Sender::new(tx, closed_rx, remote_send_err_rx);
     let receiver = Receiver::new(rx, closed_tx, false, remote_send_err_tx, None);
     (sender, receiver)
+}
+
+/// Makes a local mpsc receiver forwardable to remote endpoints.
+///
+/// The returned [`Forwarding`] future resolves once forwarding has completed or an error occurs.
+/// The returned receiver may be sent to remote endpoints via channels.
+pub fn forward<T, Codec>(mut local_rx: tokio::sync::mpsc::Receiver<T>) -> (Forwarding, Receiver<T, Codec>)
+where
+    T: RemoteSend,
+    Codec: codec::Codec,
+{
+    let (tx, rx) = channel(1);
+
+    let hnd = exec::spawn(async move {
+        loop {
+            let permit = match tx.reserve().await {
+                Ok(permit) => permit,
+                Err(err) if err.is_closed() => break,
+                Err(err) => return Err(err),
+            };
+            match local_rx.recv().await {
+                Some(v) => {
+                    permit.send(v);
+                }
+                None => break,
+            }
+        }
+
+        Ok(())
+    });
+
+    (Forwarding(hnd), rx)
+}
+
+/// Handle to obtain the result of forwarding a local receiver remotely by [`forward`].
+///
+/// Await this to obtain the result of the forwarding operation.
+/// The operation is assumed to have finished successfully if either the local or remote
+/// channel is closed or dropped.
+///
+/// Dropping this *does not* stop forwarding.
+pub struct Forwarding(exec::task::JoinHandle<Result<(), SendError<()>>>);
+
+impl fmt::Debug for Forwarding {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("Forwarding").finish()
+    }
+}
+
+impl Future for Forwarding {
+    type Output = Result<(), SendError<()>>;
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        match ready!(self.0.poll_unpin(cx)) {
+            Ok(res) => Poll::Ready(res),
+            Err(_) => Poll::Ready(Err(SendError::Closed(()))),
+        }
+    }
+}
+
+impl Forwarding {
+    /// Stops forwarding.
+    ///
+    /// The remote sending half and local receiving half of the mpsc channels are dropped.
+    pub fn stop(self) {
+        self.0.abort();
+    }
 }
 
 /// Extensions for MPSC channels.

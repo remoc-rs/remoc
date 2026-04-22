@@ -55,3 +55,70 @@ async fn close() {
         Err(err) => panic!("wrong error after close: {err}"),
     }
 }
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn forward_local() {
+    crate::init();
+    let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<oneshot::Receiver<i16>>().await;
+
+    let (local_tx, local_rx) = tokio::sync::oneshot::channel::<i16>();
+
+    println!("Forwarding local oneshot receiver over remote channel");
+    let (forward, rx) = oneshot::forward(local_rx);
+    a_tx.send(rx).await.unwrap();
+    let rx = b_rx.recv().await.unwrap().unwrap();
+
+    let i = 1234;
+    local_tx.send(i).unwrap();
+
+    let r = rx.await.unwrap();
+    println!("Received {r}");
+    assert_eq!(i, r, "forwarded value mismatch");
+
+    println!("Waiting for forward task");
+    forward.await.unwrap();
+}
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn forwarded_local() {
+    crate::init();
+    let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<oneshot::Receiver<i16>>().await;
+
+    let (local_tx, local_rx) = tokio::sync::oneshot::channel::<i16>();
+
+    println!("Forwarding local oneshot receiver via Receiver::forwarded");
+    let rx = oneshot::Receiver::forwarded(local_rx);
+    a_tx.send(rx).await.unwrap();
+    let rx = b_rx.recv().await.unwrap().unwrap();
+
+    let i = 4321;
+    local_tx.send(i).unwrap();
+
+    let r = rx.await.unwrap();
+    assert_eq!(i, r, "forwarded value mismatch");
+}
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn forward_local_dropped() {
+    crate::init();
+    let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<oneshot::Receiver<i16>>().await;
+
+    let (local_tx, local_rx) = tokio::sync::oneshot::channel::<i16>();
+
+    println!("Forwarding local oneshot receiver, then dropping local sender");
+    let (forward, rx) = oneshot::forward(local_rx);
+    a_tx.send(rx).await.unwrap();
+    let rx = b_rx.recv().await.unwrap().unwrap();
+
+    drop(local_tx);
+
+    match rx.await {
+        Ok(_) => panic!("expected receive to fail after local sender dropped"),
+        Err(err) => println!("Got expected error: {err}"),
+    }
+
+    forward.await.unwrap();
+}

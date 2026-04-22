@@ -17,8 +17,8 @@
 //! # Security
 //!
 //! This module is **not** designed for use with untrusted remote peers.
-//! A malicious peer can hold a [ReadGuard](ReadGuard) or [WriteGuard](WriteGuard)
-//! indefinitely, which blocks the [Owner](Owner) from processing any further
+//! A malicious peer can hold a [ReadGuard] or [WriteGuard]
+//! indefinitely, which blocks the [Owner] from processing any further
 //! read or write requests, effectively causing a denial of service for all peers.
 //! Only use this module with trusted peers.
 //!

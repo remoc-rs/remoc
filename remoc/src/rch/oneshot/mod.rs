@@ -39,10 +39,17 @@
 //! ```
 //!
 
+use futures::FutureExt;
 use serde::{Serialize, de::DeserializeOwned};
+use std::{
+    fmt,
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll, ready},
+};
 
 use super::mpsc;
-use crate::{RemoteSend, codec};
+use crate::{RemoteSend, codec, exec};
 
 mod receiver;
 mod sender;
@@ -62,6 +69,71 @@ where
     let tx = tx.set_buffer();
     let rx = rx.set_buffer();
     (Sender(tx), Receiver(rx))
+}
+
+/// Makes a local oneshot receiver forwardable to remote endpoints.
+///
+/// The returned [`Forwarding`] future resolves once forwarding has completed or an error occurs.
+/// The returned receiver may be sent to remote endpoints via channels.
+pub fn forward<T, Codec>(local_rx: tokio::sync::oneshot::Receiver<T>) -> (Forwarding, Receiver<T, Codec>)
+where
+    T: RemoteSend,
+    Codec: codec::Codec,
+{
+    let (tx, rx) = channel();
+
+    let hnd = exec::spawn(async move {
+        tokio::select! {
+            biased;
+            () = tx.closed() => Ok(()),
+            res = local_rx => {
+                match res {
+                    Ok(v) => match tx.send(v) {
+                        Ok(_) => Ok(()),
+                        Err(err) if err.is_closed() => Ok(()),
+                        Err(err) => Err(err.without_item()),
+                    },
+                    Err(_) => Ok(()),
+                }
+            }
+        }
+    });
+
+    (Forwarding(hnd), rx)
+}
+
+/// Handle to obtain the result of forwarding a local receiver remotely by [`forward`].
+///
+/// Await this to obtain the result of the forwarding operation.
+/// The operation is assumed to have finished successfully if either the local or remote
+/// channel is closed or dropped.
+///
+/// Dropping this *does not* stop forwarding.
+pub struct Forwarding(exec::task::JoinHandle<Result<(), SendError<()>>>);
+
+impl fmt::Debug for Forwarding {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("Forwarding").finish()
+    }
+}
+
+impl Future for Forwarding {
+    type Output = Result<(), SendError<()>>;
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        match ready!(self.0.poll_unpin(cx)) {
+            Ok(res) => Poll::Ready(res),
+            Err(_) => Poll::Ready(Err(SendError::Closed(()))),
+        }
+    }
+}
+
+impl Forwarding {
+    /// Stops forwarding.
+    ///
+    /// The remote sending half and local receiving half of the oneshot channels are dropped.
+    pub fn stop(self) {
+        self.0.abort();
+    }
 }
 
 /// Extensions for oneshot channels.

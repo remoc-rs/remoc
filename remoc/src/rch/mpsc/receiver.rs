@@ -167,6 +167,23 @@ pub(crate) struct TransportedReceiver<T, Codec> {
     max_item_size: u64,
 }
 
+impl<T, Codec> Receiver<T, Codec>
+where
+    T: RemoteSend,
+    Codec: codec::Codec,
+{
+    /// Creates a receiver that forwards values from the given local mpsc receiver.
+    ///
+    /// The returned receiver may be sent to remote endpoints via channels.
+    ///
+    /// Any send errors that occur during forwarding are silently dropped;
+    /// use [`forward`](super::forward) if you need to observe them.
+    pub fn forwarded(local_rx: tokio::sync::mpsc::Receiver<T>) -> Self {
+        let (_fwd, rx) = super::forward(local_rx);
+        rx
+    }
+}
+
 impl<T, Codec, const BUFFER: usize, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, BUFFER, MAX_ITEM_SIZE> {
     pub(crate) fn new(
         rx: tokio::sync::mpsc::Receiver<SendReq<T>>, closed_tx: tokio::sync::watch::Sender<Option<ClosedReason>>,

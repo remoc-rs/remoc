@@ -139,6 +139,23 @@ impl<T, Codec, const MAX_ITEM_SIZE: usize> fmt::Debug for Receiver<T, Codec, MAX
     }
 }
 
+impl<T, Codec> Receiver<T, Codec>
+where
+    T: RemoteSend,
+    Codec: codec::Codec,
+{
+    /// Creates a receiver that forwards the value from the given local oneshot receiver.
+    ///
+    /// The returned receiver may be sent to remote endpoints via channels.
+    ///
+    /// Any send errors that occur during forwarding are silently dropped;
+    /// use [`forward`](super::forward) if you need to observe them.
+    pub fn forwarded(local_rx: tokio::sync::oneshot::Receiver<T>) -> Self {
+        let (_fwd, rx) = super::forward(local_rx);
+        rx
+    }
+}
+
 impl<T, Codec, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, MAX_ITEM_SIZE>
 where
     T: DeserializeOwned + Send + 'static,

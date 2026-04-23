@@ -205,6 +205,27 @@ where
         self.inner_ref().tx.send_modify(move |v| func(v.as_mut().unwrap()))
     }
 
+    /// Modifies the watched value conditionally in-place, notifying all receivers
+    /// only if the closure returns `true`.
+    ///
+    /// This method never fails, even if all receivers have been dropped or become
+    /// disconnected.
+    ///
+    /// # Local vs. remote consistency
+    /// If `func` mutates the value but returns `false`, the mutation is applied
+    /// locally (and visible via [`borrow`](Self::borrow)) but is not forwarded to
+    /// remote receivers. Local and remote observations of the value can therefore
+    /// become inconsistent until the next notifying send.
+    ///
+    /// # Panics
+    /// This method panics if calling `func` results in a panic.
+    pub fn send_if_modified<F>(&self, func: F) -> bool
+    where
+        F: FnOnce(&mut T) -> bool,
+    {
+        self.inner_ref().tx.send_if_modified(move |v| func(v.as_mut().unwrap()))
+    }
+
     /// Sends a new value via the channel, notifying all receivers and returning the
     /// previous value in the channel.
     ///

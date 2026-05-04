@@ -184,6 +184,36 @@ pub trait Codec: Send + Sync + Serialize + for<'de> Deserialize<'de> + Clone + U
         Item: DeserializeOwned;
 }
 
+/// Dummy codec.
+///
+/// Does not support serialization or deserialization.
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct Dummy;
+
+impl Codec for Dummy {
+    fn serialize<Writer, Item>(_writer: Writer, _item: &Item) -> Result<(), SerializationError>
+    where
+        Writer: std::io::Write,
+        Item: serde::Serialize,
+    {
+        Err(SerializationError::new(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "dummy codec does not support serialization",
+        )))
+    }
+
+    fn deserialize<Reader, Item>(_reader: Reader) -> Result<Item, DeserializationError>
+    where
+        Reader: std::io::Read,
+        Item: serde::de::DeserializeOwned,
+    {
+        Err(DeserializationError::new(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "dummy codec does not support deserialization",
+        )))
+    }
+}
+
 #[cfg(feature = "codec-json")]
 pub mod map;
 

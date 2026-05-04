@@ -59,7 +59,7 @@ impl Receiver {
 
             if let LocalConnect::Requested(_) = &self.local {
                 // Sender requested local connection. Set up loopback chmux and reply.
-                let (loopback, tx, rx) = Connect::loopback::<(), (), codec::Default>(Cfg::default()).await;
+                let (loopback, tx, rx) = Connect::loopback::<(), (), codec::Dummy>(Cfg::default()).await;
                 let LocalConnect::Requested(reply_tx) = mem::take(&mut self.local) else { unreachable!() };
                 if reply_tx.send(tx.into_inner()).is_ok() {
                     exec::spawn(loopback);

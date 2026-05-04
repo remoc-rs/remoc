@@ -77,7 +77,7 @@ impl Serialize for Sender {
         let receiver_tx = self.receiver_tx.clone();
         let interlock_confirm = {
             let mut interlock = self.interlock.lock().unwrap();
-            if interlock.receiver.check_local() { Some(interlock.receiver.start_send()) } else { None }
+            if interlock.receiver.check_local() { Some(interlock.sender.start_send()) } else { None }
         };
 
         match (receiver_tx, interlock_confirm) {

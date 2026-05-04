@@ -1,9 +1,9 @@
 //! Initial connection functions.
 
 use bytes::Bytes;
-use futures::{Future, FutureExt, Sink, Stream, TryStreamExt, future::BoxFuture};
+use futures::{Future, FutureExt, Sink, Stream, StreamExt, TryStreamExt, future::BoxFuture};
 use std::{
-    convert::TryInto,
+    convert::{Infallible, TryInto},
     error::Error,
     fmt, io,
     pin::Pin,
@@ -309,5 +309,53 @@ impl<TransportSinkError, TransportStreamError> Future for Connect<'_, TransportS
     /// This future runs the dispatcher for this connection.
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         Pin::into_inner(self).0.poll_unpin(cx)
+    }
+}
+
+type LoopbackSendError = futures::channel::mpsc::SendError;
+type LoopbackRecvError = Infallible;
+
+/// A loopback connection.
+pub type LoopbackConnect = Connect<'static, LoopbackSendError, LoopbackRecvError>;
+
+impl LoopbackConnect {
+    /// Establishes a connection over a local loopback transport and
+    /// returns a [sender](base::Sender) and [receiver](base::Receiver).
+    ///
+    /// This establishes a [chmux](crate::chmux) connection over the loopback transport and opens a channel.
+    ///
+    /// You must poll the returned [Connect] future or spawn it for the connection to work.
+    ///
+    /// # Panics
+    /// Panics if the chmux configuration is invalid.
+    pub async fn loopback<Tx, Rx, Codec>(
+        cfg: crate::Cfg,
+    ) -> (LoopbackConnect, base::Sender<Tx, Codec>, base::Receiver<Rx, Codec>)
+    where
+        Tx: RemoteSend,
+        Rx: RemoteSend,
+        Codec: codec::Codec,
+    {
+        let (a_transport_tx, a_transport_rx) = futures::channel::mpsc::channel(cfg.transport_send_queue);
+        let (b_transport_tx, b_transport_rx) = futures::channel::mpsc::channel(cfg.transport_send_queue);
+
+        let a_transport_rx = a_transport_rx.map(|item| Ok(item));
+        let b_transport_rx = b_transport_rx.map(|item| Ok(item));
+
+        let ((a_connect, a_base_tx, _a_base_rx), (b_connect, _b_base_tx, b_base_rx)) = tokio::try_join!(
+            Self::framed::<_, _, _, (), _>(cfg.clone(), a_transport_tx, a_transport_rx),
+            Self::framed::<_, _, (), _, _>(cfg.clone(), b_transport_tx, b_transport_rx),
+        )
+        .unwrap();
+
+        let connection = Self(
+            async move {
+                tokio::try_join!(a_connect, b_connect)?;
+                Ok(())
+            }
+            .boxed(),
+        );
+
+        (connection, a_base_tx, b_base_rx)
     }
 }

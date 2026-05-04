@@ -248,7 +248,7 @@ pub use remote_send::RemoteSend;
 mod connect;
 #[cfg(feature = "rch")]
 #[cfg_attr(docsrs, doc(cfg(feature = "rch")))]
-pub use connect::{Connect, ConnectError};
+pub use connect::{Connect, ConnectError, LoopbackConnect};
 
 #[cfg(feature = "rch")]
 mod connect_ext;

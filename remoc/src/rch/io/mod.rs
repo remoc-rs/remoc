@@ -31,10 +31,11 @@
 //!   This sends the final byte count to the receiver. If the sender is dropped without calling
 //!   shutdown, the receiver will return an [`UnexpectedEof`](std::io::ErrorKind::UnexpectedEof) error.
 //!
-//! # Remote constraint
+//! # Local and remote use
 //!
-//! At least one half of this channel must be sent to a remote endpoint.
-//! Using both halves locally will cause operations to block indefinitely.
+//! Both halves of this channel can be used locally without sending either to a remote endpoint.
+//! In that case an in-process loopback connection is used automatically.
+//! Forwarding, i.e. passing channel ends through intermediate remote endpoints, is also supported.
 //!
 //! # Example: Known size
 //!

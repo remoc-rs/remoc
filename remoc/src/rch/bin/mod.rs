@@ -1,15 +1,17 @@
-//! A channel that exchanges binary data with a remote endpoint.
+//! A channel that exchanges binary data.
 //!
 //! Allows low-overhead exchange of binary data.
 //!
-//! At least one end of the channel must be remote.
-//! Forwarding, i.e. both channel ends on remote endpoints, is supported.
+//! Both endpoints can be local, remote, or forwarded over multiple remote hops.
+//! When both ends remain local, a lightweight in-process [chmux](crate::chmux) loopback
+//! connection is used automatically — no serialization overhead is incurred.
+//! Forwarding, i.e. passing channel ends through intermediate remote endpoints, is supported.
 //!
-//! If the sole use is to transfer a large binary object into one direction,
-//! consider using a [lazy blob](crate::robj::lazy_blob) instead.
+//! If the sole use is to transfer a large binary object in one direction and the receiver
+//! may not always need the data, consider using a [lazy blob](crate::robj::lazy_blob) instead.
 //!
-//! This is a wrapper around a [chmux](crate::chmux) channel that allows to
-//! establish a connection by sending the sender or receiver to a remote endpoint.
+//! This is a wrapper around a [chmux](crate::chmux) channel that allows a connection to be
+//! established by sending the sender or receiver to a remote endpoint.
 
 use std::sync::{Arc, Mutex};
 
@@ -27,6 +29,7 @@ pub fn channel() -> (Sender, Receiver) {
     let (sender_tx, sender_rx) = tokio::sync::mpsc::unbounded_channel();
     let (receiver_tx, receiver_rx) = tokio::sync::mpsc::unbounded_channel();
     let interlock = Arc::new(Mutex::new(Interlock::new()));
+    let (local_tx, local_rx) = tokio::sync::oneshot::channel();
 
     let sender = Sender {
         sender: None,
@@ -34,6 +37,7 @@ pub fn channel() -> (Sender, Receiver) {
         receiver_tx: Some(receiver_tx),
         interlock: interlock.clone(),
         successor_tx: std::sync::Mutex::new(None),
+        local: sender::LocalConnect::Ready(local_tx),
     };
     let receiver = Receiver {
         receiver: None,
@@ -41,6 +45,7 @@ pub fn channel() -> (Sender, Receiver) {
         receiver_rx,
         interlock,
         successor_tx: std::sync::Mutex::new(None),
+        local: receiver::LocalConnect::Ready(local_rx),
     };
     (sender, receiver)
 }

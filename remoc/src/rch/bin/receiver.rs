@@ -12,7 +12,15 @@ use super::{
     },
     Interlock, Location,
 };
-use crate::chmux;
+use crate::{Cfg, Connect, chmux, codec, exec};
+
+#[derive(Default)]
+pub(super) enum LocalConnect {
+    #[default]
+    None,
+    Ready(tokio::sync::oneshot::Receiver<tokio::sync::oneshot::Sender<chmux::Sender>>),
+    Requested(tokio::sync::oneshot::Sender<chmux::Sender>),
+}
 
 /// A binary channel receiver.
 pub struct Receiver {
@@ -21,6 +29,7 @@ pub struct Receiver {
     pub(super) receiver_rx: tokio::sync::mpsc::UnboundedReceiver<Result<chmux::Receiver, ConnectError>>,
     pub(super) interlock: Arc<Mutex<Interlock>>,
     pub(super) successor_tx: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<Self>>>,
+    pub(super) local: LocalConnect,
 }
 
 impl fmt::Debug for Receiver {
@@ -39,6 +48,26 @@ pub(crate) struct TransportedReceiver {
 impl Receiver {
     async fn connect(&mut self) {
         if self.receiver.is_none() {
+            if let LocalConnect::Ready(local_rx) = &mut self.local {
+                // Check for local connection request over local channel.
+                // Local channel is closed if Receiver has been sent to remote endpoint.
+                match local_rx.await {
+                    Ok(reply_tx) => self.local = LocalConnect::Requested(reply_tx),
+                    Err(_) => self.local = LocalConnect::None,
+                }
+            }
+
+            if let LocalConnect::Requested(_) = &self.local {
+                // Sender requested local connection. Set up loopback chmux and reply.
+                let (loopback, tx, rx) = Connect::loopback::<(), (), codec::Default>(Cfg::default()).await;
+                let LocalConnect::Requested(reply_tx) = mem::take(&mut self.local) else { unreachable!() };
+                if reply_tx.send(tx.into_inner()).is_ok() {
+                    exec::spawn(loopback);
+                    self.receiver = Some(Ok(rx.into_inner()));
+                    return;
+                }
+            }
+
             self.receiver = Some(self.receiver_rx.recv().await.unwrap_or(Err(ConnectError::Dropped)));
         }
     }
@@ -77,7 +106,7 @@ impl Serialize for Receiver {
         let sender_tx = self.sender_tx.clone();
         let interlock_confirm = {
             let mut interlock = self.interlock.lock().unwrap();
-            if interlock.sender.check_local() { Some(interlock.sender.start_send()) } else { None }
+            if interlock.sender.check_local() { Some(interlock.receiver.start_send()) } else { None }
         };
 
         match (sender_tx, interlock_confirm) {
@@ -144,6 +173,7 @@ impl<'de> Deserialize<'de> for Receiver {
             receiver_rx,
             interlock: Arc::new(Mutex::new(Interlock { sender: Location::Remote, receiver: Location::Local })),
             successor_tx: std::sync::Mutex::new(None),
+            local: LocalConnect::None,
         })
     }
 }
@@ -158,6 +188,7 @@ impl Drop for Receiver {
                 receiver_rx: tokio::sync::mpsc::unbounded_channel().1,
                 interlock: Arc::new(Mutex::new(Interlock::new())),
                 successor_tx: std::sync::Mutex::new(None),
+                local: LocalConnect::None,
             };
             let _ = successor_tx.send(mem::replace(self, dummy));
         }

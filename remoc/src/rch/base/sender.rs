@@ -464,6 +464,11 @@ where
         }
     }
 
+    /// Consumes this base remote sender and returns the underlying [chmux] sender.
+    pub fn into_inner(self) -> chmux::Sender {
+        self.sender
+    }
+
     /// Sends an item over the channel.
     ///
     /// The item may contain ports that will be serialized and connected as well.

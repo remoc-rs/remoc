@@ -1,15 +1,16 @@
 //! Lazy transmission of binary data.
 //!
-//! This allows a remote endpoint to optionally request the transmission of binary data.
+//! This allows an endpoint to optionally request the transmission of binary data.
 //! For example, a client may only be interested sometimes in some data or it
 //! wants to know the size of the data before receiving it.
 //! By wrapping the binary data in a [LazyBlob], the client can query its size by
 //! [LazyBlob::len] and request transfer by calling [LazyBlob::get].
 //!
-//! Transmission is performed over a [chmux] binary channel without the overhead
-//! of a [codec].
-//! The transmission takes place in chunks, so that other channels are not blocked
-//! when transferring a large amount of binary data.
+//! When sent over a remote channel, transmission is performed over a [chmux] binary
+//! channel without the overhead of a [codec], and takes place in chunks so that other
+//! channels are not blocked when transferring a large amount of binary data.
+//! When used locally (without sending over a remote channel), no copying occurs and
+//! the data is transferred directly.
 //!
 //! A [LazyBlob] can be forwarded over multiple remote endpoints.
 //! The size of the binary data is limited by [usize::MAX].
@@ -215,15 +216,16 @@ where
                         let data = data.clone();
                         exec::spawn(
                             async move {
-                                let bin_tx = match fw_tx.into_inner() {
-                                    Some(tx) => tx,
-                                    _ => return,
-                                };
-                                let mut tx = match bin_tx.into_inner().await {
-                                    Ok(tx) => tx,
-                                    _ => return,
-                                };
-                                let _ = tx.send(data).await;
+                                match fw_tx.into_inner() {
+                                    Some(fw_bin::InnerSender::Local(tx)) => {
+                                        let _ = tx.send(data);
+                                    }
+                                    Some(fw_bin::InnerSender::Remote(bin_tx)) => {
+                                        let Ok(mut tx) = bin_tx.into_inner().await else { return };
+                                        let _ = tx.send(data).await;
+                                    }
+                                    None => return,
+                                }
                             }
                             .in_current_span(),
                         );
@@ -266,10 +268,15 @@ where
                 async move {
                     let (fw_tx, fw_rx) = fw_bin::channel();
                     let _ = req_tx.send(fw_tx).await;
-                    let bin_rx = fw_rx.into_inner().await.ok_or(FetchError::Dropped)?;
-                    let mut rx = bin_rx.into_inner().await.map_err(FetchError::RemoteConnect)?;
-                    rx.set_max_data_size(len);
-                    rx.recv().await.map_err(FetchError::RemoteReceive)?.ok_or(FetchError::Dropped)
+                    match fw_rx.into_inner().await {
+                        Some(fw_bin::InnerReceiver::Local(data)) => Ok(data.into()),
+                        Some(fw_bin::InnerReceiver::Remote(bin_rx)) => {
+                            let mut rx = bin_rx.into_inner().await.map_err(FetchError::RemoteConnect)?;
+                            rx.set_max_data_size(len);
+                            rx.recv().await.map_err(FetchError::RemoteReceive)?.ok_or(FetchError::Dropped)
+                        }
+                        None => Err(FetchError::Dropped),
+                    }
                 }
                 .boxed(),
             )));

@@ -13,6 +13,7 @@ use syn::{
 };
 
 use crate::{
+    assoc_type::AssocType,
     method::{SelfRef, TraitMethod},
     util::attribute_tokens,
 };
@@ -61,6 +62,8 @@ pub struct TraitDef {
     colon: Option<Token![:]>,
     /// Supertraits.
     supertraits: Punctuated<TypeParamBound, Token![+]>,
+    /// Associated types declared in the trait.
+    assoc_types: Vec<AssocType>,
     /// Methods.
     methods: Vec<TraitMethod>,
     /// Whether the `clone` attribute is present.
@@ -111,10 +114,17 @@ impl Parse for TraitDef {
         let content;
         braced!(content in input);
 
-        // Parse service method definitions.
+        // Parse associated type declarations and method definitions.
+        let mut assoc_types: Vec<AssocType> = Vec::new();
         let mut methods: Vec<TraitMethod> = Vec::new();
         while !content.is_empty() {
-            methods.push(content.parse()?);
+            let attrs = content.call(Attribute::parse_outer)?;
+            if content.peek(Token![type]) {
+                assoc_types.push(AssocType::parse_with_attrs(&content, attrs)?);
+            } else {
+                let method = TraitMethod::parse_with_attrs(&content, attrs)?;
+                methods.push(method);
+            }
         }
 
         Ok(Self {
@@ -124,6 +134,7 @@ impl Parse for TraitDef {
             generics,
             colon,
             supertraits,
+            assoc_types,
             methods,
             clone: false,
             async_trait: false,
@@ -142,6 +153,9 @@ pub struct GenericsArgs {
     pub with_send: bool,
     pub with_sync: bool,
     pub with_static: bool,
+    /// If true, lift the trait's associated types into bare type
+    /// parameters (with their bounds) on the produced generics.
+    pub with_assoc_types: bool,
 }
 
 impl TraitDef {
@@ -207,8 +221,13 @@ impl TraitDef {
         let where_clause = &generics.where_clause;
         let mut attrs = attribute_tokens(attrs);
 
-        // Trait methods.
+        // Associated type declarations.
         let mut defs = quote! {};
+        for a in &self.assoc_types {
+            defs.append_all(a.trait_decl());
+        }
+
+        // Trait methods.
         for m in &self.methods {
             defs.append_all(m.trait_method(!self.async_trait));
         }
@@ -257,6 +276,35 @@ impl TraitDef {
             ty_generics.params.insert(idx, GenericParam::Type(format_ident!("Target").into()));
         }
 
+        // Insert associated types as bare type parameters (with their bounds
+        // attached as where predicates so that derived `serde` `bound`
+        // attributes pick them up).
+        if args.with_assoc_types {
+            for assoc in &self.assoc_types {
+                let lifted = assoc.lifted_ident();
+                // Insert before Target/Codec block, after the trait's own params.
+                let insert_at = ty_generics
+                    .params
+                    .iter()
+                    .position(
+                        |p| matches!(p, GenericParam::Type(tp) if tp.ident == "Target" || tp.ident == "Codec"),
+                    )
+                    .unwrap_or(ty_generics.params.len());
+                let tp: TypeParam = syn::parse2(quote! { #lifted }).unwrap();
+                ty_generics.params.insert(insert_at, GenericParam::Type(tp));
+            }
+            // Add bounds for the inserted assoc types as where predicates.
+            for assoc in &self.assoc_types {
+                if assoc.bounds.is_empty() {
+                    continue;
+                }
+                let lifted = assoc.lifted_ident();
+                let bounds = &assoc.bounds;
+                let wc: WhereClause = syn::parse2(quote! { where #lifted: #bounds }).unwrap();
+                ty_generics.make_where_clause().predicates.extend(wc.predicates);
+            }
+        }
+
         if args.with_lifetime {
             let target_lt: Lifetime = syn::parse2(quote! {'target}).unwrap();
             ty_generics.params.insert(0, LifetimeParam::new(target_lt).into());
@@ -271,7 +319,13 @@ impl TraitDef {
 
         if args.with_target {
             let wc: WhereClause = syn::parse2(quote! { where Target: #ident #trait_generics }).unwrap();
-            impl_generics.make_where_clause().predicates.extend(wc.predicates);
+            impl_generics.make_where_clause().predicates.extend(wc.predicates.clone());
+            // Server struct field types use `<Target as Trait>::Foo` projections
+            // when the trait has associated types, so the struct definition
+            // also needs the `Target: Trait` bound.
+            if !self.assoc_types.is_empty() {
+                ty_generics.make_where_clause().predicates.extend(wc.predicates);
+            }
         }
 
         if args.with_send {
@@ -292,6 +346,106 @@ impl TraitDef {
         (ty_generics, impl_generics)
     }
 
+    /// Token stream of the trait's own generic argument idents (for use
+    /// in turbofish position), without any added Target/Codec/assoc types.
+    fn trait_generic_arg_tokens(&self) -> Vec<TokenStream> {
+        self.generics
+            .params
+            .iter()
+            .filter_map(|p| match p {
+                GenericParam::Type(tp) => {
+                    let id = &tp.ident;
+                    Some(quote! { #id })
+                }
+                GenericParam::Const(cp) => {
+                    let id = &cp.ident;
+                    Some(quote! { #id })
+                }
+                GenericParam::Lifetime(_) => None,
+            })
+            .collect()
+    }
+
+    /// Trait path with associated-type bindings, e.g.
+    /// `Trait<T1, T2, Foo = Foo, Bar = Bar>`. Used in `Target: Trait<...>`
+    /// bounds in dispatch functions where the request enum's lifted assoc-
+    /// type generics must be unified with the trait's projections.
+    fn trait_path_with_assoc_bindings(&self) -> TokenStream {
+        let ident = &self.ident;
+        let trait_args = self.trait_generic_arg_tokens();
+        if trait_args.is_empty() && self.assoc_types.is_empty() {
+            return quote! { #ident };
+        }
+        let mut parts: Vec<TokenStream> = Vec::new();
+        for t in trait_args {
+            parts.push(t);
+        }
+        for a in &self.assoc_types {
+            let n = &a.ident;
+            let l = a.lifted_ident();
+            parts.push(quote! { #n = #l });
+        }
+        quote! { #ident < #(#parts),* > }
+    }
+
+    /// Argument list for a request enum / client when used in a
+    /// non-server context (assoc types appear as bare idents).
+    /// Emits `<T1, T2, Foo, Bar, Codec>` (or omits `Codec` if not requested).
+    fn req_args_bare(&self, with_codec: bool) -> TokenStream {
+        let trait_args = self.trait_generic_arg_tokens();
+        let assoc_args: Vec<TokenStream> = self
+            .assoc_types
+            .iter()
+            .map(|a| {
+                let id = a.lifted_ident();
+                quote! { #id }
+            })
+            .collect();
+        let mut parts: Vec<TokenStream> = Vec::new();
+        parts.extend(trait_args);
+        parts.extend(assoc_args);
+        if with_codec {
+            parts.push(quote! { Codec });
+        }
+        if parts.is_empty() {
+            return quote! {};
+        }
+        quote! { < #(#parts),* > }
+    }
+
+    /// Argument list for a request enum / client when used in a server
+    /// context where `Target: Trait` is in scope. Associated types are
+    /// substituted by their projection through `Target`.
+    /// Emits `<T1, T2, <Target as Trait<...>>::Foo, <Target as Trait<...>>::Bar, Codec>`.
+    fn req_args_projected(&self, with_codec: bool) -> TokenStream {
+        let ident = &self.ident;
+        let trait_args = self.trait_generic_arg_tokens();
+        let trait_path_args: TokenStream = if trait_args.is_empty() {
+            quote! {}
+        } else {
+            let parts = &trait_args;
+            quote! { < #(#parts),* > }
+        };
+        let assoc_args: Vec<TokenStream> = self
+            .assoc_types
+            .iter()
+            .map(|a| {
+                let n = &a.ident;
+                quote! { <Target as #ident #trait_path_args>::#n }
+            })
+            .collect();
+        let mut parts: Vec<TokenStream> = Vec::new();
+        parts.extend(trait_args);
+        parts.extend(assoc_args);
+        if with_codec {
+            parts.push(quote! { Codec });
+        }
+        if parts.is_empty() {
+            return quote! {};
+        }
+        quote! { < #(#parts),* > }
+    }
+
     /// Identifier of request enums for all, by-value, by-reference and by-mutable-reference requests.
     fn request_enum_idents(&self) -> (Ident, Ident, Ident, Ident) {
         (
@@ -305,16 +459,8 @@ impl TraitDef {
     /// Requests enums with dispatch functions.
     pub fn request_enums(&self) -> TokenStream {
         let Self { vis, ident, .. } = self;
+        let assoc = &self.assoc_types;
 
-        let (trait_generics, _) = self.generics(GenericsArgs {
-            with_target: false,
-            with_codec: false,
-            with_codec_default: false,
-            with_lifetime: false,
-            with_send: false,
-            with_sync: false,
-            with_static: false,
-        });
         let (ty_generics, impl_generics) = self.generics(GenericsArgs {
             with_target: false,
             with_codec: true,
@@ -323,6 +469,7 @@ impl TraitDef {
             with_send: false,
             with_sync: false,
             with_static: false,
+            with_assoc_types: true,
         });
         let (ty_generics_default_codec, _) = self.generics(GenericsArgs {
             with_target: false,
@@ -332,6 +479,7 @@ impl TraitDef {
             with_send: false,
             with_sync: false,
             with_static: false,
+            with_assoc_types: true,
         });
         let ty_generics_where = &ty_generics.where_clause;
         let (impl_generics_impl, impl_generics_ty, impl_generics_where) = impl_generics.split_for_impl();
@@ -341,23 +489,28 @@ impl TraitDef {
         let impl_generics_where_pred = &impl_generics_where.unwrap().predicates;
         let impl_generics_where_str = quote! { #impl_generics_where_pred }.to_string();
 
+        // Trait path used in dispatch fn `Target: Trait<...>` bounds.
+        // Includes assoc-type bindings unifying lifted assoc generics with
+        // the target's projections.
+        let trait_path_dispatch = self.trait_path_with_assoc_bindings();
+
         let (mut value_entries, mut ref_entries, mut ref_mut_entries) = (quote! {}, quote! {}, quote! {});
         let (mut value_clauses, mut ref_clauses, mut ref_mut_clauses) = (quote! {}, quote! {}, quote! {});
         let (mut value_froms, mut ref_froms, mut ref_mut_froms) = (quote! {}, quote! {}, quote! {});
         for md in &self.methods {
             match md.self_ref {
                 SelfRef::Value => {
-                    value_entries.append_all(md.request_enum_entry());
+                    value_entries.append_all(md.request_enum_entry(assoc));
                     value_clauses.append_all(md.dispatch_discriminator());
                     value_froms.append_all(md.impl_from_clause(&req_value));
                 }
                 SelfRef::Ref => {
-                    ref_entries.append_all(md.request_enum_entry());
+                    ref_entries.append_all(md.request_enum_entry(assoc));
                     ref_clauses.append_all(md.dispatch_discriminator());
                     ref_froms.append_all(md.impl_from_clause(&req_ref));
                 }
                 SelfRef::RefMut => {
-                    ref_mut_entries.append_all(md.request_enum_entry());
+                    ref_mut_entries.append_all(md.request_enum_entry(assoc));
                     ref_mut_clauses.append_all(md.dispatch_discriminator());
                     ref_mut_froms.append_all(md.impl_from_clause(&req_ref_mut));
                 }
@@ -386,7 +539,7 @@ impl TraitDef {
                 fn dispatch<Target>(self, __target: Target, __err_tx: ::remoc::rtc::ReplyErrorSender) ->
                      ::std::pin::Pin<::std::boxed::Box<dyn ::std::future::Future<Output = ()> + ::std::marker::Send>>
                 where
-                    Target: #ident #trait_generics,
+                    Target: #trait_path_dispatch,
                     Target: ::std::marker::Send + 'static,
                 {
                     use ::remoc::rtc::FutureExt;
@@ -411,7 +564,7 @@ impl TraitDef {
                 fn dispatch<'target, Target>(self, __target: &'target Target, __err_tx: ::remoc::rtc::ReplyErrorSender) ->
                     ::std::pin::Pin<::std::boxed::Box<dyn ::std::future::Future<Output = ()> + ::std::marker::Send + 'target>>
                 where
-                    Target: #ident #trait_generics,
+                    Target: #trait_path_dispatch,
                     Target: ::std::marker::Sync,
                 {
                     use ::remoc::rtc::FutureExt;
@@ -436,7 +589,7 @@ impl TraitDef {
                 fn dispatch<'target, Target>(self, __target: &'target mut Target, __err_tx: ::remoc::rtc::ReplyErrorSender) ->
                     ::std::pin::Pin<::std::boxed::Box<dyn ::std::future::Future<Output = ()> + ::std::marker::Send + 'target>>
                 where
-                    Target: #ident #trait_generics,
+                    Target: #trait_path_dispatch,
                     Target: ::std::marker::Send,
                 {
                     use ::remoc::rtc::FutureExt;
@@ -527,15 +680,7 @@ impl TraitDef {
         let need_sync = self.is_taking_ref();
         let need_static = self.is_taking_value();
 
-        let (req_generics, _) = self.generics(GenericsArgs {
-            with_target: false,
-            with_codec: true,
-            with_codec_default: false,
-            with_lifetime: false,
-            with_send: false,
-            with_sync: false,
-            with_static: false,
-        });
+        let req_generics = self.req_args_projected(true);
         let (ty_generics, impl_generics) = self.generics(GenericsArgs {
             with_target: true,
             with_codec: true,
@@ -544,6 +689,7 @@ impl TraitDef {
             with_send: need_send,
             with_sync: need_sync,
             with_static: need_static,
+            with_assoc_types: false,
         });
         let ty_generics_where = &ty_generics.where_clause;
         let (impl_generics_impl, impl_generics_ty, impl_generics_where) = impl_generics.split_for_impl();
@@ -656,15 +802,7 @@ impl TraitDef {
 
         let need_sync = self.is_taking_ref();
 
-        let (req_generics, _) = self.generics(GenericsArgs {
-            with_target: false,
-            with_codec: true,
-            with_codec_default: false,
-            with_lifetime: false,
-            with_send: false,
-            with_sync: false,
-            with_static: false,
-        });
+        let req_generics = self.req_args_projected(true);
         let (ty_generics, impl_generics) = self.generics(GenericsArgs {
             with_target: true,
             with_codec: true,
@@ -673,6 +811,7 @@ impl TraitDef {
             with_send: false,
             with_sync: need_sync,
             with_static: false,
+            with_assoc_types: false,
         });
         let ty_generics_where = &ty_generics.where_clause;
         let (impl_generics_impl, impl_generics_ty, impl_generics_where) = impl_generics.split_for_impl();
@@ -762,15 +901,7 @@ impl TraitDef {
         let need_send = self.is_taking_value() || self.is_taking_ref_mut();
         let need_sync = self.is_taking_ref();
 
-        let (req_generics, _) = self.generics(GenericsArgs {
-            with_target: false,
-            with_codec: true,
-            with_codec_default: false,
-            with_lifetime: false,
-            with_send: false,
-            with_sync: false,
-            with_static: false,
-        });
+        let req_generics = self.req_args_projected(true);
         let (ty_generics, impl_generics) = self.generics(GenericsArgs {
             with_target: true,
             with_codec: true,
@@ -779,6 +910,7 @@ impl TraitDef {
             with_send: need_send,
             with_sync: need_sync,
             with_static: false,
+            with_assoc_types: false,
         });
         let ty_generics_where = &ty_generics.where_clause;
         let (impl_generics_impl, impl_generics_ty, impl_generics_where) = impl_generics.split_for_impl();
@@ -874,15 +1006,7 @@ impl TraitDef {
     fn server_shared(&self) -> TokenStream {
         let Self { vis, ident, .. } = self;
 
-        let (req_generics, _) = self.generics(GenericsArgs {
-            with_target: false,
-            with_codec: true,
-            with_codec_default: false,
-            with_lifetime: false,
-            with_send: false,
-            with_sync: false,
-            with_static: false,
-        });
+        let req_generics = self.req_args_projected(true);
         let (ty_generics, impl_generics) = self.generics(GenericsArgs {
             with_target: true,
             with_codec: true,
@@ -891,6 +1015,7 @@ impl TraitDef {
             with_send: true,
             with_sync: true,
             with_static: true,
+            with_assoc_types: false,
         });
         let ty_generics_where = &ty_generics.where_clause;
         let (impl_generics_impl, impl_generics_ty, impl_generics_where) = impl_generics.split_for_impl();
@@ -986,15 +1111,7 @@ impl TraitDef {
     fn server_shared_mut(&self) -> TokenStream {
         let Self { vis, ident, .. } = self;
 
-        let (req_generics, _) = self.generics(GenericsArgs {
-            with_target: false,
-            with_codec: true,
-            with_codec_default: false,
-            with_lifetime: false,
-            with_send: false,
-            with_sync: false,
-            with_static: false,
-        });
+        let req_generics = self.req_args_projected(true);
         let (ty_generics, impl_generics) = self.generics(GenericsArgs {
             with_target: true,
             with_codec: true,
@@ -1003,6 +1120,7 @@ impl TraitDef {
             with_send: true,
             with_sync: true,
             with_static: true,
+            with_assoc_types: false,
         });
         let ty_generics_where = &ty_generics.where_clause;
         let (impl_generics_impl, impl_generics_ty, impl_generics_where) = impl_generics.split_for_impl();
@@ -1109,15 +1227,7 @@ impl TraitDef {
     fn req_receiver(&self) -> TokenStream {
         let Self { vis, ident, .. } = self;
 
-        let (req_generics, _) = self.generics(GenericsArgs {
-            with_target: false,
-            with_codec: true,
-            with_codec_default: false,
-            with_lifetime: false,
-            with_send: false,
-            with_sync: false,
-            with_static: false,
-        });
+        let req_generics = self.req_args_bare(true);
         let (ty_generics, impl_generics) = self.generics(GenericsArgs {
             with_target: false,
             with_codec: true,
@@ -1126,6 +1236,7 @@ impl TraitDef {
             with_send: false,
             with_sync: false,
             with_static: false,
+            with_assoc_types: true,
         });
         let ty_generics_where = &ty_generics.where_clause;
         let (impl_generics_impl, impl_generics_ty, impl_generics_where) = impl_generics.split_for_impl();
@@ -1270,29 +1381,32 @@ impl TraitDef {
             with_send: false,
             with_sync: false,
             with_static: false,
+            with_assoc_types: true,
         });
         let ty_generics_where_ty = &ty_generics.where_clause;
         let (ty_generics_impl, ty_generics_ty, ty_generics_where) = ty_generics.split_for_impl();
         let (impl_generics_impl, impl_generics_ty, impl_generics_where) = impl_generics.split_for_impl();
 
-        let (req_generics, _) = self.generics(GenericsArgs {
-            with_target: false,
-            with_codec: true,
-            with_codec_default: false,
-            with_lifetime: false,
-            with_send: false,
-            with_sync: false,
-            with_static: false,
-        });
+        let req_generics = self.req_args_bare(true);
         let (_req_all, req_value, req_ref, req_ref_mut) = self.request_enum_idents();
 
         let impl_generics_where_pred = &impl_generics_where.unwrap().predicates;
         let impl_generics_where_str = quote! { #impl_generics_where_pred }.to_string();
 
+        let assoc = &self.assoc_types;
+
         // Generate client method implementations.
         let mut methods = quote! {};
         for m in &self.methods {
-            methods.append_all(m.client_method(&req_value, &req_ref, &req_ref_mut));
+            methods.append_all(m.client_method(&req_value, &req_ref, &req_ref_mut, assoc));
+        }
+
+        // Associated type items for the client's `impl Trait for Client`.
+        let mut assoc_impl_items = quote! {};
+        for a in &self.assoc_types {
+            let n = &a.ident;
+            let l = a.lifted_ident();
+            assoc_impl_items.append_all(quote! { type #n = #l; });
         }
 
         let doc = format!("Remote client for [{}].\n\nCan be sent to a remote endpoint.", &ident);
@@ -1394,6 +1508,7 @@ impl TraitDef {
 
             #async_trait
             impl #impl_generics_impl #ident #generics for #client_ident #impl_generics_ty #impl_generics_where {
+                #assoc_impl_items
                 #methods
             }
 

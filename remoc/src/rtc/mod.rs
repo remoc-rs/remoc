@@ -93,6 +93,19 @@
 //! the trait function on the server is automatically cancelled at the next `await` point.
 //! You can apply the `#[no_cancel]` attribute to a method to always run it to completion.
 //!
+//! # Associated types
+//!
+//! A remote trait may declare associated types (`type Item: RemoteSend;`).
+//! Each associated type is lifted to an additional generic parameter on the generated
+//! client, request enums and request receiver.
+//! The lifted parameter is always prefixed with `__` (e.g. `type Item` becomes `__Item`)
+//! to avoid collisions with the trait's own generic parameters and to signal that it
+//! originates from a lifted associated type.
+//! When sending the client, the concrete type for each associated type must be supplied
+//! as a type argument (e.g. `StorageClient<__Item = String>`).
+//!
+//! Generic associated types (GATs) and associated type defaults are not supported.
+//!
 //! # Forward and backward compatibility
 //!
 //! All request arguments are packed into an enum case named after the function.
@@ -260,12 +273,23 @@ use crate::{
 /// Since the generated code relies on [Tokio](tokio) macros, you must add a dependency
 /// to Tokio in your `Cargo.toml`.
 ///
-/// # Generics and lifetimes
+/// # Generics, associated types and lifetimes
 ///
 /// The trait may be generic with constraints on the generic arguments.
 /// You will probably need to constrain them on [RemoteSend].
 /// Method definitions within the remote trait may use generic arguments from the trait
 /// definition, but must not introduce generic arguments in the method definition.
+///
+/// Associated types (`type Foo: Bound;`) are supported.
+/// Each associated type is lifted to an additional generic parameter on the generated
+/// `TraitClient`, request enums and request receiver.
+/// To avoid collisions with the trait's own generic parameters and to make the origin
+/// of the parameter visible, the lifted parameter is always prefixed with `__`
+/// (e.g. `type Item` becomes `__Item`).
+/// Method signatures may refer to associated types using `Self::Foo` or the qualified
+/// form `<Self as Trait>::Foo`; both are rewritten to the lifted parameter in the
+/// generated code.
+/// Generic associated types (GATs) and associated type defaults are not supported.
 ///
 /// Lifetimes are not allowed on remote traits and their methods.
 ///

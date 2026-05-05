@@ -5,6 +5,7 @@
 use quote::quote;
 use syn::{meta, parse_macro_input};
 
+mod assoc_type;
 mod method;
 mod trait_def;
 mod util;

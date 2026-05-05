@@ -11,7 +11,10 @@ use syn::{
     token::{self, Comma},
 };
 
-use crate::util::{attribute_tokens, to_pascal_case};
+use crate::{
+    assoc_type::{AssocType, remove_self_type},
+    util::{attribute_tokens, to_pascal_case},
+};
 
 /// Self reference of method.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,8 +110,15 @@ fn is_send(path: &Path) -> bool {
 impl Parse for TraitMethod {
     /// Parses a method within the service trait.
     fn parse(input: ParseStream) -> syn::Result<Self> {
+        let attrs = input.call(Attribute::parse_outer)?;
+        Self::parse_with_attrs(input, attrs)
+    }
+}
+
+impl TraitMethod {
+    /// Parses a method within the service trait, given already-parsed outer attributes.
+    pub fn parse_with_attrs(input: ParseStream, mut attrs: Vec<Attribute>) -> syn::Result<Self> {
         // Parse method definition.
-        let mut attrs = input.call(Attribute::parse_outer)?;
         let is_async = input.parse::<Option<Token![async]>>()?.is_some();
         input.parse::<Token![fn]>()?;
         let ident: Ident = input.parse()?;
@@ -267,9 +277,9 @@ impl TraitMethod {
     }
 
     /// Entry within request enum.
-    pub fn request_enum_entry(&self) -> TokenStream {
+    pub fn request_enum_entry(&self, assoc: &[AssocType]) -> TokenStream {
         let ident = to_pascal_case(&self.ident);
-        let ret_ty = &self.ret_ty;
+        let ret_ty = remove_self_type(&self.ret_ty, assoc);
 
         let mut entries = quote! {
             #[doc="Reply channel for sending the result of the method invocation.\n\n"]
@@ -286,6 +296,7 @@ impl TraitMethod {
             }
 
             let attrs = attribute_tokens(attrs);
+            let ty = remove_self_type(ty, assoc);
             entries.append_all(quote! {
                 #attrs
                 #ident : #ty ,
@@ -358,8 +369,11 @@ impl TraitMethod {
     }
 
     /// Client method implementation.
-    pub fn client_method(&self, req_value: &Ident, req_ref: &Ident, req_ref_mut: &Ident) -> TokenStream {
-        let Self { ident, self_ref, ret_ty, .. } = self;
+    pub fn client_method(
+        &self, req_value: &Ident, req_ref: &Ident, req_ref_mut: &Ident, assoc: &[AssocType],
+    ) -> TokenStream {
+        let Self { ident, self_ref, .. } = self;
+        let ret_ty = remove_self_type(&self.ret_ty, assoc);
 
         // Self reference and request enum.
         let (self_ref, req_enum, req_type) = match self_ref {
@@ -373,6 +387,7 @@ impl TraitMethod {
         let mut args = quote! {};
         let mut entries = quote! {};
         for NamedArg { ident, ty, .. } in &self.args {
+            let ty = remove_self_type(ty, assoc);
             args.append_all(quote! { #ident : #ty , });
             entries.append_all(quote! { #ident , });
         }

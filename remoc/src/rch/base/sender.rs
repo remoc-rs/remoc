@@ -417,6 +417,9 @@ async fn send_erased(
         }
     };
 
+    // Ensure that item is dropped before connection callbacks run.
+    drop(item_any);
+
     for (callback, connect) in callbacks.into_iter().zip(connects.into_iter()) {
         exec::spawn(callback(connect).in_current_span());
     }
@@ -424,9 +427,6 @@ async fn send_erased(
     for task in tasks {
         exec::spawn(task.in_current_span());
     }
-
-    // Ensure that item is dropped before connection callbacks run.
-    drop(item_any);
 
     Ok(())
 }

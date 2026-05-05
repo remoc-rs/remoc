@@ -224,7 +224,7 @@ where
                                         let Ok(mut tx) = bin_tx.into_inner().await else { return };
                                         let _ = tx.send(data).await;
                                     }
-                                    None => return,
+                                    None => (),
                                 }
                             }
                             .in_current_span(),

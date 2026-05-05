@@ -1,3 +1,9 @@
+mod assoc_bounds;
+mod assoc_collision;
+mod assoc_mixed;
+mod assoc_multiple;
+mod assoc_qualified;
+mod assoc_simple;
 mod async_trait;
 mod default;
 mod errors;

@@ -339,8 +339,8 @@ impl LoopbackConnect {
         let (a_transport_tx, a_transport_rx) = futures::channel::mpsc::channel(cfg.transport_send_queue);
         let (b_transport_tx, b_transport_rx) = futures::channel::mpsc::channel(cfg.transport_send_queue);
 
-        let a_transport_rx = a_transport_rx.map(|item| Ok(item));
-        let b_transport_rx = b_transport_rx.map(|item| Ok(item));
+        let a_transport_rx = a_transport_rx.map(Ok);
+        let b_transport_rx = b_transport_rx.map(Ok);
 
         let ((a_connect, a_base_tx, _a_base_rx), (b_connect, _b_base_tx, b_base_rx)) = tokio::try_join!(
             Self::framed::<_, _, _, (), _>(cfg.clone(), a_transport_tx, b_transport_rx),

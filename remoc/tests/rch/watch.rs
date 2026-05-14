@@ -654,3 +654,104 @@ async fn wait_for_closed() {
     let result = rx.wait_for(|v| *v == 999).await;
     assert!(result.is_err(), "wait_for should fail when sender is dropped");
 }
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn conn_failure_receiver_changed() {
+    crate::init();
+    let ((mut a_tx, _), (_, mut b_rx), conn) = droppable_loop_channel::<watch::Receiver<i16>>().await;
+
+    println!("Sending remote watch receiver");
+    let (tx, rx) = watch::channel(123);
+    a_tx.send(rx).await.unwrap();
+    println!("Receiving remote watch receiver");
+    let mut rx = b_rx.recv().await.unwrap().unwrap();
+
+    // Read initial value.
+    let initial = *rx.borrow_and_update().unwrap();
+    assert_eq!(initial, 123);
+
+    // Send a value and wait for it to be observed, so the channel is fully established.
+    tx.send(456).unwrap();
+    let changed_res = rx.changed().await;
+    println!("changed() after normal send returned: {changed_res:?}");
+    assert!(changed_res.is_ok());
+    assert_eq!(*rx.borrow_and_update().unwrap(), 456);
+
+    println!("Dropping connection");
+    drop(conn);
+
+    // Drop the original sender too, so the only thing that can close the
+    // remote receiver's underlying channel is loss of the connection.
+    // We keep tx alive on purpose to make sure the close signal comes from
+    // the broken connection, not from sender drop.
+    let _keep_tx_alive = tx;
+
+    println!("Waiting for changed() on receiver after connection drop");
+    let res = rx.changed().await;
+    println!("changed() result after connection drop: {res:?}");
+
+    // After the connection is forcefully dropped, the forwarder injects a final
+    // `RecvError` into the underlying watch channel. `changed()` must surface
+    // this as `Err(ChangedError::RecvError(_))` rather than `Ok(())`.
+    let err = match res {
+        Err(ChangedError::Recv(err)) => err,
+        other => panic!("expected ChangedError::RecvError, got: {other:?}"),
+    };
+    assert!(err.is_final(), "RecvError reported by changed() must be final");
+
+    // `borrow()` still surfaces the underlying RecvError.
+    let borrow_res = rx.borrow().map(|v| *v);
+    println!("borrow() after connection drop: {borrow_res:?}");
+    assert!(borrow_res.is_err());
+
+    // Subsequent `changed()` calls keep returning the same final RecvError
+    // (idempotent terminal state) rather than degrading to `Closed`.
+    let res2 = rx.changed().await;
+    println!("Second changed() result: {res2:?}");
+    assert!(matches!(res2, Err(ChangedError::Recv(ref e)) if e.is_final()));
+
+    // `has_changed()` also surfaces the final RecvError.
+    assert!(matches!(rx.has_changed(), Err(ChangedError::Recv(ref e)) if e.is_final()));
+}
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn sender_drop_receiver_changed() {
+    crate::init();
+    let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<watch::Receiver<i16>>().await;
+
+    println!("Sending remote watch receiver");
+    let (tx, rx) = watch::channel(1);
+    a_tx.send(rx).await.unwrap();
+    println!("Receiving remote watch receiver");
+    let mut rx = b_rx.recv().await.unwrap().unwrap();
+
+    // Establish channel with a regular value change.
+    assert_eq!(*rx.borrow_and_update().unwrap(), 1);
+    tx.send(2).unwrap();
+    let res = rx.changed().await;
+    println!("changed() after normal send returned: {res:?}");
+    assert!(res.is_ok());
+    assert_eq!(*rx.borrow_and_update().unwrap(), 2);
+
+    println!("Dropping remote sender (clean close)");
+    drop(tx);
+
+    // A clean sender drop must be reported as Closed, not as a RecvError.
+    println!("Waiting for changed() after sender drop");
+    let res = rx.changed().await;
+    println!("changed() result after sender drop: {res:?}");
+    assert!(matches!(res, Err(ChangedError::Closed)));
+
+    // Idempotent: repeated calls keep returning Closed.
+    let res2 = rx.changed().await;
+    println!("Second changed() result: {res2:?}");
+    assert!(matches!(res2, Err(ChangedError::Closed)));
+
+    // `has_changed()` reports closure too.
+    assert!(matches!(rx.has_changed(), Err(ChangedError::Closed)));
+
+    // The last value before close is still observable via `borrow()`.
+    assert_eq!(*rx.borrow().unwrap(), 2);
+}

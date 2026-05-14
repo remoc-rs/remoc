@@ -55,15 +55,22 @@ impl RecvError {
 /// An error occurred during waiting for a change on a watch channel.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ChangedError {
-    /// The sender has been dropped or the connection has been lost.
+    /// The sender has been dropped.
     Closed,
+    /// A final receive error occurred, meaning that no further values can be received.
+    Recv(RecvError),
 }
 
 impl ChangedError {
     /// True, if remote endpoint has closed the channel.
-    #[deprecated = "a remoc::rch::watch::ChangedError is always due to closure"]
     pub fn is_closed(&self) -> bool {
-        true
+        matches!(self, Self::Closed)
+    }
+}
+
+impl From<RecvError> for ChangedError {
+    fn from(err: RecvError) -> Self {
+        Self::Recv(err)
     }
 }
 
@@ -71,52 +78,12 @@ impl fmt::Display for ChangedError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Closed => write!(f, "closed"),
+            Self::Recv(err) => write!(f, "{err}"),
         }
     }
 }
 
 impl Error for ChangedError {}
-
-/// An error occurred during wait for a value that satisfies a condition on a channel
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum WaitForError {
-    /// Receiving failed.
-    Recv(RecvError),
-    /// The sender has been dropped or the connection has been lost.
-    Closed,
-}
-
-impl From<RecvError> for WaitForError {
-    fn from(err: RecvError) -> Self {
-        Self::Recv(err)
-    }
-}
-
-impl From<ChangedError> for WaitForError {
-    fn from(err: ChangedError) -> Self {
-        match err {
-            ChangedError::Closed => Self::Closed,
-        }
-    }
-}
-
-impl WaitForError {
-    /// True, if remote endpoint has closed the channel.
-    pub fn is_closed(&self) -> bool {
-        true
-    }
-}
-
-impl fmt::Display for WaitForError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Recv(err) => write!(f, "{err}"),
-            Self::Closed => write!(f, "closed"),
-        }
-    }
-}
-
-impl Error for WaitForError {}
 
 /// Receive values from the associated [Sender](super::Sender),
 /// which may be located on a remote endpoint.
@@ -199,12 +166,28 @@ impl<T, Codec, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, MAX_ITEM_SIZE> {
     /// Checks if this channel contains a message that this receiver has not yet seen.
     /// The current value will not be marked as seen.
     pub fn has_changed(&self) -> Result<bool, ChangedError> {
+        if let Err(err) = &*self.rx.borrow()
+            && err.is_final()
+        {
+            return Err(ChangedError::Recv(err.clone()));
+        }
         self.rx.has_changed().map_err(|_| ChangedError::Closed)
     }
 
     /// Wait for a change notification, then mark the newest value as seen.
     pub async fn changed(&mut self) -> Result<(), ChangedError> {
-        self.rx.changed().await.map_err(|_| ChangedError::Closed)
+        if let Err(err) = &*self.rx.borrow()
+            && err.is_final()
+        {
+            return Err(ChangedError::Recv(err.clone()));
+        }
+        self.rx.changed().await.map_err(|_| ChangedError::Closed)?;
+        if let Err(err) = &*self.rx.borrow()
+            && err.is_final()
+        {
+            return Err(ChangedError::Recv(err.clone()));
+        }
+        Ok(())
     }
 
     /// Marks the state as changed.
@@ -218,7 +201,7 @@ impl<T, Codec, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, MAX_ITEM_SIZE> {
     }
 
     /// Waits for a value that satisfies the provided condition.
-    pub async fn wait_for(&mut self, mut f: impl FnMut(&T) -> bool) -> Result<Ref<'_, T>, WaitForError> {
+    pub async fn wait_for(&mut self, mut f: impl FnMut(&T) -> bool) -> Result<Ref<'_, T>, ChangedError> {
         let res = self
             .rx
             .wait_for(move |res| match res {
@@ -232,7 +215,7 @@ impl<T, Codec, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, MAX_ITEM_SIZE> {
                 Ok(_) => Ok(Ref(ref_res)),
                 Err(err) => Err(err.clone().into()),
             },
-            Err(_) => Err(WaitForError::Closed),
+            Err(_) => Err(ChangedError::Closed),
         }
     }
 

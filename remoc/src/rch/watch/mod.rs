@@ -67,7 +67,7 @@ use crate::{RemoteSend, chmux, codec, exec, rch::BACKCHANNEL_MSG_ERROR};
 mod receiver;
 mod sender;
 
-pub use receiver::{ChangedError, Receiver, ReceiverStream, RecvError, WaitForError};
+pub use receiver::{ChangedError, Receiver, ReceiverStream, RecvError};
 pub use sender::{SendError, Sender};
 
 /// Returns a reference to the inner value.

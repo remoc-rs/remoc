@@ -7,7 +7,7 @@ use std::{
     future::Future,
     mem,
     pin::Pin,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, Weak},
     task::{Context, Poll, ready},
 };
 
@@ -269,6 +269,23 @@ where
 
         inner.subs.len() + inner.not_ready
     }
+
+    /// Converts the Sender to a [WeakSender].
+    ///
+    /// If all [Sender]s were dropped and only [WeakSender] instances remain, the channel is closed.    
+    pub fn downgrade(&self) -> WeakSender<T, Codec> {
+        WeakSender { inner: Arc::downgrade(&self.inner) }
+    }
+
+    /// Returns the number of [Sender] handles.
+    pub fn strong_count(&self) -> usize {
+        Arc::strong_count(&self.inner)
+    }
+
+    /// Returns the number of [WeakSender] handles.
+    pub fn weak_count(&self) -> usize {
+        Arc::weak_count(&self.inner)
+    }
 }
 
 impl<T, Codec> Drop for Sender<T, Codec> {
@@ -347,5 +364,51 @@ impl<T> Broadcasting<T> {
     /// up this broadcast operation.
     pub fn into_sendings(self) -> Vec<Sending<T>> {
         self.0
+    }
+}
+
+/// A broadcast sender that does not prevent the channel from being closed.
+///
+/// If all [Sender] instances of a channel were dropped and only [WeakSender] instances remain,
+/// the channel is closed.
+//
+/// In order to send messages, the [WeakSender] needs to be upgraded using [WeakSender::upgrade].
+///
+/// Cannot be sent over a remote channel.
+#[derive(Clone)]
+pub struct WeakSender<T, Codec = codec::Default> {
+    inner: Weak<Mutex<SenderInner<T, Codec>>>,
+}
+
+impl<T, Codec> fmt::Debug for WeakSender<T, Codec> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("WeakSender").finish()
+    }
+}
+
+impl<T, Codec> Default for WeakSender<T, Codec> {
+    /// Creates a [WeakSender] that can never be converted to a [Sender].
+    fn default() -> Self {
+        Self { inner: Weak::new() }
+    }
+}
+
+impl<T, Codec> WeakSender<T, Codec> {
+    /// Tries to convert a WeakSender into a [Sender].
+    ///
+    /// This will return `Some` if there are other [Sender] instances alive and the channel wasn’t previously dropped.
+    /// Otherwise `None` is returned.    
+    pub fn upgrade(&self) -> Option<Sender<T, Codec>> {
+        self.inner.upgrade().map(|inner| Sender { inner })
+    }
+
+    /// Returns the number of [Sender] handles.
+    pub fn strong_count(&self) -> usize {
+        self.inner.strong_count()
+    }
+
+    /// Returns the number of [WeakSender] handles.
+    pub fn weak_count(&self) -> usize {
+        self.inner.weak_count()
     }
 }

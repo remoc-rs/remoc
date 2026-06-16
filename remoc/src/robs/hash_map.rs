@@ -993,14 +993,14 @@ where
             .in_current_span(),
         );
 
-        MirroredHashMap { inner, tx, changed_rx, _dropped_tx: dropped_tx }
+        MirroredHashMap { inner, tx: tx.downgrade(), changed_rx, _dropped_tx: dropped_tx }
     }
 }
 
 /// A hash map that is mirroring an observable hash map.
 pub struct MirroredHashMap<K, V, Codec = crate::codec::Default> {
     inner: Arc<RwLock<Option<MirroredHashMapInner<K, V>>>>,
-    tx: rch::broadcast::Sender<HashMapEvent<K, V>, Codec>,
+    tx: rch::broadcast::WeakSender<HashMapEvent<K, V>, Codec>,
     changed_rx: watch::Receiver<()>,
     _dropped_tx: oneshot::Sender<()>,
 }
@@ -1080,7 +1080,7 @@ where
     pub async fn subscribe(&self, buffer: usize) -> Result<HashMapSubscription<K, V, Codec>, RecvError> {
         let view = self.borrow().await?;
         let initial = view.clone();
-        let events = if view.is_done() { None } else { Some(self.tx.subscribe(buffer)) };
+        let events = if view.is_done() { None } else { self.tx.upgrade().map(|tx| tx.subscribe(buffer)) };
 
         Ok(HashMapSubscription::new(HashMapInitialValue::new_value(initial), events))
     }
@@ -1097,7 +1097,7 @@ where
     ) -> Result<HashMapSubscription<K, V, Codec>, RecvError> {
         let view = self.borrow().await?;
         let initial = view.clone();
-        let events = if view.is_done() { None } else { Some(self.tx.subscribe(buffer)) };
+        let events = if view.is_done() { None } else { self.tx.upgrade().map(|tx| tx.subscribe(buffer)) };
 
         Ok(HashMapSubscription::new(
             HashMapInitialValue::new_incremental(initial, Arc::new(default_on_err)),

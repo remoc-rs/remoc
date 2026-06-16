@@ -250,3 +250,103 @@ async fn incremental() {
         sleep(Duration::from_millis(100)).await;
     }
 }
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn mirrored_subscribe() {
+    let mut obs: ObservableHashSet<_, remoc::codec::Default> = ObservableHashSet::new();
+    for i in 0..100 {
+        obs.insert(i);
+    }
+
+    let sub = obs.subscribe(1024);
+    let mut mirror = sub.mirror(10000);
+
+    // Wait until the mirror is in sync with the observed hash set.
+    loop {
+        let mb = mirror.borrow_and_update().await.unwrap();
+        if *mb == *obs {
+            break;
+        }
+        drop(mb);
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    // Subscribe to the mirror itself.
+    let mut sub2 = mirror.subscribe(1024).await.unwrap();
+    assert!(!sub2.is_incremental());
+    assert!(!sub2.is_done());
+
+    let initial = sub2.take_initial().unwrap();
+    assert_eq!(initial, *obs);
+    assert!(sub2.is_complete());
+    assert!(!sub2.is_done());
+
+    // A change to the observed hash set must propagate through the mirror to the subscription.
+    obs.insert(1000);
+    assert_eq!(sub2.recv().await.unwrap(), Some(HashSetEvent::Set(1000)));
+
+    obs.remove(&0);
+    assert_eq!(sub2.recv().await.unwrap(), Some(HashSetEvent::Remove(0)));
+
+    // When the original observed hash set ends, the subscription to the mirror must end as well.
+    obs.done();
+    assert_eq!(sub2.recv().await.unwrap(), Some(HashSetEvent::Done));
+    assert!(sub2.is_done());
+    assert_eq!(sub2.recv().await.unwrap(), None);
+}
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn mirrored_subscribe_incremental() {
+    let mut obs: ObservableHashSet<_, remoc::codec::Default> = ObservableHashSet::new();
+    for i in 0..100 {
+        obs.insert(i);
+    }
+
+    let sub = obs.subscribe(1024);
+    let mut mirror = sub.mirror(10000);
+
+    // Wait until the mirror is in sync with the observed hash set.
+    loop {
+        let mb = mirror.borrow_and_update().await.unwrap();
+        if *mb == *obs {
+            break;
+        }
+        drop(mb);
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    // Subscribe to the mirror itself with incremental transfer of the current contents.
+    let mut sub2 = mirror.subscribe_incremental(1024).await.unwrap();
+    assert!(sub2.is_incremental());
+    assert!(!sub2.is_done());
+
+    // Receive the current contents incrementally.
+    let mut hs2 = HashSet::new();
+    loop {
+        match sub2.recv().await.unwrap() {
+            Some(HashSetEvent::Set(k)) => {
+                hs2.insert(k);
+            }
+            Some(HashSetEvent::InitialComplete) => break,
+            other => panic!("unexpected event {other:?}"),
+        }
+    }
+    assert_eq!(hs2, *obs);
+    assert!(sub2.is_complete());
+    assert!(!sub2.is_done());
+
+    // A change to the observed hash set must propagate through the mirror to the subscription.
+    obs.insert(1000);
+    assert_eq!(sub2.recv().await.unwrap(), Some(HashSetEvent::Set(1000)));
+
+    obs.remove(&0);
+    assert_eq!(sub2.recv().await.unwrap(), Some(HashSetEvent::Remove(0)));
+
+    // When the original observed hash set ends, the subscription to the mirror must end as well.
+    obs.done();
+    assert_eq!(sub2.recv().await.unwrap(), Some(HashSetEvent::Done));
+    assert!(sub2.is_done());
+    assert_eq!(sub2.recv().await.unwrap(), None);
+}

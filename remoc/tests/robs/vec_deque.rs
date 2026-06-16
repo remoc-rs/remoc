@@ -477,3 +477,105 @@ async fn pop_operations_stress_test() {
     obs.done();
     assert_eq!(sub.recv().await.unwrap(), Some(VecDequeEvent::Done));
 }
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn mirrored_subscribe() {
+    let mut obs: ObservableVecDeque<_, remoc::codec::Default> = ObservableVecDeque::new();
+    for i in 0..100 {
+        obs.push_back(i);
+    }
+
+    let sub = obs.subscribe(1024);
+    let mut mirror = sub.mirror(10000);
+
+    // Wait until the mirror is in sync with the observed deque.
+    loop {
+        let mb = mirror.borrow_and_update().await.unwrap();
+        if *mb == *obs {
+            break;
+        }
+        drop(mb);
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    // Subscribe to the mirror itself.
+    let mut sub2 = mirror.subscribe(1024).await.unwrap();
+    assert!(!sub2.is_incremental());
+    assert!(!sub2.is_done());
+
+    let initial = sub2.take_initial().unwrap();
+    assert_eq!(initial, *obs);
+    assert!(sub2.is_complete());
+    assert!(!sub2.is_done());
+
+    // A change to the observed deque must propagate through the mirror to the subscription.
+    obs.push_back(1000);
+    assert_eq!(sub2.recv().await.unwrap(), Some(VecDequeEvent::PushBack(1000)));
+
+    obs.pop_front();
+    assert_eq!(sub2.recv().await.unwrap(), Some(VecDequeEvent::PopFront));
+
+    // When the original observed deque ends, the subscription to the mirror must end as well.
+    obs.done();
+    assert_eq!(sub2.recv().await.unwrap(), Some(VecDequeEvent::Done));
+    assert!(sub2.is_done());
+    assert_eq!(sub2.recv().await.unwrap(), None);
+}
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn mirrored_subscribe_incremental() {
+    use std::collections::VecDeque;
+
+    let mut obs: ObservableVecDeque<_, remoc::codec::Default> = ObservableVecDeque::new();
+    for i in 0..100 {
+        obs.push_back(i);
+    }
+
+    let sub = obs.subscribe(1024);
+    let mut mirror = sub.mirror(10000);
+
+    // Wait until the mirror is in sync with the observed deque.
+    loop {
+        let mb = mirror.borrow_and_update().await.unwrap();
+        if *mb == *obs {
+            break;
+        }
+        drop(mb);
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    // Subscribe to the mirror itself with incremental transfer of the current contents.
+    let mut sub2 = mirror.subscribe_incremental(1024).await.unwrap();
+    assert!(sub2.is_incremental());
+    assert!(!sub2.is_done());
+
+    // Receive the current contents incrementally.
+    let mut vd2 = VecDeque::new();
+    loop {
+        match sub2.recv().await.unwrap() {
+            Some(VecDequeEvent::PushBack(k)) => {
+                vd2.push_back(k);
+            }
+            Some(VecDequeEvent::InitialComplete) => break,
+            other => panic!("unexpected event {other:?}"),
+        }
+    }
+    assert_eq!(vd2, *obs);
+    assert!(sub2.is_complete());
+    assert!(!sub2.is_done());
+
+    // A change to the observed deque must propagate through the mirror to the subscription.
+    obs.push_back(1000);
+    assert_eq!(sub2.recv().await.unwrap(), Some(VecDequeEvent::PushBack(1000)));
+
+    obs.pop_front();
+    assert_eq!(sub2.recv().await.unwrap(), Some(VecDequeEvent::PopFront));
+
+    // When the original observed deque ends, the subscription to the mirror must end as well.
+    obs.done();
+    assert_eq!(sub2.recv().await.unwrap(), Some(VecDequeEvent::Done));
+    assert!(sub2.is_done());
+    assert_eq!(sub2.recv().await.unwrap(), None);
+}

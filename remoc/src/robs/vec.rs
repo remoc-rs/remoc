@@ -943,14 +943,14 @@ where
             .in_current_span(),
         );
 
-        MirroredVec { inner, tx, changed_rx, _dropped_tx: dropped_tx }
+        MirroredVec { inner, tx: tx.downgrade(), changed_rx, _dropped_tx: dropped_tx }
     }
 }
 
 /// A vector that is mirroring an observable vector.
 pub struct MirroredVec<T, Codec = crate::codec::Default> {
     inner: Arc<RwLock<Option<MirroredVecInner<T>>>>,
-    tx: rch::broadcast::Sender<VecEvent<T>, Codec>,
+    tx: rch::broadcast::WeakSender<VecEvent<T>, Codec>,
     changed_rx: watch::Receiver<()>,
     _dropped_tx: oneshot::Sender<()>,
 }
@@ -1029,7 +1029,7 @@ where
     pub async fn subscribe(&self, buffer: usize) -> Result<VecSubscription<T, Codec>, RecvError> {
         let view = self.borrow().await?;
         let initial = view.clone();
-        let events = if view.is_done() { None } else { Some(self.tx.subscribe(buffer)) };
+        let events = if view.is_done() { None } else { self.tx.upgrade().map(|tx| tx.subscribe(buffer)) };
 
         Ok(VecSubscription::new(VecInitialValue::new_value(initial), events))
     }
@@ -1044,7 +1044,7 @@ where
     pub async fn subscribe_incremental(&self, buffer: usize) -> Result<VecSubscription<T, Codec>, RecvError> {
         let view = self.borrow().await?;
         let initial = view.clone();
-        let events = if view.is_done() { None } else { Some(self.tx.subscribe(buffer)) };
+        let events = if view.is_done() { None } else { self.tx.upgrade().map(|tx| tx.subscribe(buffer)) };
 
         Ok(VecSubscription::new(VecInitialValue::new_incremental(initial, Arc::new(default_on_err)), events))
     }

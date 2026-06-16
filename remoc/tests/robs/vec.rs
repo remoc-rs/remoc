@@ -257,3 +257,103 @@ async fn incremental() {
         sleep(Duration::from_millis(100)).await;
     }
 }
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn mirrored_subscribe() {
+    let mut obs: ObservableVec<_, remoc::codec::Default> = ObservableVec::new();
+    for i in 0..100 {
+        obs.push(i);
+    }
+
+    let sub = obs.subscribe(1024);
+    let mut mirror = sub.mirror(10000);
+
+    // Wait until the mirror is in sync with the observed vec.
+    loop {
+        let mb = mirror.borrow_and_update().await.unwrap();
+        if *mb == *obs {
+            break;
+        }
+        drop(mb);
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    // Subscribe to the mirror itself.
+    let mut sub2 = mirror.subscribe(1024).await.unwrap();
+    assert!(!sub2.is_incremental());
+    assert!(!sub2.is_done());
+
+    let initial = sub2.take_initial().unwrap();
+    assert_eq!(initial, *obs);
+    assert!(sub2.is_complete());
+    assert!(!sub2.is_done());
+
+    // A change to the observed vec must propagate through the mirror to the subscription.
+    obs.push(1000);
+    assert_eq!(sub2.recv().await.unwrap(), Some(VecEvent::Push(1000)));
+
+    obs.remove(0);
+    assert_eq!(sub2.recv().await.unwrap(), Some(VecEvent::Remove(0)));
+
+    // When the original observed vec ends, the subscription to the mirror must end as well.
+    obs.done();
+    assert_eq!(sub2.recv().await.unwrap(), Some(VecEvent::Done));
+    assert!(sub2.is_done());
+    assert_eq!(sub2.recv().await.unwrap(), None);
+}
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn mirrored_subscribe_incremental() {
+    let mut obs: ObservableVec<_, remoc::codec::Default> = ObservableVec::new();
+    for i in 0..100 {
+        obs.push(i);
+    }
+
+    let sub = obs.subscribe(1024);
+    let mut mirror = sub.mirror(10000);
+
+    // Wait until the mirror is in sync with the observed vec.
+    loop {
+        let mb = mirror.borrow_and_update().await.unwrap();
+        if *mb == *obs {
+            break;
+        }
+        drop(mb);
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    // Subscribe to the mirror itself with incremental transfer of the current contents.
+    let mut sub2 = mirror.subscribe_incremental(1024).await.unwrap();
+    assert!(sub2.is_incremental());
+    assert!(!sub2.is_done());
+
+    // Receive the current contents incrementally.
+    let mut v2 = Vec::new();
+    loop {
+        match sub2.recv().await.unwrap() {
+            Some(VecEvent::Push(k)) => {
+                v2.push(k);
+            }
+            Some(VecEvent::InitialComplete) => break,
+            other => panic!("unexpected event {other:?}"),
+        }
+    }
+    assert_eq!(v2, *obs);
+    assert!(sub2.is_complete());
+    assert!(!sub2.is_done());
+
+    // A change to the observed vec must propagate through the mirror to the subscription.
+    obs.push(1000);
+    assert_eq!(sub2.recv().await.unwrap(), Some(VecEvent::Push(1000)));
+
+    obs.remove(0);
+    assert_eq!(sub2.recv().await.unwrap(), Some(VecEvent::Remove(0)));
+
+    // When the original observed vec ends, the subscription to the mirror must end as well.
+    obs.done();
+    assert_eq!(sub2.recv().await.unwrap(), Some(VecEvent::Done));
+    assert!(sub2.is_done());
+    assert_eq!(sub2.recv().await.unwrap(), None);
+}

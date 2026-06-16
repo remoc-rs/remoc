@@ -213,3 +213,71 @@ async fn simple_stream() {
     println!("Waiting for tasks to finish");
     tokio::try_join!(rx1_task, rx2_task, rx3_task).unwrap();
 }
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn weak_sender() {
+    crate::init();
+
+    let (tx, mut rx) = broadcast::channel::<i32, codec::Default, 16>(16);
+
+    // Downgrade to a weak sender.
+    let weak = tx.downgrade();
+    assert_eq!(tx.strong_count(), 1);
+    assert_eq!(tx.weak_count(), 1);
+    assert_eq!(weak.strong_count(), 1);
+    assert_eq!(weak.weak_count(), 1);
+
+    // Upgrade succeeds while a strong sender exists.
+    let tx2 = weak.upgrade().expect("upgrade should succeed while a strong sender exists");
+    assert_eq!(tx.strong_count(), 2);
+
+    // Sending through the upgraded sender reaches the receiver.
+    tx2.send(1).unwrap();
+    assert_eq!(rx.recv().await.unwrap(), 1);
+
+    drop(tx2);
+    assert_eq!(tx.strong_count(), 1);
+
+    // Sending still works through the original sender.
+    tx.send(2).unwrap();
+    assert_eq!(rx.recv().await.unwrap(), 2);
+
+    // After dropping all strong senders, only the weak sender remains.
+    drop(tx);
+    assert_eq!(weak.strong_count(), 0);
+
+    // Upgrade now fails.
+    assert!(weak.upgrade().is_none());
+
+    // The channel is closed and the receiver observes this.
+    assert!(matches!(rx.recv().await, Err(broadcast::RecvError::Closed)));
+}
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn weak_sender_keeps_channel_open_only_while_strong_exists() {
+    crate::init();
+
+    let (tx, mut rx) = broadcast::channel::<i32, codec::Default, 16>(16);
+    let weak = tx.downgrade();
+
+    // Keep only a weak sender around and drop the strong one.
+    drop(tx);
+
+    // Channel is closed since no strong sender remains.
+    assert!(weak.upgrade().is_none());
+    assert_eq!(weak.strong_count(), 0);
+    assert!(matches!(rx.recv().await, Err(broadcast::RecvError::Closed)));
+}
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn weak_sender_default() {
+    crate::init();
+
+    // A default weak sender can never be upgraded.
+    let weak = broadcast::WeakSender::<i32, codec::Default>::default();
+    assert_eq!(weak.strong_count(), 0);
+    assert!(weak.upgrade().is_none());
+}

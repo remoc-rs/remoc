@@ -627,14 +627,14 @@ where
             .in_current_span(),
         );
 
-        MirroredHashSet { inner, tx, changed_rx, _dropped_tx: dropped_tx }
+        MirroredHashSet { inner, tx: tx.downgrade(), changed_rx, _dropped_tx: dropped_tx }
     }
 }
 
 /// A hash set that is mirroring an observable hash set.
 pub struct MirroredHashSet<T, Codec = crate::codec::Default> {
     inner: Arc<RwLock<Option<MirroredHashSetInner<T>>>>,
-    tx: rch::broadcast::Sender<HashSetEvent<T>, Codec>,
+    tx: rch::broadcast::WeakSender<HashSetEvent<T>, Codec>,
     changed_rx: watch::Receiver<()>,
     _dropped_tx: oneshot::Sender<()>,
 }
@@ -713,7 +713,7 @@ where
     pub async fn subscribe(&self, buffer: usize) -> Result<HashSetSubscription<T, Codec>, RecvError> {
         let view = self.borrow().await?;
         let initial = view.clone();
-        let events = if view.is_done() { None } else { Some(self.tx.subscribe(buffer)) };
+        let events = if view.is_done() { None } else { self.tx.upgrade().map(|tx| tx.subscribe(buffer)) };
 
         Ok(HashSetSubscription::new(HashSetInitialValue::new_value(initial), events))
     }
@@ -728,7 +728,7 @@ where
     pub async fn subscribe_incremental(&self, buffer: usize) -> Result<HashSetSubscription<T, Codec>, RecvError> {
         let view = self.borrow().await?;
         let initial = view.clone();
-        let events = if view.is_done() { None } else { Some(self.tx.subscribe(buffer)) };
+        let events = if view.is_done() { None } else { self.tx.upgrade().map(|tx| tx.subscribe(buffer)) };
 
         Ok(HashSetSubscription::new(
             HashSetInitialValue::new_incremental(initial, Arc::new(default_on_err)),

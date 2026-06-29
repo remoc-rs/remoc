@@ -314,21 +314,6 @@ impl TraitMethod {
         quote! { #docs_attrs #ident {#entries} , }
     }
 
-    /// Conversion clause for `impl From<#from_ty>`.
-    pub fn impl_from_clause(&self, from_ty: &Ident) -> TokenStream {
-        let ident = &self.ident;
-        let enum_ident = to_pascal_case(ident);
-
-        // Build enum argument list.
-        let mut entries = quote! { __reply_tx, };
-        for NamedArg { ident: arg_ident, .. } in &self.args {
-            entries.append_all(quote! { #arg_ident, });
-        }
-
-        let entry = quote! { #enum_ident {#entries} };
-        quote! { #from_ty :: #entry => Self :: #entry , }
-    }
-
     /// Enum match discriminator and dispatch code.
     pub fn dispatch_discriminator(&self) -> TokenStream {
         let ident = &self.ident;
@@ -365,6 +350,15 @@ impl TraitMethod {
             Self :: #enum_ident { #args __reply_tx } => {
                 async move { #call }.boxed()
             },
+        }
+    }
+
+    /// Match clause returning the method name for the `ReqEnum::method_name` implementation.
+    pub fn method_name_clause(&self) -> TokenStream {
+        let enum_ident = to_pascal_case(&self.ident);
+        let name = self.ident.to_string();
+        quote! {
+            Self :: #enum_ident { .. } => #name,
         }
     }
 

@@ -391,19 +391,64 @@ impl From<oneshot::RecvError> for CallError {
     }
 }
 
+/// The request enum of a remotely callable trait.
+#[doc(hidden)]
+pub trait ReqEnum {
+    /// The name of the remotely callable trait this request enum belongs to.
+    fn trait_name() -> &'static str;
+
+    /// Trait method name this request enum variant belongs to.
+    ///
+    /// # Panics
+    /// Panics when called on the `__Phantom` variant.
+    fn method_name(&self) -> &'static str;
+}
+
 /// A request from client to server.
 ///
 /// This groups the methods of a remotable trait by how they take `self`.
 /// Each variant holds a per-kind request enum that in turn has one variant per
 /// method of that kind.
 #[derive(Serialize, Deserialize)]
-pub enum Req<Value, Ref, RefMut> {
+pub enum Req<Value, Ref, RefMut>
+where
+    Value: ReqEnum,
+    Ref: ReqEnum,
+    RefMut: ReqEnum,
+{
     /// Request for a method taking self by value (`self`).
     Value(Value),
     /// Request for a method taking self by reference (`&self`).
     Ref(Ref),
     /// Request for a method taking self by mutable reference (`&mut self`).
     RefMut(RefMut),
+}
+
+impl<Value, Ref, RefMut> Req<Value, Ref, RefMut>
+where
+    Value: ReqEnum,
+    Ref: ReqEnum,
+    RefMut: ReqEnum,
+{
+    /// The name of the remotely callable trait this request enum belongs to.
+    pub fn trait_name() -> &'static str {
+        let trait_name = Value::trait_name();
+        assert_eq!(trait_name, Ref::trait_name());
+        assert_eq!(trait_name, RefMut::trait_name());
+        trait_name
+    }
+
+    /// Trait method name this request enum variant belongs to.
+    ///
+    /// # Panics
+    /// Panics when called on the `__Phantom` variant.
+    pub fn method_name(&self) -> &'static str {
+        match self {
+            Self::Value(req) => req.method_name(),
+            Self::Ref(req) => req.method_name(),
+            Self::RefMut(req) => req.method_name(),
+        }
+    }
 }
 
 /// Client of a remotable trait.
@@ -471,18 +516,23 @@ impl Future for Closed {
 /// Allows setting the [client monitor](ClientMonitor) on a [client](Client).
 pub trait MonitorableClient {
     /// Type of request by value (`self`).
-    type Value;
+    type Value: ReqEnum;
     /// Type of request by reference (`&self`).
-    type Ref;
+    type Ref: ReqEnum;
     /// Type of request by mutable reference (`&mut self`).
-    type RefMut;
+    type RefMut: ReqEnum;
 
     /// Sets the [client monitor](ClientMonitor).
     fn set_monitor(&mut self, monitor: impl ClientMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static);
 }
 
 /// Allows monitoring each request a client makes.
-pub trait ClientMonitor<Value, Ref, RefMut>: Send + Sync {
+pub trait ClientMonitor<Value, Ref, RefMut>: Send + Sync
+where
+    Value: ReqEnum,
+    Ref: ReqEnum,
+    RefMut: ReqEnum,
+{
     /// Called for each request before sending it to server.
     ///
     /// The function can inspect the request and decide whether it should be
@@ -625,11 +675,11 @@ where
     Self: Sized,
 {
     /// Type of request by value (`self`).
-    type Value;
+    type Value: ReqEnum;
     /// Type of request by reference (`&self`).
-    type Ref;
+    type Ref: ReqEnum;
     /// Type of request by mutable reference (`&mut self`).
-    type RefMut;
+    type RefMut: ReqEnum;
 
     /// Creates a new request receiver instance together with its associated client.
     fn new(request_buffer: usize) -> (Self, Self::Client);
@@ -656,18 +706,23 @@ where
 /// Allows setting the [server monitor](ServerMonitor) on a server.
 pub trait MonitorableServer {
     /// Type of request by value (`self`).
-    type Value;
+    type Value: ReqEnum;
     /// Type of request by reference (`&self`).
-    type Ref;
+    type Ref: ReqEnum;
     /// Type of request by mutable reference (`&mut self`).
-    type RefMut;
+    type RefMut: ReqEnum;
 
     /// Sets the [server monitor](ServerMonitor).
     fn set_monitor(&mut self, monitor: impl ServerMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static);
 }
 
 /// Allows monitoring each request a server handles.
-pub trait ServerMonitor<Value, Ref, RefMut>: Send {
+pub trait ServerMonitor<Value, Ref, RefMut>: Send
+where
+    Value: ReqEnum,
+    Ref: ReqEnum,
+    RefMut: ReqEnum,
+{
     /// Called for each request before dispatch to its handling method.
     ///
     /// The function can inspect the request and decide whether it should be
@@ -750,14 +805,24 @@ pub use crate::server_monitor_pre_dispatch;
 #[derive(Debug, Default)]
 pub struct DefaultMonitor;
 
-impl<Value, Ref, RefMut> ClientMonitor<Value, Ref, RefMut> for DefaultMonitor {
+impl<Value, Ref, RefMut> ClientMonitor<Value, Ref, RefMut> for DefaultMonitor
+where
+    Value: ReqEnum,
+    Ref: ReqEnum,
+    RefMut: ReqEnum,
+{
     fn pre_call<'a>(&self, req: &'a Req<Value, Ref, RefMut>) -> BoxFuture<'a, CallDecision> {
         let _ = req;
         std::future::ready(CallDecision::Pass).boxed()
     }
 }
 
-impl<Value, Ref, RefMut> ServerMonitor<Value, Ref, RefMut> for DefaultMonitor {
+impl<Value, Ref, RefMut> ServerMonitor<Value, Ref, RefMut> for DefaultMonitor
+where
+    Value: ReqEnum,
+    Ref: ReqEnum,
+    RefMut: ReqEnum,
+{
     fn pre_dispatch<'a>(
         &mut self, req: &'a Result<Option<Req<Value, Ref, RefMut>>, mpsc::RecvError>,
     ) -> BoxFuture<'a, DispatchDecision> {
@@ -767,7 +832,12 @@ impl<Value, Ref, RefMut> ServerMonitor<Value, Ref, RefMut> for DefaultMonitor {
 }
 
 #[doc(hidden)]
-pub fn default_client_monitor<Value, Ref, RefMut>() -> Arc<dyn ClientMonitor<Value, Ref, RefMut>> {
+pub fn default_client_monitor<Value, Ref, RefMut>() -> Arc<dyn ClientMonitor<Value, Ref, RefMut>>
+where
+    Value: ReqEnum,
+    Ref: ReqEnum,
+    RefMut: ReqEnum,
+{
     Arc::new(DefaultMonitor)
 }
 

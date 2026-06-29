@@ -59,6 +59,9 @@ struct CountingMonitor {
 impl<V, R, M> ServerMonitor<V, R, M> for CountingMonitor
 where
     Req<V, R, M>: Sync,
+    V: remoc::rtc::ReqEnum,
+    R: remoc::rtc::ReqEnum,
+    M: remoc::rtc::ReqEnum,
 {
     fn pre_dispatch<'a>(
         &mut self, req: &'a Result<Option<Req<V, R, M>>, remoc::rch::mpsc::RecvError>,
@@ -93,7 +96,12 @@ struct RateLimitMonitor {
     remaining: usize,
 }
 
-impl<V, R, M> ServerMonitor<V, R, M> for RateLimitMonitor {
+impl<V, R, M> ServerMonitor<V, R, M> for RateLimitMonitor
+where
+    V: remoc::rtc::ReqEnum,
+    R: remoc::rtc::ReqEnum,
+    M: remoc::rtc::ReqEnum,
+{
     fn pre_dispatch<'a>(
         &mut self, req: &'a Result<Option<Req<V, R, M>>, remoc::rch::mpsc::RecvError>,
     ) -> BoxFuture<'a, DispatchDecision> {
@@ -221,7 +229,12 @@ struct InFlightMonitor {
     max: Arc<AtomicUsize>,
 }
 
-impl<V, R, M> ServerMonitor<V, R, M> for InFlightMonitor {
+impl<V, R, M> ServerMonitor<V, R, M> for InFlightMonitor
+where
+    V: remoc::rtc::ReqEnum,
+    R: remoc::rtc::ReqEnum,
+    M: remoc::rtc::ReqEnum,
+{
     fn pre_dispatch<'a>(
         &mut self, req: &'a Result<Option<Req<V, R, M>>, remoc::rch::mpsc::RecvError>,
     ) -> BoxFuture<'a, DispatchDecision> {

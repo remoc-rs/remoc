@@ -242,7 +242,7 @@ use std::{
     future::Future,
     pin::Pin,
     sync::Arc,
-    task::{Context, Poll},
+    task::{Context, Poll, ready},
 };
 use tokio_util::sync::ReusableBoxFuture;
 
@@ -741,8 +741,7 @@ where
 }
 
 /// A receiver of requests made by the client of a remotable trait.
-pub trait ReqReceiver<Codec>:
-    ServerBase + Stream<Item = Result<Req<Self::Value, Self::Ref, Self::RefMut>, mpsc::RecvError>>
+pub trait ReqReceiver<Codec>: ServerBase
 where
     Self: Sized,
 {
@@ -773,7 +772,91 @@ where
     /// This allows to process outstanding requests while stopping the client
     /// from sending new requests.
     fn close(&mut self);
+
+    /// Converts the request receiver into a [stream](Stream) of requests.
+    fn into_stream(self) -> ReqReceiverStream<Self, Codec>
+    where
+        Self: Send + 'static,
+        Codec: 'static,
+    {
+        ReqReceiverStream::new(self)
+    }
 }
+
+/// A [stream](Stream) of requests received from the client of a remotable trait.
+///
+/// This is created by [`ReqReceiver::into_stream`] and yields the requests
+/// returned by [`ReqReceiver::recv`]. Each request passes through the
+/// [request receiver monitor](ReqReceiverMonitor), if one is set.
+pub struct ReqReceiverStream<R, Codec>
+where
+    R: ReqReceiver<Codec> + Send + 'static,
+    Codec: 'static,
+{
+    #[allow(clippy::type_complexity)]
+    inner: ReusableBoxFuture<'static, (Result<Option<Req<R::Value, R::Ref, R::RefMut>>, mpsc::RecvError>, R)>,
+    close: bool,
+}
+
+impl<R, Codec> fmt::Debug for ReqReceiverStream<R, Codec>
+where
+    R: ReqReceiver<Codec> + Send + 'static,
+    Codec: 'static,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("ReqReceiverStream").finish()
+    }
+}
+
+impl<R, Codec> ReqReceiverStream<R, Codec>
+where
+    R: ReqReceiver<Codec> + Send + 'static,
+    Codec: 'static,
+{
+    /// Creates a new request receiver stream wrapping the given request receiver.
+    pub fn new(req_rx: R) -> Self {
+        Self { inner: ReusableBoxFuture::new(Self::make_future(req_rx, false)), close: false }
+    }
+
+    /// Closes the receiver half of the request channel after the next request
+    /// is received, preventing the client from sending new requests.
+    ///
+    /// Already sent requests will still be received.
+    pub fn close(&mut self) {
+        self.close = true;
+    }
+
+    #[allow(clippy::type_complexity)]
+    async fn make_future(
+        mut req_rx: R, close: bool,
+    ) -> (Result<Option<Req<R::Value, R::Ref, R::RefMut>>, mpsc::RecvError>, R) {
+        if close {
+            req_rx.close();
+        }
+
+        let result = req_rx.recv().await;
+        (result, req_rx)
+    }
+}
+
+impl<R, Codec> Stream for ReqReceiverStream<R, Codec>
+where
+    R: ReqReceiver<Codec> + Send + 'static,
+    Codec: 'static,
+{
+    type Item = Result<Req<R::Value, R::Ref, R::RefMut>, mpsc::RecvError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        let (result, req_rx) = ready!(self.inner.poll(cx));
+
+        let close = self.close;
+        self.inner.set(Self::make_future(req_rx, close));
+
+        Poll::Ready(result.transpose())
+    }
+}
+
+impl<R, Codec> Unpin for ReqReceiverStream<R, Codec> where R: ReqReceiver<Codec> + Send + 'static {}
 
 /// Allows setting the [server monitor](ServerMonitor) on a [server](ServerBase).
 pub trait MonitorableServer {
@@ -802,6 +885,79 @@ where
     fn pre_dispatch<'a>(
         &'a mut self, req: &'a Result<Option<Req<Value, Ref, RefMut>>, mpsc::RecvError>,
     ) -> BoxFuture<'a, DispatchDecision>;
+}
+
+/// Allows setting the [request receiver monitor](ReqReceiverMonitor) on a
+/// [request receiver](ReqReceiver).
+pub trait MonitorableReqReceiver {
+    /// Type of request by value (`self`).
+    type Value: ReqEnum;
+    /// Type of request by reference (`&self`).
+    type Ref: ReqEnum;
+    /// Type of request by mutable reference (`&mut self`).
+    type RefMut: ReqEnum;
+
+    /// Sets the [request receiver monitor](ReqReceiverMonitor).
+    fn set_monitor(&mut self, monitor: impl ReqReceiverMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static);
+}
+
+/// Allows monitoring each request a [request receiver](ReqReceiver) receives.
+///
+/// Unlike a [server monitor](ServerMonitor), it cannot guard a request or stop
+/// the receiver with a custom error; it can only let a request [pass](RecvDecision::Pass)
+/// or [drop](RecvDecision::Drop) it.
+pub trait ReqReceiverMonitor<Value, Ref, RefMut>: Send
+where
+    Value: ReqEnum,
+    Ref: ReqEnum,
+    RefMut: ReqEnum,
+{
+    /// Called for each received request before it is returned from
+    /// [`ReqReceiver::recv`].
+    ///
+    /// The function can inspect the request and decide whether it should be
+    /// returned to the caller or dropped.
+    fn pre_recv<'a>(
+        &'a mut self, req: &'a Result<Option<Req<Value, Ref, RefMut>>, mpsc::RecvError>,
+    ) -> BoxFuture<'a, RecvDecision>;
+}
+
+impl<A, B, Value, Ref, RefMut> ReqReceiverMonitor<Value, Ref, RefMut> for ChainedMonitor<A, B>
+where
+    A: ReqReceiverMonitor<Value, Ref, RefMut>,
+    B: ReqReceiverMonitor<Value, Ref, RefMut>,
+    Value: ReqEnum,
+    Ref: ReqEnum,
+    RefMut: ReqEnum,
+{
+    fn pre_recv<'a>(
+        &'a mut self, req: &'a Result<Option<Req<Value, Ref, RefMut>>, mpsc::RecvError>,
+    ) -> BoxFuture<'a, RecvDecision> {
+        let pre_recv_0 = self.0.pre_recv(req);
+        let pre_recv_1 = self.1.pre_recv(req);
+
+        async move {
+            match pre_recv_0.await {
+                RecvDecision::Pass => (),
+                RecvDecision::Drop => return RecvDecision::Drop,
+            }
+
+            pre_recv_1.await
+        }
+        .boxed()
+    }
+}
+
+/// Decision on how a received request should be processed made by the
+/// [request receiver monitor](ReqReceiverMonitor).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecvDecision {
+    /// Return the request to the caller of [`ReqReceiver::recv`].
+    Pass,
+    /// Drop the request and receive the next one.
+    ///
+    /// The client-side method fails with [`CallError::Dropped`].
+    Drop,
 }
 
 impl<A, B, Value, Ref, RefMut> ServerMonitor<Value, Ref, RefMut> for ChainedMonitor<A, B>
@@ -902,7 +1058,14 @@ macro_rules! server_monitor_pre_dispatch {
         match $monitor.pre_dispatch(&$req).await {
             ::remoc::rtc::DispatchDecision::Pass => ::std::boxed::Box::new(::remoc::rtc::DefaultGuard),
             ::remoc::rtc::DispatchDecision::Guard(guard) => guard,
-            ::remoc::rtc::DispatchDecision::Drop => continue,
+            ::remoc::rtc::DispatchDecision::Drop => {
+                match &$req {
+                    Ok(None) => (),
+                    Err(err) if err.is_final() => (),
+                    _ => continue,
+                }
+                ::std::boxed::Box::new(::remoc::rtc::DefaultGuard)
+            }
             ::remoc::rtc::DispatchDecision::Error(err) => return Err(::remoc::rtc::ServeError::Monitor(err)),
         }
     };
@@ -910,7 +1073,14 @@ macro_rules! server_monitor_pre_dispatch {
         match $monitor.pre_dispatch(&$req).await {
             ::remoc::rtc::DispatchDecision::Pass => ::std::boxed::Box::new(::remoc::rtc::DefaultGuard),
             ::remoc::rtc::DispatchDecision::Guard(guard) => guard,
-            ::remoc::rtc::DispatchDecision::Drop => continue,
+            ::remoc::rtc::DispatchDecision::Drop => {
+                match &$req {
+                    Ok(None) => (),
+                    Err(err) if err.is_final() => (),
+                    _ => continue,
+                }
+                ::std::boxed::Box::new(::remoc::rtc::DefaultGuard)
+            }
             ::remoc::rtc::DispatchDecision::Error(err) => {
                 return (Some($target), Err(::remoc::rtc::ServeError::Monitor(err)))
             }
@@ -919,6 +1089,23 @@ macro_rules! server_monitor_pre_dispatch {
 }
 #[doc(hidden)]
 pub use crate::server_monitor_pre_dispatch;
+
+#[macro_export]
+#[doc(hidden)]
+macro_rules! req_receiver_monitor_pre_recv {
+    ($monitor:expr, $req:expr) => {
+        match $monitor.pre_recv(&$req).await {
+            ::remoc::rtc::RecvDecision::Pass => (),
+            ::remoc::rtc::RecvDecision::Drop => match &$req {
+                Ok(None) => (),
+                Err(err) if err.is_final() => (),
+                _ => continue,
+            },
+        }
+    };
+}
+#[doc(hidden)]
+pub use crate::req_receiver_monitor_pre_recv;
 
 /// The default [client](ClientMonitor) and [server](ServerMonitor).
 ///
@@ -950,6 +1137,20 @@ where
     ) -> BoxFuture<'a, DispatchDecision> {
         let _ = req;
         std::future::ready(DispatchDecision::Pass).boxed()
+    }
+}
+
+impl<Value, Ref, RefMut> ReqReceiverMonitor<Value, Ref, RefMut> for DefaultMonitor
+where
+    Value: ReqEnum,
+    Ref: ReqEnum,
+    RefMut: ReqEnum,
+{
+    fn pre_recv<'a>(
+        &mut self, req: &'a Result<Option<Req<Value, Ref, RefMut>>, mpsc::RecvError>,
+    ) -> BoxFuture<'a, RecvDecision> {
+        let _ = req;
+        std::future::ready(RecvDecision::Pass).boxed()
     }
 }
 

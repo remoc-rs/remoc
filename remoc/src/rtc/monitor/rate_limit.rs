@@ -8,7 +8,7 @@ use tracing::Level;
 use crate::{
     exec::time::{Instant, sleep},
     rch,
-    rtc::{DispatchDecision, Req, ReqEnum, ServerMonitor},
+    rtc::{DispatchDecision, RecvDecision, Req, ReqEnum, ReqReceiverMonitor, ServerMonitor},
 };
 
 /// A [server monitor](ServerMonitor) that rate-limits requests from clients.
@@ -61,6 +61,53 @@ impl RateLimitMonitor {
         self.log_level = level;
         self
     }
+
+    /// Waits until dispatching a request would no longer exceed the rate limit.
+    ///
+    /// `target` is used for logging when a request is delayed.
+    async fn wait_for_slot(&self, target: impl Fn() -> String) {
+        // The lock is intentionally held across the `sleep` below. The rate limit is global
+        // (shared by all clones via `history`), so whenever the window is saturated every other
+        // call would have to wait for the same oldest entry to expire anyway. Holding the lock
+        // therefore queues subsequent calls in arrival order (tokio's `Mutex` is FIFO-fair)
+        // without reducing throughput, while keeping dispatch strictly in order.
+        let mut history = self.history.lock().await;
+
+        loop {
+            while let Some(front) = history.front()
+                && front.elapsed() >= self.window
+            {
+                history.pop_front();
+            }
+
+            if history.len() < self.requests.get() {
+                break;
+            }
+
+            log_at!(self.log_level, target =% target(), "delaying this and possibly subsequent calls due to rate limiting");
+
+            let front = history.front().unwrap();
+            sleep(self.window - front.elapsed()).await;
+        }
+
+        history.push_back(Instant::now());
+    }
+
+    fn req_target_str<Value, Ref, RefMut>(
+        req: &Result<Option<Req<Value, Ref, RefMut>>, rch::mpsc::RecvError>,
+    ) -> impl Fn() -> String
+    where
+        Value: ReqEnum,
+        Ref: ReqEnum,
+        RefMut: ReqEnum,
+    {
+        let trait_name = Req::<Value, Ref, RefMut>::trait_name();
+        let method_name = if let Ok(Some(req)) = req { Some(req.method_name()) } else { None };
+        move || match method_name {
+            Some(method_name) => format!("{trait_name}::{method_name}"),
+            None => trait_name.to_string(),
+        }
+    }
 }
 
 impl<Value, Ref, RefMut> ServerMonitor<Value, Ref, RefMut> for RateLimitMonitor
@@ -72,40 +119,28 @@ where
     fn pre_dispatch<'a>(
         &'a mut self, req: &'a Result<Option<Req<Value, Ref, RefMut>>, rch::mpsc::RecvError>,
     ) -> BoxFuture<'a, DispatchDecision> {
-        let trait_name = Req::<Value, Ref, RefMut>::trait_name();
-        let method_name = if let Ok(Some(req)) = req { Some(req.method_name()) } else { None };
-
+        let target = Self::req_target_str(req);
         async move {
-            // The lock is intentionally held across the `sleep` below. The rate limit is global
-            // (shared by all clones via `history`), so whenever the window is saturated every other
-            // call would have to wait for the same oldest entry to expire anyway. Holding the lock
-            // therefore queues subsequent calls in arrival order (tokio's `Mutex` is FIFO-fair)
-            // without reducing throughput, while keeping dispatch strictly in order.
-            let mut history = self.history.lock().await;
-
-            loop {
-                while let Some(front) = history.front()
-                    && front.elapsed() >= self.window
-                {
-                    history.pop_front();
-                }
-
-                if history.len() < self.requests.get() {
-                    break;
-                }
-
-                let target = match method_name {
-                    Some(method_name) => format!("{trait_name}::{method_name}"),
-                    None => trait_name.to_string(),
-                };
-                log_at!(self.log_level, %target, "delaying this and possibly subsequent calls due to rate limiting");
-
-                let front = history.front().unwrap();
-                sleep(self.window - front.elapsed()).await;
-            }
-
-            history.push_back(Instant::now());
+            self.wait_for_slot(target).await;
             DispatchDecision::Pass
+        }
+        .boxed()
+    }
+}
+
+impl<Value, Ref, RefMut> ReqReceiverMonitor<Value, Ref, RefMut> for RateLimitMonitor
+where
+    Value: ReqEnum,
+    Ref: ReqEnum,
+    RefMut: ReqEnum,
+{
+    fn pre_recv<'a>(
+        &'a mut self, req: &'a Result<Option<Req<Value, Ref, RefMut>>, rch::mpsc::RecvError>,
+    ) -> BoxFuture<'a, RecvDecision> {
+        let target = Self::req_target_str(req);
+        async move {
+            self.wait_for_slot(target).await;
+            RecvDecision::Pass
         }
         .boxed()
     }

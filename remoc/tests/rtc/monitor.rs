@@ -15,7 +15,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use remoc::rtc::{
     CallDecision, ChainedMonitor, ClientMonitor, DispatchDecision, DispatchGuard, MonitorableClient,
-    MonitorableServer, Req, ServeError, Server, ServerMonitor, ServerShared,
+    MonitorableReqReceiver, MonitorableServer, RecvDecision, Req, ReqReceiver, ReqReceiverMonitor, ServeError,
+    Server, ServerMonitor, ServerShared,
 };
 
 use crate::loop_channel;
@@ -830,4 +831,220 @@ async fn chain_client_monitors_short_circuit() {
 
     // The second monitor was short-circuited by the first, so it counted nothing.
     assert_eq!(count.load(Ordering::SeqCst), 0);
+}
+
+/// Handles a single [`Counter`] request received from a [`CounterReqReceiver`].
+fn handle_counter_req<Codec>(value: &mut u32, req: CounterReq<Codec>)
+where
+    Codec: remoc::codec::Codec,
+{
+    match req {
+        Req::Value(CounterReqValue::Value { __reply_tx }) => {
+            let _ = __reply_tx.send(Ok(*value));
+        }
+        Req::Ref(CounterReqRef::ValueRef { __reply_tx }) => {
+            let _ = __reply_tx.send(Ok(*value));
+        }
+        Req::RefMut(CounterReqRefMut::Increase { __reply_tx, by }) => {
+            *value += by;
+            let _ = __reply_tx.send(Ok(()));
+        }
+        _ => (),
+    }
+}
+
+/// Request receiver monitor that counts the requests it passes through.
+struct CountingReqMonitor {
+    count: Arc<AtomicUsize>,
+}
+
+impl<V, R, M> ReqReceiverMonitor<V, R, M> for CountingReqMonitor
+where
+    V: remoc::rtc::ReqEnum,
+    R: remoc::rtc::ReqEnum,
+    M: remoc::rtc::ReqEnum,
+{
+    fn pre_recv<'a>(
+        &'a mut self, req: &'a Result<Option<Req<V, R, M>>, remoc::rch::mpsc::RecvError>,
+    ) -> BoxFuture<'a, RecvDecision> {
+        let count = self.count.clone();
+        let is_req = matches!(req, Ok(Some(_)));
+        async move {
+            if is_req {
+                count.fetch_add(1, Ordering::SeqCst);
+            }
+            RecvDecision::Pass
+        }
+        .boxed()
+    }
+}
+
+/// Request receiver monitor that drops every request.
+struct DropReqMonitor;
+
+impl<V, R, M> ReqReceiverMonitor<V, R, M> for DropReqMonitor
+where
+    V: remoc::rtc::ReqEnum,
+    R: remoc::rtc::ReqEnum,
+    M: remoc::rtc::ReqEnum,
+{
+    fn pre_recv<'a>(
+        &'a mut self, req: &'a Result<Option<Req<V, R, M>>, remoc::rch::mpsc::RecvError>,
+    ) -> BoxFuture<'a, RecvDecision> {
+        let is_req = matches!(req, Ok(Some(_)));
+        async move { if is_req { RecvDecision::Drop } else { RecvDecision::Pass } }.boxed()
+    }
+}
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn req_receiver_monitor_counts() {
+    crate::init();
+    let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<CounterClient>().await;
+
+    let count = Arc::new(AtomicUsize::new(0));
+
+    println!("Creating counter request receiver with counting monitor");
+    let (mut req_rx, client) = CounterReqReceiver::new(1);
+    req_rx.set_monitor(CountingReqMonitor { count: count.clone() });
+
+    a_tx.send(client).await.unwrap();
+
+    let client_task = async move {
+        let mut client = b_rx.recv().await.unwrap().unwrap();
+
+        client.increase(20).await.unwrap();
+        assert_eq!(client.value_ref().await.unwrap(), 20);
+        client.increase(45).await.unwrap();
+        assert_eq!(client.value().await.unwrap(), 65);
+    };
+
+    let server_task = async move {
+        let mut value = 0;
+        while let Some(req) = req_rx.recv().await.unwrap() {
+            handle_counter_req(&mut value, req);
+        }
+        value
+    };
+
+    let (_, value) = tokio::join!(client_task, server_task);
+
+    // The monitor observed every one of the four requests.
+    assert_eq!(count.load(Ordering::SeqCst), 4);
+    assert_eq!(value, 65);
+}
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn req_receiver_monitor_drops() {
+    crate::init();
+    let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<CounterClient>().await;
+
+    println!("Creating counter request receiver with dropping monitor");
+    let (mut req_rx, client) = CounterReqReceiver::new(1);
+    req_rx.set_monitor(DropReqMonitor);
+
+    a_tx.send(client).await.unwrap();
+
+    let client_task = async move {
+        let mut client = b_rx.recv().await.unwrap().unwrap();
+
+        // Every request is dropped by the monitor, so each call fails.
+        assert!(client.increase(20).await.is_err());
+        assert!(client.value_ref().await.is_err());
+    };
+
+    let server_task = async move {
+        let mut value = 0;
+        // The dropped requests never surface; once the client disconnects the
+        // terminal `Ok(None)` is returned and the loop ends.
+        while let Some(req) = req_rx.recv().await.unwrap() {
+            handle_counter_req(&mut value, req);
+        }
+        value
+    };
+
+    let (_, value) = tokio::join!(client_task, server_task);
+
+    // No request was ever handled.
+    assert_eq!(value, 0);
+}
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn req_receiver_monitor_chain_short_circuit() {
+    crate::init();
+    let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<CounterClient>().await;
+
+    let count = Arc::new(AtomicUsize::new(0));
+
+    println!("Creating counter request receiver with a dropping monitor chained before a counting one");
+    let (mut req_rx, client) = CounterReqReceiver::new(1);
+    req_rx.set_monitor(ChainedMonitor(DropReqMonitor, CountingReqMonitor { count: count.clone() }));
+
+    a_tx.send(client).await.unwrap();
+
+    let client_task = async move {
+        let mut client = b_rx.recv().await.unwrap().unwrap();
+
+        assert!(client.increase(20).await.is_err());
+        assert!(client.value_ref().await.is_err());
+    };
+
+    let server_task = async move {
+        let mut value = 0;
+        while let Some(req) = req_rx.recv().await.unwrap() {
+            handle_counter_req(&mut value, req);
+        }
+        value
+    };
+
+    let (_, value) = tokio::join!(client_task, server_task);
+
+    // The first monitor dropped every request, so the second never saw them.
+    assert_eq!(count.load(Ordering::SeqCst), 0);
+    assert_eq!(value, 0);
+}
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn req_receiver_monitor_stream_filtered() {
+    use futures::StreamExt;
+
+    crate::init();
+    let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<CounterClient>().await;
+
+    let count = Arc::new(AtomicUsize::new(0));
+
+    println!("Creating counter request receiver stream with a counting then dropping monitor chain");
+    let (mut req_rx, client) = CounterReqReceiver::new(1);
+    req_rx.set_monitor(ChainedMonitor(CountingReqMonitor { count: count.clone() }, DropReqMonitor));
+
+    a_tx.send(client).await.unwrap();
+
+    let client_task = async move {
+        let mut client = b_rx.recv().await.unwrap().unwrap();
+
+        // Every request is dropped by the monitor, so each call fails even
+        // though requests are consumed through the stream interface.
+        assert!(client.increase(20).await.is_err());
+        assert!(client.value_ref().await.is_err());
+    };
+
+    let server_task = async move {
+        let mut stream = req_rx.into_stream();
+        let mut value = 0;
+        // The stream must route requests through the monitor; since the monitor
+        // drops them, nothing is ever yielded until the client disconnects.
+        while let Some(req) = stream.next().await {
+            handle_counter_req(&mut value, req.unwrap());
+        }
+        value
+    };
+
+    let (_, value) = tokio::join!(client_task, server_task);
+
+    // The monitor saw both requests (proving the stream is filtered) but dropped them.
+    assert_eq!(count.load(Ordering::SeqCst), 2);
+    assert_eq!(value, 0);
 }

@@ -1309,24 +1309,38 @@ impl TraitDef {
         let client = self.client_ident();
         let server = format_ident!("{}ReqReceiver", &ident);
 
+        let req_params = quote! {
+            #req_value #req_generics,
+            #req_ref #req_generics,
+            #req_ref_mut #req_generics,
+        };
+
         let doc = format!("Request receiver for [{}].", ident);
 
         quote! {
             #[doc=#doc]
             #vis struct #server #ty_generics #ty_generics_where {
                 req_rx: ::remoc::rch::mpsc::Receiver<
-                    ::remoc::rtc::Req<
-                        #req_value #req_generics,
-                        #req_ref #req_generics,
-                        #req_ref_mut #req_generics,
-                    >,
+                    ::remoc::rtc::Req<#req_params>,
                     Codec,
                 >,
+                monitor: ::std::boxed::Box<dyn ::remoc::rtc::ReqReceiverMonitor<#req_params>>,
             }
 
             impl #impl_generics_impl ::remoc::rtc::ServerBase for #server #impl_generics_ty #impl_generics_where
             {
                 type Client = #client #req_generics;
+            }
+
+            impl #impl_generics_impl ::remoc::rtc::MonitorableReqReceiver for #server #impl_generics_ty #impl_generics_where
+            {
+                type Value = #req_value #req_generics;
+                type Ref = #req_ref #req_generics;
+                type RefMut = #req_ref_mut #req_generics;
+
+                fn set_monitor(&mut self, monitor: impl ::remoc::rtc::ReqReceiverMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static) {
+                    self.monitor = ::std::boxed::Box::new(monitor);
+                }
             }
 
             impl #impl_generics_impl ::remoc::rtc::ReqReceiver <Codec> for #server #impl_generics_ty #impl_generics_where
@@ -1337,38 +1351,27 @@ impl TraitDef {
 
                 fn new(request_buffer: usize) -> (Self, Self::Client) {
                     let (req_tx, req_rx) = ::remoc::rch::mpsc::channel(request_buffer);
-                    (Self { req_rx }, Self::Client::new(req_tx))
+                    (
+                        Self {
+                            req_rx,
+                            monitor: ::std::boxed::Box::new(::remoc::rtc::DefaultMonitor),
+                        },
+                        Self::Client::new(req_tx),
+                    )
                 }
 
                 async fn recv(&mut self) -> ::std::result::Result<::std::option::Option<
                     ::remoc::rtc::Req<Self::Value, Self::Ref, Self::RefMut>
                 >, ::remoc::rch::mpsc::RecvError> {
-                    self.req_rx.recv().await
+                    loop {
+                        let req = self.req_rx.recv().await;
+                        ::remoc::rtc::req_receiver_monitor_pre_recv!(self.monitor, req);
+                        break req
+                    }
                 }
 
                 fn close(&mut self) {
                     self.req_rx.close()
-                }
-            }
-
-            impl #impl_generics_impl ::remoc::rtc::Stream for #server #impl_generics_ty #impl_generics_where
-            {
-                /// Request type.
-                type Item = ::std::result::Result<
-                    ::remoc::rtc::Req<
-                        #req_value #req_generics,
-                        #req_ref #req_generics,
-                        #req_ref_mut #req_generics,
-                    >,
-                    ::remoc::rch::mpsc::RecvError
-                >;
-
-                /// Attempt to receive the next request, i.e. method call, from the client.
-                fn poll_next(mut self: ::std::pin::Pin<&mut Self>, cx: &mut ::std::task::Context<'_>)
-                    -> ::std::task::Poll<::std::option::Option<Self::Item>>
-                {
-                    use ::remoc::rtc::StreamExt;
-                    self.req_rx.poll_next_unpin(cx)
                 }
             }
         }

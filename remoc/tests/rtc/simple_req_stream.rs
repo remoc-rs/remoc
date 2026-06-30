@@ -104,7 +104,7 @@ async fn simple_req() {
 
     println!("Creating counter server");
     let mut counter_obj = CounterObj::new();
-    let (mut req_rx, client) = CounterReqReceiver::new(1);
+    let (req_rx, client) = CounterReqReceiver::new(1);
 
     println!("Sending counter request receiver");
     a_tx.send(client).await.unwrap();
@@ -135,7 +135,8 @@ async fn simple_req() {
         assert_eq!(client.value().await.unwrap(), 65);
     });
 
-    while let Some(req) = req_rx.next().await {
+    let mut req_stream = req_rx.into_stream();
+    while let Some(req) = req_stream.next().await {
         let req = req.unwrap();
         counter_obj.handle_req(req);
     }

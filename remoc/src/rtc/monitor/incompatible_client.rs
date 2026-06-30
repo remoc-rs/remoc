@@ -7,7 +7,7 @@ use tracing::Level;
 use crate::{
     exec::time::Instant,
     rch::mpsc,
-    rtc::{DispatchDecision, Req, ReqEnum, ServerMonitor},
+    rtc::{DispatchDecision, RecvDecision, Req, ReqEnum, ReqReceiverMonitor, ServerMonitor},
 };
 
 /// Error returned by [`IncompatibleClientMonitor`] when too many requests fail
@@ -128,7 +128,7 @@ impl IncompatibleClientMonitor {
     }
 
     /// Handles a non-final request decode failure.
-    fn on_decode_error(&mut self, error: &mpsc::RecvError) -> DispatchDecision {
+    fn on_non_final_recv_error(&mut self, error: &mpsc::RecvError) -> DispatchDecision {
         log_at!(self.log_level, %error, "failed to receive request");
 
         let Some(limit) = self.limit else {
@@ -140,6 +140,17 @@ impl IncompatibleClientMonitor {
         } else {
             DispatchDecision::Drop
         }
+    }
+
+    /// Handles a non-final request decode failure for a [request receiver](crate::rtc::ReqReceiver).
+    fn on_non_final_req_recv_error(&mut self, error: &mpsc::RecvError) -> RecvDecision {
+        log_at!(self.log_level, %error, "failed to receive request");
+
+        let Some(limit) = self.limit else {
+            return RecvDecision::Drop;
+        };
+
+        if self.count_failure(limit) { RecvDecision::Pass } else { RecvDecision::Drop }
     }
 }
 
@@ -165,8 +176,25 @@ where
         &mut self, req: &'a Result<Option<Req<Value, Ref, RefMut>>, mpsc::RecvError>,
     ) -> BoxFuture<'a, DispatchDecision> {
         let decision = match req {
-            Err(err) if !err.is_final() => self.on_decode_error(err),
+            Err(err) if !err.is_final() => self.on_non_final_recv_error(err),
             _ => DispatchDecision::Pass,
+        };
+        future::ready(decision).boxed()
+    }
+}
+
+impl<Value, Ref, RefMut> ReqReceiverMonitor<Value, Ref, RefMut> for IncompatibleClientMonitor
+where
+    Value: ReqEnum,
+    Ref: ReqEnum,
+    RefMut: ReqEnum,
+{
+    fn pre_recv<'a>(
+        &mut self, req: &'a Result<Option<Req<Value, Ref, RefMut>>, mpsc::RecvError>,
+    ) -> BoxFuture<'a, RecvDecision> {
+        let decision = match req {
+            Err(err) if !err.is_final() => self.on_non_final_req_recv_error(err),
+            _ => RecvDecision::Pass,
         };
         future::ready(decision).boxed()
     }

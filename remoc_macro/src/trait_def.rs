@@ -478,6 +478,17 @@ impl TraitDef {
         let req_all = format_ident!("{}Req", &self.ident);
         let ty_generics_list = &ty_generics.params;
 
+        let (ty_generics_codec_default, _) = self.generics(GenericsArgs {
+            with_target: false,
+            with_codec: true,
+            with_codec_default: true,
+            with_lifetime: false,
+            with_send: false,
+            with_sync: false,
+            with_static: false,
+            with_assoc_types: true,
+        });
+
         let impl_generics_where_pred = &impl_generics_where.unwrap().predicates;
         let impl_generics_where_str = quote! { #impl_generics_where_pred }.to_string();
 
@@ -522,7 +533,7 @@ impl TraitDef {
 
         quote! {
             #[doc = #req_doc_all]
-            #vis type #req_all #ty_generics = ::remoc::rtc::Req<
+            #vis type #req_all #ty_generics_codec_default = ::remoc::rtc::Req<
                 #req_value #ty_generics,
                 #req_ref #ty_generics,
                 #req_ref_mut #ty_generics,

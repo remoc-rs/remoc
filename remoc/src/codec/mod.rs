@@ -60,7 +60,7 @@ pub(crate) struct ErrorMsg(pub String);
 
 impl fmt::Display for ErrorMsg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", &self.0)
+        write!(f, "{}", self.0)
     }
 }
 
@@ -101,7 +101,7 @@ impl SerializationError {
 
 impl fmt::Display for SerializationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", &self.0)
+        write!(f, "{}", self.0)
     }
 }
 
@@ -143,7 +143,7 @@ impl DeserializationError {
 
 impl fmt::Display for DeserializationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", &self.0)
+        write!(f, "{}", self.0)
     }
 }
 

@@ -202,7 +202,7 @@ pub struct Handle<T, Codec = codec::Default> {
 
 impl<T, Codec> fmt::Debug for Handle<T, Codec> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", &self.state)
+        write!(f, "{:?}", self.state)
     }
 }
 
@@ -439,7 +439,7 @@ where
     T: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", &**self)
+        write!(f, "{:?}", **self)
     }
 }
 
@@ -465,6 +465,6 @@ where
     T: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", &**self)
+        write!(f, "{:?}", **self)
     }
 }

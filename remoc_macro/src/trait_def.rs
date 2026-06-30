@@ -694,7 +694,7 @@ impl TraitDef {
         let client = self.client_ident();
         let server = format_ident!("{}Server", &ident);
 
-        let doc = format!("Server for [{}] taking the target object by value.", &ident);
+        let doc = format!("Server for [{}] taking the target object by value.", ident);
 
         let dispatch_value = if self.is_taking_value() {
             quote! { req.dispatch(target, err_tx.clone(), guard).await; }
@@ -823,7 +823,7 @@ impl TraitDef {
         let client = self.client_ident();
         let server = format_ident!("{}ServerRef", &ident);
 
-        let doc = format!("Server for [{}] taking the target object by reference.", &ident);
+        let doc = format!("Server for [{}] taking the target object by reference.", ident);
 
         let dispatch_ref = if self.is_taking_ref() {
             quote! { req.dispatch(target, err_tx.clone(), guard).await; }
@@ -936,7 +936,7 @@ impl TraitDef {
         let client = self.client_ident();
         let server = format_ident!("{}ServerRefMut", &ident);
 
-        let doc = format!("Server for [{}] taking the target object by mutable reference.", &ident);
+        let doc = format!("Server for [{}] taking the target object by mutable reference.", ident);
 
         let dispatch_ref = if self.is_taking_ref() {
             quote! { req.dispatch(target, err_tx.clone(), guard).await; }
@@ -1055,7 +1055,7 @@ impl TraitDef {
         let client = self.client_ident();
         let server = format_ident!("{}ServerShared", &ident);
 
-        let doc = format!("Server for [{}] taking the target object by shared reference.", &ident);
+        let doc = format!("Server for [{}] taking the target object by shared reference.", ident);
 
         let dispatch_ref = if self.is_taking_ref() {
             quote! { req.dispatch(&*target, err_tx, guard).await; }
@@ -1174,7 +1174,7 @@ impl TraitDef {
         let client = self.client_ident();
         let server = format_ident!("{}ServerSharedMut", &ident);
 
-        let doc = format!("Server for [{}] taking the target object by shared mutable reference.", &ident);
+        let doc = format!("Server for [{}] taking the target object by shared mutable reference.", ident);
 
         let dispatch_ref = if self.is_taking_ref() {
             quote! { req.dispatch(&*target, err_tx, guard).await; }
@@ -1298,7 +1298,7 @@ impl TraitDef {
         let client = self.client_ident();
         let server = format_ident!("{}ReqReceiver", &ident);
 
-        let doc = format!("Request receiver for [{}].", &ident);
+        let doc = format!("Request receiver for [{}].", ident);
 
         quote! {
             #[doc=#doc]
@@ -1472,7 +1472,7 @@ impl TraitDef {
             assoc_impl_items.append_all(quote! { type #n = #l; });
         }
 
-        let doc = format!("Remote client for [{}].\n\nCan be sent to a remote endpoint.", &ident);
+        let doc = format!("Remote client for [{}].\n\nCan be sent to a remote endpoint.", ident);
 
         // Allowing cloning if object is accessed by reference only.
         let clone = if (!self.is_taking_ref_mut() || self.clone) && !self.is_taking_value() {

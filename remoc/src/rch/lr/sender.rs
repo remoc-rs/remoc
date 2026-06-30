@@ -115,7 +115,7 @@ impl From<base::SendErrorKind> for SendErrorKind {
 
 impl<T> fmt::Display for SendError<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", &self.kind)
+        write!(f, "{}", self.kind)
     }
 }
 

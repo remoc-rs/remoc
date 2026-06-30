@@ -75,7 +75,7 @@ where
     Codec: codec::Codec,
 {
     let data: T = Default::default();
-    println!("data:\n{:?}", &data);
+    println!("data:\n{:?}", data);
 
     let mut buffer = Vec::new();
     <Codec as codec::Codec>::serialize(&mut buffer, &data).unwrap();

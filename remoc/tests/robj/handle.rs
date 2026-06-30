@@ -16,7 +16,7 @@ async fn simple() {
     let value = "test string".to_string();
 
     let local_handle = Handle::new(value.clone());
-    println!("Created handle: {:?}", &local_handle);
+    println!("Created handle: {:?}", local_handle);
 
     let _other_handle: Handle<_, codec::Default> = Handle::new(123);
 
@@ -24,7 +24,7 @@ async fn simple() {
     a_tx.send(local_handle).await.unwrap();
     println!("Receiving handle");
     let remote_handle = b_rx.recv().await.unwrap().unwrap();
-    println!("{:?}", &remote_handle);
+    println!("{:?}", remote_handle);
 
     match remote_handle.as_ref().await {
         Ok(_) => panic!("remote deref succeeded"),
@@ -36,11 +36,11 @@ async fn simple() {
     b_tx.send(remote_handle).await.unwrap();
     println!("Receiving handle");
     let local_handle = a_rx.recv().await.unwrap().unwrap();
-    println!("{:?}", &local_handle);
+    println!("{:?}", local_handle);
 
     println!("Changing handle type");
     let other_type_handle = local_handle.cast::<u32>();
-    println!("{:?}", &other_type_handle);
+    println!("{:?}", other_type_handle);
 
     match other_type_handle.as_ref().await {
         Ok(_) => panic!("mismatched type deref succeeded"),

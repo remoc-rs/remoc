@@ -114,8 +114,8 @@ impl fmt::Display for FetchError {
         match self {
             Self::Dropped => write!(f, "provider was dropped"),
             Self::Size(err) => write!(f, "{err}"),
-            Self::RemoteReceive(err) => write!(f, "receive error: {}", &err),
-            Self::RemoteConnect(err) => write!(f, "connect error: {}", &err),
+            Self::RemoteReceive(err) => write!(f, "receive error: {}", err),
+            Self::RemoteConnect(err) => write!(f, "connect error: {}", err),
         }
     }
 }

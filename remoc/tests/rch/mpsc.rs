@@ -379,7 +379,7 @@ async fn two_sender_conn_failure() {
                 if conn1.is_some() {
                     panic!("Send failed before connection drop");
                 }
-                println!("Send failed: {} with reason {:?}", &err, err.closed_reason());
+                println!("Send failed: {} with reason {:?}", err, err.closed_reason());
                 assert_eq!(err.closed_reason(), Some(ClosedReason::Failed));
             }
         }

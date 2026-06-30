@@ -211,6 +211,57 @@ pub fn sleep(duration: Duration) -> Sleep {
     Sleep::new(duration)
 }
 
+/// Monotonic clock backed by JavaScript's `performance.now()`.
+mod instant {
+    use std::time::Duration;
+    use wasm_bindgen::JsCast;
+    use web_sys::{Window, WorkerGlobalScope};
+
+    /// A measurement of a monotonically increasing clock.
+    ///
+    /// This is backed by JavaScript's [`performance.now()`], which is monotonic
+    /// within the current execution context.
+    ///
+    /// [`performance.now()`]: https://developer.mozilla.org/en-US/docs/Web/API/Performance/now
+    #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+    pub struct Instant {
+        millis: f64,
+    }
+
+    impl Instant {
+        /// Returns an instant corresponding to "now".
+        pub fn now() -> Self {
+            Self { millis: performance_now() }
+        }
+
+        /// Returns the amount of time elapsed since this instant.
+        pub fn elapsed(&self) -> Duration {
+            Self::now().duration_since(*self)
+        }
+
+        /// Returns the amount of time elapsed from `earlier` to this instant, or
+        /// zero duration if `earlier` is later than this instant.
+        pub fn duration_since(&self, earlier: Instant) -> Duration {
+            Duration::from_secs_f64(((self.millis - earlier.millis) / 1_000.0).max(0.0))
+        }
+    }
+
+    /// Returns the current value of `performance.now()` in milliseconds.
+    fn performance_now() -> f64 {
+        let global = js_sys::global();
+
+        if let Some(window) = global.dyn_ref::<Window>() {
+            window.performance().expect("performance not available").now()
+        } else if let Some(worker) = global.dyn_ref::<WorkerGlobalScope>() {
+            worker.performance().expect("performance not available").now()
+        } else {
+            panic!("unsupported JavaScript global: {global:?}");
+        }
+    }
+}
+
+pub use instant::Instant;
+
 pub mod error {
     use super::*;
 

@@ -18,7 +18,7 @@ pub mod task {
 }
 
 pub mod time {
-    pub use tokio::time::{Sleep, Timeout, sleep, timeout};
+    pub use tokio::time::{Instant, Sleep, Timeout, sleep, timeout};
 
     pub mod error {
         pub use tokio::time::error::Elapsed;

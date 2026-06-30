@@ -19,7 +19,7 @@ impl From<remoc::rtc::CallError> for IncreaseError {
 
 #[remoc::rtc::remote]
 pub trait Counter {
-    fn value(&self) -> impl Future<Output = Result<u32, remoc::rtc::CallError>> + Send + Sync;
+    fn value(&self) -> impl Future<Output = Result<u32, remoc::rtc::CallError>> + Send;
     fn watch(
         &mut self,
     ) -> impl ::core::future::Future<Output = Result<remoc::rch::watch::Receiver<u32>, remoc::rtc::CallError>>

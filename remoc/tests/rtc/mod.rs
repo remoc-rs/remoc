@@ -9,6 +9,7 @@ mod default;
 mod errors;
 mod generics;
 mod generics_non_clone;
+mod monitor;
 mod readonly;
 mod simple;
 mod simple_clone;

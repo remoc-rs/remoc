@@ -40,15 +40,15 @@ impl CounterObj {
         Codec: remoc::codec::Codec,
     {
         match req {
-            CounterReq::Value { __reply_tx } => {
+            remoc::rtc::Req::Ref(CounterReqRef::Value { __reply_tx }) => {
                 let _ = __reply_tx.send(Ok(self.value));
             }
-            CounterReq::Watch { __reply_tx } => {
+            remoc::rtc::Req::RefMut(CounterReqRefMut::Watch { __reply_tx }) => {
                 let (tx, rx) = remoc::rch::watch::channel(self.value);
                 self.watchers.push(tx);
                 let _ = __reply_tx.send(Ok(rx));
             }
-            CounterReq::Increase { __reply_tx, by } => {
+            remoc::rtc::Req::RefMut(CounterReqRefMut::Increase { __reply_tx, by }) => {
                 match self.value.checked_add(by) {
                     Some(new_value) => self.value = new_value,
                     None => {

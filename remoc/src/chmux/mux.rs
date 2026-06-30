@@ -514,7 +514,7 @@ where
             // PortCredits, ReceiveClose and ReceiveFinish messages can be received for port.
             free &= *remote_receiver_dropped;
         } else {
-            panic!("maybe_free_port called for port {} not in connected state.", &local_port);
+            panic!("maybe_free_port called for port {} not in connected state.", local_port);
         }
 
         if free {
@@ -803,13 +803,13 @@ where
                     self.ports.get_mut(&local_port)
                 {
                     if *sender_dropped {
-                        panic!("PortEvt SenderDropped more than once for port {}", &local_port);
+                        panic!("PortEvt SenderDropped more than once for port {}", local_port);
                     }
                     *sender_dropped = true;
                     send_msg(permit, MultiplexMsg::SendFinish { port: *remote_port });
                     self.maybe_free_port(local_port);
                 } else {
-                    panic!("PortEvt SenderDropped for port {} in invalid state", &local_port);
+                    panic!("PortEvt SenderDropped for port {} in invalid state", local_port);
                 }
             }
 
@@ -821,13 +821,13 @@ where
                     if *receiver_closed || *receiver_dropped {
                         panic!(
                             "PortEvt ReceiverClosed or ReceiverDropped more than once for port {}",
-                            &local_port
+                            local_port
                         );
                     }
                     *receiver_closed = true;
                     send_msg(permit, MultiplexMsg::ReceiveClose { port: *remote_port });
                 } else {
-                    panic!("PortEvt ReceiverClosed for non-connected port {}", &local_port);
+                    panic!("PortEvt ReceiverClosed for non-connected port {}", local_port);
                 }
             }
 
@@ -836,14 +836,14 @@ where
             GlobalEvt::Port(PortEvt::ReceiverDropped { local_port }) => match self.ports.get_mut(&local_port) {
                 Some(PortState::Connected { remote_port, receiver_dropped, .. }) => {
                     if *receiver_dropped {
-                        panic!("PortEvt ReceiverDropped more than once for port {}.", &local_port);
+                        panic!("PortEvt ReceiverDropped more than once for port {}.", local_port);
                     }
                     *receiver_dropped = true;
                     send_msg(permit, MultiplexMsg::ReceiveFinish { port: *remote_port });
                     self.maybe_free_port(local_port);
                 }
                 _ => {
-                    panic!("PortEvt ReceiverDropped for port {} in invalid state.", &local_port);
+                    panic!("PortEvt ReceiverDropped for port {} in invalid state.", local_port);
                 }
             },
 
@@ -956,7 +956,7 @@ where
                         _ => {
                             return Err(protocol_err(format!(
                                 "received data exceeds maximum chunk size on port {}",
-                                &port
+                                port
                             )));
                         }
                     };
@@ -969,7 +969,7 @@ where
                 } else {
                     return Err(protocol_err(format!(
                         "received data for non-connected or finished local port {}",
-                        &port
+                        port
                     )));
                 }
             }
@@ -998,7 +998,7 @@ where
                             _ => {
                                 return Err(protocol_err(format!(
                                     "received ports exceeds maximum chunk size on port {}",
-                                    &port
+                                    port
                                 )));
                             }
                         };
@@ -1022,7 +1022,7 @@ where
                 } else {
                     return Err(protocol_err(format!(
                         "received port data for non-connected or finished local port {}",
-                        &port
+                        port
                     )));
                 }
             }
@@ -1034,7 +1034,7 @@ where
                 } else {
                     return Err(protocol_err(format!(
                         "received port credits message for port {} not in connected state",
-                        &port
+                        port
                     )));
                 }
             }
@@ -1050,14 +1050,14 @@ where
                         _ => {
                             return Err(protocol_err(format!(
                                 "received SendFinish message for local port {} more than once",
-                                &port
+                                port
                             )));
                         }
                     }
                 } else {
                     return Err(protocol_err(format!(
                         "received SendFinish message for local port {} not in connected state",
-                        &port
+                        port
                     )));
                 }
             }
@@ -1087,13 +1087,13 @@ where
                     } else {
                         return Err(protocol_err(format!(
                             "received more than one ReceiveClose message for port {}",
-                            &port
+                            port
                         )));
                     }
                 } else {
                     return Err(protocol_err(format!(
                         "received ReceiveClose message for port {} not in connected state",
-                        &port
+                        port
                     )));
                 }
             }
@@ -1125,7 +1125,7 @@ where
                 } else {
                     return Err(protocol_err(format!(
                         "received ReceiveFinish message for port {} not in connected state",
-                        &port
+                        port
                     )));
                 }
             }

@@ -79,7 +79,7 @@ postcard = { version = "1.0", features = ["use-std"], optional = true }
 # Web support
 getrandom = { version = "0.4", features = ["wasm_js"], optional = true }
 js-sys = { version = "0.3.72", optional = true }
-web-sys = { version = "0.3.72", features = ["Window", "WorkerGlobalScope"], optional = true }
+web-sys = { version = "0.3.72", features = ["Window", "WorkerGlobalScope", "Performance"], optional = true }
 wasm-bindgen = { version = "0.2.95", optional = true }
 wasm-bindgen-futures = { version = "0.4.45", optional = true }
 

@@ -51,7 +51,7 @@ async fn basic() {
     loop_transport!(0, a_tx, a_rx, b_tx, b_rx);
     let ((a_mux, a_client, a_server), (b_mux, b_client, mut b_server)) =
         try_join(chmux::ChMux::new(cfg(), a_tx, a_rx), chmux::ChMux::new(cfg2(), b_tx, b_rx)).await.unwrap();
-    println!("Connected: a_mux={:?}, b_mux={:?}", &a_mux, &b_mux);
+    println!("Connected: a_mux={:?}, b_mux={:?}", a_mux, b_mux);
 
     let (a_mux_done_tx, a_mux_done_rx) = oneshot::channel();
     exec::spawn(
@@ -111,7 +111,7 @@ async fn basic() {
     {
         println!("A client connecting 1...");
         let ret: Result<(chmux::Sender, chmux::Receiver), _> = a_client.connect().await;
-        println!("A client connect result: {:?}", &ret);
+        println!("A client connect result: {:?}", ret);
     }
 
     println!("Delay test...");
@@ -124,11 +124,11 @@ async fn basic() {
     let mut n_recv = 0;
     while let Some(msg) = rx.recv().await.unwrap() {
         let s = String::from_utf8(msg.into()).unwrap();
-        println!("A client received: {}", &s);
+        println!("A client received: {}", s);
         n_recv += 1;
 
         println!("A client replying...");
-        tx.send(format!("Reply: {}", &s).into()).await.unwrap();
+        tx.send(format!("Reply: {}", s).into()).await.unwrap();
         println!("A client replied");
     }
     if n_recv != N_MSG {
@@ -246,7 +246,7 @@ async fn hangup() {
     loop_transport!(0, a_tx, a_rx, b_tx, b_rx);
     let ((a_mux, a_client, a_server), (b_mux, b_client, mut b_server)) =
         try_join(chmux::ChMux::new(cfg(), a_tx, a_rx), chmux::ChMux::new(cfg2(), b_tx, b_rx)).await.unwrap();
-    println!("Connected: a_mux={:?}, b_mux={:?}", &a_mux, &b_mux);
+    println!("Connected: a_mux={:?}, b_mux={:?}", a_mux, b_mux);
 
     let (a_mux_done_tx, a_mux_done_rx) = oneshot::channel();
     exec::spawn(

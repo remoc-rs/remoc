@@ -72,11 +72,11 @@ async fn big_msg() {
         if let Err(err) = &res {
             println!("Send error: {err}");
             match &err.kind {
-                SendErrorKind::Serialize(ser) if ser.0.is::<StreamingUnavailable>() => {
-                    if !remoc::exec::are_threads_available().await {
-                        println!("Okay, because no threads available");
-                        return;
-                    }
+                SendErrorKind::Serialize(ser)
+                    if ser.0.is::<StreamingUnavailable>() && !remoc::exec::are_threads_available().await =>
+                {
+                    println!("Okay, because no threads available");
+                    return;
                 }
                 _ => (),
             }

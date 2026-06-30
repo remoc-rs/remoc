@@ -314,21 +314,6 @@ impl TraitMethod {
         quote! { #docs_attrs #ident {#entries} , }
     }
 
-    /// Conversion clause for `impl From<#from_ty>`.
-    pub fn impl_from_clause(&self, from_ty: &Ident) -> TokenStream {
-        let ident = &self.ident;
-        let enum_ident = to_pascal_case(ident);
-
-        // Build enum argument list.
-        let mut entries = quote! { __reply_tx, };
-        for NamedArg { ident: arg_ident, .. } in &self.args {
-            entries.append_all(quote! { #arg_ident, });
-        }
-
-        let entry = quote! { #enum_ident {#entries} };
-        quote! { #from_ty :: #entry => Self :: #entry , }
-    }
-
     /// Enum match discriminator and dispatch code.
     pub fn dispatch_discriminator(&self) -> TokenStream {
         let ident = &self.ident;
@@ -349,14 +334,14 @@ impl TraitMethod {
                     biased;
                     () = __reply_tx.closed() => (),
                     result = __target.#ident(#args) => {
-                        ::remoc::rtc::send_reply(__reply_tx, &__err_tx, result).await;
+                        ::remoc::rtc::send_reply(__reply_tx, &__err_tx, __guard, result).await;
                     }
                 }
             }
         } else {
             quote! {
                 let result = __target.#ident(#args).await;
-                ::remoc::rtc::send_reply(__reply_tx, &__err_tx, result).await;
+                ::remoc::rtc::send_reply(__reply_tx, &__err_tx, __guard, result).await;
             }
         };
 
@@ -365,6 +350,15 @@ impl TraitMethod {
             Self :: #enum_ident { #args __reply_tx } => {
                 async move { #call }.boxed()
             },
+        }
+    }
+
+    /// Match clause returning the method name for the `ReqEnum::method_name` implementation.
+    pub fn method_name_clause(&self) -> TokenStream {
+        let enum_ident = to_pascal_case(&self.ident);
+        let name = self.ident.to_string();
+        quote! {
+            Self :: #enum_ident { .. } => #name,
         }
     }
 
@@ -396,11 +390,30 @@ impl TraitMethod {
             async fn #ident (#self_ref, #args) -> #ret_ty {
                 let (mut reply_tx, reply_rx) = ::remoc::rch::oneshot::channel();
                 reply_tx.set_max_item_size(self.max_reply_size);
+
                 let req_value = #req_enum :: #req_case { __reply_tx: reply_tx, #entries };
                 let req = ::remoc::rtc::Req::#req_type(req_value);
+
+                let mut guard = match self.monitor.pre_call(&req).await {
+                    ::remoc::rtc::CallDecision::Pass => ::std::boxed::Box::new(::remoc::rtc::DefaultGuard),
+                    ::remoc::rtc::CallDecision::Guard(guard) => guard,
+                    ::remoc::rtc::CallDecision::Drop => return Err(::remoc::rtc::CallError::Dropped.into()),
+                };
+
                 self.req_tx.send(req).await.map_err(::remoc::rtc::CallError::from)?;
-                let reply = reply_rx.await.map_err(::remoc::rtc::CallError::from)?;
-                reply
+
+                match reply_rx.await {
+                    Ok(reply) => {
+                        if reply.is_err() {
+                            guard.failed();
+                        }
+                        reply
+                    }
+                    Err(err) => {
+                        guard.reply_failed(&err);
+                        Err(::remoc::rtc::CallError::from(err).into())
+                    }
+                }
             }
         }
     }

@@ -292,9 +292,10 @@ async fn recv_erased(inner: &mut RecvInner) -> Result<Option<Box<dyn Any + Send>
 
                     let pds_ref =
                         PortDeserializer::start(inner.receiver.port_allocator(), inner.receiver.storage());
-                    let item = (inner.deserialize)(&mut data.reader()).map_err(RecvError::Deserialize)?;
-                    let pds = PortDeserializer::finish(pds_ref);
+                    let item_res = (inner.deserialize)(&mut data.reader());
                     inner.data = DataSource::None;
+                    let item = item_res.map_err(RecvError::Deserialize)?;
+                    let pds = PortDeserializer::finish(pds_ref);
                     inner.item = Some(item);
                     inner.port_deser = Some(pds);
                 }

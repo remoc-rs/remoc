@@ -9,9 +9,29 @@
 //!
 //! ### Rate limiting
 //!
-//! To limit the used bandwidth a minimum delay between subsequent value transmissions
-//! to the remote endpoint can be [configured](`Sender::set_rate_limit`). By default
-//! rate limiting is disabled and all value updates are sent immediately.
+//! To limit the used bandwidth a minimum delay between subsequent value
+//! transmissions to the remote endpoint can be configured. Intermediate values
+//! are coalesced, i.e. only the most recent value is transmitted once the delay
+//! has elapsed, and the latest value is always eventually delivered. The final
+//! value is transmitted immediately when the sender is dropped.
+//!
+//! Rate limiting can be requested from both ends of the channel:
+//!
+//!   * the sending side via [`Sender::set_rate_limit`] (or
+//!     [`Forwarding::set_rate_limit`]), and
+//!   * the receiving side via [`Receiver::set_rate_limit`].
+//!
+//! The receiver-requested rate limit is transmitted back to the sending endpoint,
+//! where the actual throttling takes place. When both sides configure a rate
+//! limit, the effective minimum delay is the **maximum** of the two values, so
+//! that the bandwidth limits requested by both endpoints are honored.
+//!
+//! When multiple receivers share the same channel (for example clones of a
+//! received [`Receiver`]), their individually requested rate limits are combined
+//! by taking the **minimum**; a receiver that has not configured a rate limit
+//! contributes [`Duration::ZERO`] and thus disables throttling for that channel.
+//!
+//! By default rate limiting is disabled and all value updates are sent immediately.
 //!
 //! # Alternatives
 //!
@@ -64,16 +84,19 @@ use std::{
     future::{self, Future},
     ops::Deref,
     pin::Pin,
-    sync::{Arc, Mutex},
+    sync::{Arc, Weak},
     task::{Context, Poll, ready},
     time::Duration,
 };
 
 use super::{DEFAULT_MAX_ITEM_SIZE, RemoteSendError, base};
 use crate::{
-    RemoteSend, chmux, codec, exec,
-    exec::time::{Instant, sleep},
-    rch::BACKCHANNEL_MSG_ERROR,
+    RemoteSend, chmux, codec,
+    exec::{
+        self,
+        time::{Instant, sleep},
+    },
+    rch::{BACKCHANNEL_MSG_ERROR, BACKCHANNEL_MSG_RATE_LIMIT},
 };
 
 mod receiver;
@@ -111,16 +134,20 @@ where
 {
     let (tx, rx) = tokio::sync::watch::channel(Ok(init));
     let (remote_send_err_tx, remote_send_err_rx) = tokio::sync::mpsc::unbounded_channel();
-    let rate_limit = Arc::new(Mutex::new(default_rate_limit()));
+    let (sender_rate_limit_tx, sender_rate_limit_rx) = tokio::sync::watch::channel(default_rate_limit());
+    let (receiver_rate_limit_tx, receiver_rate_limit_rx) = rate_limit_channel(default_rate_limit());
 
     let sender = Sender::new(
         tx,
         remote_send_err_tx.clone(),
         remote_send_err_rx,
         DEFAULT_MAX_ITEM_SIZE,
-        rate_limit.clone(),
+        sender_rate_limit_tx,
+        sender_rate_limit_rx.clone(),
+        receiver_rate_limit_tx.clone(),
+        receiver_rate_limit_rx,
     );
-    let receiver = Receiver::new(rx, remote_send_err_tx, None, rate_limit);
+    let receiver = Receiver::new(rx, remote_send_err_tx, None, sender_rate_limit_rx, receiver_rate_limit_tx);
     (sender, receiver)
 }
 
@@ -135,7 +162,7 @@ where
 {
     let init = local_rx.borrow_and_update().clone();
     let (mut tx, rx) = channel(init);
-    let rate_limit = tx.inner.as_ref().unwrap().rate_limit.clone();
+    let sender_rate_limit_tx = tx.inner.as_ref().unwrap().sender_rate_limit_tx.clone();
 
     let hnd = exec::spawn(async move {
         loop {
@@ -162,7 +189,7 @@ where
         tx.check()
     });
 
-    (Forwarding { hnd, rate_limit }, rx)
+    (Forwarding { hnd, sender_rate_limit_tx }, rx)
 }
 
 /// Handle to obtain the result of forwarding a local receiver remotely by [`forward`].
@@ -174,7 +201,7 @@ where
 /// Dropping this *does not* stop forwarding.
 pub struct Forwarding {
     hnd: exec::task::JoinHandle<Result<(), SendError>>,
-    rate_limit: Arc<Mutex<Duration>>,
+    sender_rate_limit_tx: tokio::sync::watch::Sender<Duration>,
 }
 
 impl fmt::Debug for Forwarding {
@@ -205,17 +232,21 @@ impl Forwarding {
     ///
     /// By default this is [`Duration::ZERO`], thus rate limiting is disabled.
     pub fn rate_limit(&self) -> Duration {
-        *self.rate_limit.lock().unwrap()
+        *self.sender_rate_limit_tx.borrow()
     }
 
     /// Sets the minimum delay between sending value updates.
     ///
-    /// Transmission of value updates to remote endpoints is throttled accordingly.
-    /// It is guaranteed that the latest value will be transmitted with a delay
-    /// of at most `rate_limit`. The final value is transmitted immediately when
-    /// the sender is dropped.
+    /// Transmission of value updates to remote endpoints is throttled accordingly,
+    /// coalescing intermediate values. It is guaranteed that the latest value will
+    /// eventually be transmitted; the final value is transmitted immediately when
+    /// the forwarding is stopped or the sender is dropped.
+    ///
+    /// If the receiver also configures a rate limit, the effective minimum delay
+    /// is the maximum of both values. See the
+    /// [module-level documentation](self#rate-limiting) for details.
     pub fn set_rate_limit(&mut self, rate_limit: Duration) {
-        *self.rate_limit.lock().unwrap() = rate_limit;
+        self.sender_rate_limit_tx.send_replace(rate_limit);
     }
 }
 
@@ -246,7 +277,8 @@ where
 async fn send_impl<T, Codec>(
     mut rx: tokio::sync::watch::Receiver<Result<T, RecvError>>, raw_tx: chmux::Sender,
     mut raw_rx: chmux::Receiver, remote_send_err_tx: tokio::sync::mpsc::UnboundedSender<RemoteSendError>,
-    max_item_size: usize, rate_limit: Arc<Mutex<Duration>>,
+    max_item_size: usize, mut sender_rate_limit_rx: tokio::sync::watch::Receiver<Duration>,
+    mut receiver_rate_limit_tx: RateLimitSender,
 ) where
     T: Serialize + Send + Clone + 'static,
     Codec: codec::Codec,
@@ -262,9 +294,9 @@ async fn send_impl<T, Codec>(
 
     // Process events.
     while !closed {
+        let rate_limit = sender_rate_limit_rx.borrow_and_update().max(receiver_rate_limit_tx.get());
         let pending_send_trigger = async {
             if send_pending {
-                let rate_limit = *rate_limit.lock().unwrap();
                 if let Some(last_send) = last_send
                     && rate_limit > Duration::ZERO
                 {
@@ -285,9 +317,17 @@ async fn send_impl<T, Codec>(
             // Back channel message from remote endpoint.
             backchannel_msg = raw_rx.recv() => {
                 match backchannel_msg {
-                    Ok(Some(mut msg)) if msg.remaining() >= 1 => {
-                        if msg.get_u8() == BACKCHANNEL_MSG_ERROR {
-                            let _ = remote_send_err_tx.send(RemoteSendError::Forward);
+                    Ok(Some(mut msg)) => {
+                        match msg.try_get_u8() {
+                            Ok(BACKCHANNEL_MSG_ERROR) => {
+                                let _ = remote_send_err_tx.send(RemoteSendError::Forward);
+                            }
+                            Ok(BACKCHANNEL_MSG_RATE_LIMIT) => {
+                                if let Ok(ns) = msg.try_get_u128_le() {
+                                    receiver_rate_limit_tx.set(Duration::from_nanos_u128(ns));
+                                }
+                            }
+                            _ => (),
                         }
                     }
                     _ => closed = true,
@@ -297,6 +337,9 @@ async fn send_impl<T, Codec>(
 
             // Rate-limit delay has passed.
             () = pending_send_trigger => true,
+
+            // Sender rate-limit has changed.
+            Ok(()) = sender_rate_limit_rx.changed() => false,
 
             // Value was updated and needs to be sent to remote endpoint.
             changed = rx.changed() => {
@@ -329,7 +372,7 @@ async fn send_impl<T, Codec>(
 async fn recv_impl<T, Codec>(
     tx: tokio::sync::watch::Sender<Result<T, RecvError>>, mut raw_tx: chmux::Sender, raw_rx: chmux::Receiver,
     mut remote_send_err_rx: tokio::sync::mpsc::UnboundedReceiver<RemoteSendError>,
-    mut current_err: Option<RemoteSendError>, max_item_size: usize,
+    mut current_err: Option<RemoteSendError>, max_item_size: usize, mut rate_limit_rx: RateLimitReceiver,
 ) where
     T: DeserializeOwned + Send + 'static,
     Codec: codec::Codec,
@@ -337,6 +380,9 @@ async fn recv_impl<T, Codec>(
     // Decode raw received data using remote receiver.
     let mut remote_rx = base::Receiver::<Result<T, RecvError>, Codec>::new(raw_rx);
     remote_rx.set_max_item_size(max_item_size);
+
+    // Rate limiting signaling to sender.
+    let mut rate_limit = None;
 
     // Process events.
     loop {
@@ -353,6 +399,17 @@ async fn recv_impl<T, Codec>(
             () = futures::future::ready(()), if current_err.is_some() => {
                 let _ = raw_tx.send(vec![BACKCHANNEL_MSG_ERROR].into()).await;
                 current_err = None;
+            }
+
+            // Rate limit changed; update sender via back channel.
+            Ok(()) = rate_limit_rx.changed() => {
+                let new_rate_limit = rate_limit_rx.get_and_update();
+                if rate_limit != Some(new_rate_limit) {
+                    let mut msg = vec![BACKCHANNEL_MSG_RATE_LIMIT];
+                    msg.extend(new_rate_limit.as_nanos().to_le_bytes());
+                    let _ = raw_tx.send(msg.into()).await;
+                    rate_limit = Some(new_rate_limit);
+                }
             }
 
             // Data received from remote endpoint.
@@ -374,6 +431,71 @@ async fn recv_impl<T, Codec>(
                 }
             }
         }
+    }
+}
+
+/// Create channel for combining rate limits of multiple receivers.
+pub(crate) fn rate_limit_channel(rate_limit: Duration) -> (RateLimitSender, RateLimitReceiver) {
+    let current = Arc::new(rate_limit);
+    let (tx, rx) = tokio::sync::watch::channel(vec![Arc::downgrade(&current)]);
+    (RateLimitSender { tx, current }, RateLimitReceiver(rx))
+}
+
+/// Rate limit sender beloning to a watch channel receiver.
+#[derive(Clone)]
+pub(crate) struct RateLimitSender {
+    tx: tokio::sync::watch::Sender<Vec<Weak<Duration>>>,
+    current: Arc<Duration>,
+}
+
+impl RateLimitSender {
+    /// Get the rate limit.
+    pub fn get(&self) -> Duration {
+        *self.current
+    }
+
+    /// Set the rate limit.
+    pub fn set(&mut self, rate_limit: Duration) {
+        self.current = Arc::new(Duration::ZERO);
+
+        let rate_limit = Arc::new(rate_limit);
+        self.tx.send_modify(|limits| {
+            limits.retain(|weak| weak.strong_count() > 0);
+            limits.push(Arc::downgrade(&rate_limit));
+        });
+
+        self.current = rate_limit
+    }
+}
+
+impl Drop for RateLimitSender {
+    fn drop(&mut self) {
+        self.current = Arc::new(Duration::ZERO);
+        self.tx.send_modify(|limits| limits.retain(|weak| weak.strong_count() > 0));
+    }
+}
+
+/// Rate limit receiver, combining the requested rate limits.
+pub(crate) struct RateLimitReceiver(tokio::sync::watch::Receiver<Vec<Weak<Duration>>>);
+
+impl RateLimitReceiver {
+    /// Wait for rate limit to change.
+    pub async fn changed(&mut self) -> Result<(), tokio::sync::watch::error::RecvError> {
+        self.0.changed().await
+    }
+
+    fn compute(weaks: &[Weak<Duration>]) -> Duration {
+        weaks.iter().filter_map(|weak| weak.upgrade()).map(|limit| *limit).min().unwrap_or_default()
+    }
+
+    /// Get lowest rate limit of all senders.
+    pub fn get(&self) -> Duration {
+        Self::compute(&self.0.borrow())
+    }
+
+    /// Get lowest rate limit of all senders and mark as seen.
+    pub fn get_and_update(&mut self) -> Duration {
+        Self::compute(&self.0.borrow_and_update())
     }
 }
 

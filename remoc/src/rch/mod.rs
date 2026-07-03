@@ -163,6 +163,9 @@ pub(crate) const BACKCHANNEL_MSG_CLOSE: u8 = 0x01;
 /// Back channel message that error has occurred.
 pub(crate) const BACKCHANNEL_MSG_ERROR: u8 = 0x02;
 
+/// Back channel message that rate limit has changed.
+pub(crate) const BACKCHANNEL_MSG_RATE_LIMIT: u8 = 0x03;
+
 /// Remote sending error.
 #[derive(Clone)]
 pub(crate) enum RemoteSendError {

@@ -755,3 +755,181 @@ async fn sender_drop_receiver_changed() {
     // The last value before close is still observable via `borrow()`.
     assert_eq!(*rx.borrow().unwrap(), 2);
 }
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn rate_limit_default_and_set() {
+    crate::init();
+
+    // By default rate limiting is disabled.
+    let (mut tx, _rx): (watch::Sender<i16>, watch::Receiver<i16>) = watch::channel(0i16);
+    assert_eq!(tx.rate_limit(), Duration::ZERO);
+
+    // The rate limit can be changed and read back.
+    tx.set_rate_limit(Duration::from_millis(50));
+    assert_eq!(tx.rate_limit(), Duration::from_millis(50));
+
+    // A subscribed receiver shares the same rate limit state.
+    tx.set_rate_limit(Duration::from_millis(75));
+    assert_eq!(tx.rate_limit(), Duration::from_millis(75));
+}
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn rate_limit_coalesces_burst() {
+    crate::init();
+    let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<watch::Receiver<i32>>().await;
+
+    let rate_limit = Duration::from_millis(100);
+    let end_value = 1000;
+
+    println!("Sending remote watch channel receiver");
+    let (mut tx, rx) = watch::channel(0);
+    tx.set_rate_limit(rate_limit);
+    assert_eq!(tx.rate_limit(), rate_limit);
+
+    a_tx.send(rx).await.unwrap();
+    println!("Receiving remote watch channel receiver");
+    let mut rx = b_rx.recv().await.unwrap().unwrap();
+
+    let recv_task = exec::spawn(async move {
+        let mut count = 0u32;
+        let mut last = *rx.borrow_and_update().unwrap();
+        while rx.changed().await.is_ok() {
+            last = *rx.borrow_and_update().unwrap();
+            count += 1;
+            println!("Received update #{count}: {last}");
+        }
+        (count, last)
+    });
+
+    // Send a rapid burst of updates with no delay in between.
+    println!("Sending burst of {end_value} updates");
+    for value in 1..=end_value {
+        tx.send(value).unwrap();
+    }
+
+    // Give the rate limiter time to flush the final value.
+    sleep(rate_limit * 5).await;
+
+    tx.check().unwrap();
+    drop(tx);
+
+    println!("Waiting for receive task");
+    let (count, last) = recv_task.await.unwrap();
+    println!("Total received updates: {count}, last value: {last}");
+
+    // The final value must always be delivered.
+    assert_eq!(last, end_value);
+
+    // Rate limiting must coalesce the burst into far fewer updates than were sent.
+    assert!(count < 10, "expected coalescing, but got {count} updates for {end_value} sends");
+}
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn rate_limit_throttles_rate() {
+    crate::init();
+    let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<watch::Receiver<i32>>().await;
+
+    let rate_limit = Duration::from_millis(100);
+    let send_interval = Duration::from_millis(10);
+    let end_value = 100;
+
+    println!("Sending remote watch channel receiver");
+    let (mut tx, rx) = watch::channel(0);
+    tx.set_rate_limit(rate_limit);
+
+    a_tx.send(rx).await.unwrap();
+    println!("Receiving remote watch channel receiver");
+    let mut rx = b_rx.recv().await.unwrap().unwrap();
+
+    let recv_task = exec::spawn(async move {
+        let mut count = 0u32;
+        let mut last = *rx.borrow_and_update().unwrap();
+        while rx.changed().await.is_ok() {
+            last = *rx.borrow_and_update().unwrap();
+            count += 1;
+        }
+        (count, last)
+    });
+
+    // Send updates continuously at a rate faster than the rate limit.
+    // Total sending time is end_value * send_interval = ~1000ms, spanning ~10 windows.
+    println!("Sending {end_value} updates spaced {send_interval:?} apart");
+    for value in 1..=end_value {
+        tx.send(value).unwrap();
+        sleep(send_interval).await;
+    }
+
+    // Give the rate limiter time to flush the final value.
+    sleep(rate_limit * 5).await;
+
+    tx.check().unwrap();
+    drop(tx);
+
+    println!("Waiting for receive task");
+    let (count, last) = recv_task.await.unwrap();
+    println!("Total received updates: {count}, last value: {last}");
+
+    // The final value must always be delivered.
+    assert_eq!(last, end_value);
+
+    // The observed update rate must be throttled to roughly one per rate limit window,
+    // i.e. far fewer than the number of values sent, but more than one.
+    assert!(count > 1, "expected multiple throttled updates, got {count}");
+    assert!(count < (end_value / 2) as u32, "expected throttling, but got {count} updates for {end_value} sends");
+}
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn rate_limit_survives_sender_transport() {
+    crate::init();
+    let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<watch::Sender<i32>>().await;
+
+    let rate_limit = Duration::from_millis(100);
+    let end_value = 1000;
+
+    // Configure the rate limit before transporting the sender.
+    let (mut tx, rx) = watch::channel(0);
+    tx.set_rate_limit(rate_limit);
+
+    println!("Sending remote watch channel sender");
+    a_tx.send(tx).await.unwrap();
+    println!("Receiving remote watch channel sender");
+    let mut remote_tx = b_rx.recv().await.unwrap().unwrap();
+
+    // The rate limit must survive serialization/transport.
+    assert_eq!(remote_tx.rate_limit(), rate_limit);
+
+    let mut rx = rx;
+    let recv_task = exec::spawn(async move {
+        let mut count = 0u32;
+        let mut last = *rx.borrow_and_update().unwrap();
+        while rx.changed().await.is_ok() {
+            last = *rx.borrow_and_update().unwrap();
+            count += 1;
+        }
+        (count, last)
+    });
+
+    // Send a rapid burst from the transported sender.
+    println!("Sending burst of {end_value} updates from transported sender");
+    for value in 1..=end_value {
+        remote_tx.send(value).unwrap();
+    }
+
+    // Give the rate limiter time to flush the final value.
+    sleep(rate_limit * 5).await;
+
+    remote_tx.check().unwrap();
+    drop(remote_tx);
+
+    println!("Waiting for receive task");
+    let (count, last) = recv_task.await.unwrap();
+    println!("Total received updates: {count}, last value: {last}");
+
+    // The final value must always be delivered and the burst coalesced.
+    assert_eq!(last, end_value);
+    assert!(count < 10, "expected coalescing, but got {count} updates for {end_value} sends");
+}

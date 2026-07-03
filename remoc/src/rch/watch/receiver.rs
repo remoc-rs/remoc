@@ -6,7 +6,9 @@ use std::{
     marker::PhantomData,
     mem,
     pin::Pin,
+    sync::{Arc, Mutex},
     task::{Context, Poll},
+    time::Duration,
 };
 use tokio_util::sync::ReusableBoxFuture;
 
@@ -15,7 +17,7 @@ use super::{
         DEFAULT_MAX_ITEM_SIZE, RemoteSendError,
         base::{self, PortDeserializer, PortSerializer},
     },
-    Ref,
+    Ref, default_max_item_size,
 };
 use crate::{RemoteSend, chmux, codec};
 
@@ -97,6 +99,7 @@ pub struct Receiver<T, Codec = codec::Default, const MAX_ITEM_SIZE: usize = DEFA
     rx: tokio::sync::watch::Receiver<Result<T, RecvError>>,
     remote_send_err_tx: tokio::sync::mpsc::UnboundedSender<RemoteSendError>,
     remote_max_item_size: Option<usize>,
+    rate_limit: Arc<Mutex<Duration>>,
     _codec: PhantomData<Codec>,
 }
 
@@ -116,7 +119,7 @@ pub(crate) struct TransportedReceiver<T, Codec> {
     /// Data codec.
     codec: PhantomData<Codec>,
     /// Maximum item size.
-    #[serde(default)]
+    #[serde(default = "default_max_item_size")]
     max_item_size: u64,
 }
 
@@ -140,9 +143,9 @@ impl<T, Codec, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, MAX_ITEM_SIZE> {
     pub(crate) fn new(
         rx: tokio::sync::watch::Receiver<Result<T, RecvError>>,
         remote_send_err_tx: tokio::sync::mpsc::UnboundedSender<RemoteSendError>,
-        remote_max_item_size: Option<usize>,
+        remote_max_item_size: Option<usize>, rate_limit: Arc<Mutex<Duration>>,
     ) -> Self {
-        Self { rx, remote_send_err_tx, remote_max_item_size, _codec: PhantomData }
+        Self { rx, remote_send_err_tx, remote_max_item_size, rate_limit, _codec: PhantomData }
     }
 
     /// Returns a reference to the most recently received value.
@@ -233,6 +236,7 @@ impl<T, Codec, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, MAX_ITEM_SIZE> {
             ),
             remote_send_err_tx: self.remote_send_err_tx.clone(),
             remote_max_item_size: self.remote_max_item_size,
+            rate_limit: self.rate_limit.clone(),
             _codec: PhantomData,
         }
     }
@@ -267,6 +271,7 @@ where
         let mut rx = self.rx.clone();
         let data = rx.borrow_and_update().clone();
         let remote_send_err_tx = self.remote_send_err_tx.clone();
+        let rate_limit = self.rate_limit.clone();
 
         let port = PortSerializer::connect(|connect| {
             async move {
@@ -279,7 +284,8 @@ where
                     }
                 };
 
-                super::send_impl::<T, Codec>(rx, raw_tx, raw_rx, remote_send_err_tx, MAX_ITEM_SIZE).await;
+                super::send_impl::<T, Codec>(rx, raw_tx, raw_rx, remote_send_err_tx, MAX_ITEM_SIZE, rate_limit)
+                    .await;
             }
             .boxed()
         })?;
@@ -337,7 +343,11 @@ where
             .boxed()
         })?;
 
-        Ok(Self::new(rx, remote_send_err_tx, Some(max_item_size)))
+        // A once transported receiver will only send values when forwarding,
+        // for which it would be redundant to apply rate limiting.
+        let rate_limit = Arc::new(Mutex::new(Duration::ZERO));
+
+        Ok(Self::new(rx, remote_send_err_tx, Some(max_item_size), rate_limit))
     }
 }
 

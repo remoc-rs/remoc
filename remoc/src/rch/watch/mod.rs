@@ -7,6 +7,12 @@
 //! This has similar functionality as [tokio::sync::watch] with the additional
 //! ability to work over remote connections.
 //!
+//! ### Rate limiting
+//!
+//! To limit the used bandwidth a minimum delay between subsequent value transmissions
+//! to the remote endpoint can be [configured](`Sender::set_rate_limit`). By default
+//! rate limiting is disabled and all value updates are sent immediately.
+//!
 //! # Alternatives
 //!
 //! If your endpoints need the ability to change the value and synchronize the changes
@@ -55,14 +61,20 @@ use futures::FutureExt;
 use serde::{Serialize, de::DeserializeOwned};
 use std::{
     fmt,
-    future::Future,
+    future::{self, Future},
     ops::Deref,
     pin::Pin,
+    sync::{Arc, Mutex},
     task::{Context, Poll, ready},
+    time::Duration,
 };
 
 use super::{DEFAULT_MAX_ITEM_SIZE, RemoteSendError, base};
-use crate::{RemoteSend, chmux, codec, exec, rch::BACKCHANNEL_MSG_ERROR};
+use crate::{
+    RemoteSend, chmux, codec, exec,
+    exec::time::{Instant, sleep},
+    rch::BACKCHANNEL_MSG_ERROR,
+};
 
 mod receiver;
 mod sender;
@@ -99,9 +111,16 @@ where
 {
     let (tx, rx) = tokio::sync::watch::channel(Ok(init));
     let (remote_send_err_tx, remote_send_err_rx) = tokio::sync::mpsc::unbounded_channel();
+    let rate_limit = Arc::new(Mutex::new(default_rate_limit()));
 
-    let sender = Sender::new(tx, remote_send_err_tx.clone(), remote_send_err_rx, DEFAULT_MAX_ITEM_SIZE);
-    let receiver = Receiver::new(rx, remote_send_err_tx, None);
+    let sender = Sender::new(
+        tx,
+        remote_send_err_tx.clone(),
+        remote_send_err_rx,
+        DEFAULT_MAX_ITEM_SIZE,
+        rate_limit.clone(),
+    );
+    let receiver = Receiver::new(rx, remote_send_err_tx, None, rate_limit);
     (sender, receiver)
 }
 
@@ -206,7 +225,7 @@ where
 async fn send_impl<T, Codec>(
     mut rx: tokio::sync::watch::Receiver<Result<T, RecvError>>, raw_tx: chmux::Sender,
     mut raw_rx: chmux::Receiver, remote_send_err_tx: tokio::sync::mpsc::UnboundedSender<RemoteSendError>,
-    max_item_size: usize,
+    max_item_size: usize, rate_limit: Arc<Mutex<Duration>>,
 ) where
     T: Serialize + Send + Clone + 'static,
     Codec: codec::Codec,
@@ -215,9 +234,31 @@ async fn send_impl<T, Codec>(
     let mut remote_tx = base::Sender::<Result<T, RecvError>, Codec>::new(raw_tx);
     remote_tx.set_max_item_size(max_item_size);
 
+    // Rate limiting state.
+    let mut last_send: Option<Instant> = None;
+    let mut send_pending = false;
+    let mut closed = false;
+
     // Process events.
-    loop {
-        tokio::select! {
+    while !closed {
+        let pending_send_trigger = async {
+            if send_pending {
+                let rate_limit = *rate_limit.lock().unwrap();
+                if let Some(last_send) = last_send
+                    && rate_limit > Duration::ZERO
+                {
+                    let until = last_send + rate_limit;
+                    let delay = until.duration_since(Instant::now());
+                    if delay > Duration::ZERO {
+                        sleep(delay).await;
+                    }
+                }
+            } else {
+                future::pending().await
+            }
+        };
+
+        let send = tokio::select! {
             biased;
 
             // Back channel message from remote endpoint.
@@ -228,26 +269,37 @@ async fn send_impl<T, Codec>(
                             let _ = remote_send_err_tx.send(RemoteSendError::Forward);
                         }
                     }
-                    _ => break,
+                    _ => closed = true,
+                }
+                false
+            }
+
+            // Rate-limit delay has passed.
+            () = pending_send_trigger => true,
+
+            // Value was updated and needs to be sent to remote endpoint.
+            changed = rx.changed() => {
+                match changed {
+                    Ok(()) => send_pending = true,
+                    Err(_) => closed = true,
+                }
+                false
+            }
+        };
+
+        // Send updated value to remote endpoint.
+        if send || (send_pending && closed) {
+            let value = rx.borrow_and_update().clone();
+            if let Err(err) = remote_tx.send(value).await {
+                let _ = remote_send_err_tx.send(RemoteSendError::Send(err.kind.clone()));
+                if err.is_item_specific() {
+                    tracing::warn!(%err, "sending over remote channel failed");
+                    break;
                 }
             }
 
-            // Data to send to remote endpoint.
-            changed = rx.changed() => {
-                match changed {
-                    Ok(()) => {
-                        let value = rx.borrow_and_update().clone();
-                        if let Err(err) = remote_tx.send(value).await {
-                            let _ = remote_send_err_tx.send(RemoteSendError::Send(err.kind.clone()));
-                            if err.is_item_specific() {
-                                tracing::warn!(%err, "sending over remote channel failed");
-                                break
-                            }
-                        }
-                    }
-                    Err(_) => break,
-                }
-            }
+            last_send = Some(Instant::now());
+            send_pending = false;
         }
     }
 }
@@ -302,4 +354,12 @@ async fn recv_impl<T, Codec>(
             }
         }
     }
+}
+
+const fn default_max_item_size() -> u64 {
+    u64::MAX
+}
+
+const fn default_rate_limit() -> Duration {
+    Duration::ZERO
 }

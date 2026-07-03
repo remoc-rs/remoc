@@ -1,13 +1,19 @@
 use futures::FutureExt;
 use serde::{Deserialize, Serialize};
-use std::{error::Error, fmt, marker::PhantomData, sync::Mutex};
+use std::{
+    error::Error,
+    fmt,
+    marker::PhantomData,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use super::{
     super::{
         RemoteSendError, SendErrorExt,
         base::{self, PortDeserializer, PortSerializer},
     },
-    Receiver, Ref,
+    Receiver, Ref, default_max_item_size, default_rate_limit,
     receiver::RecvError,
 };
 use crate::{RemoteSend, chmux, codec};
@@ -116,6 +122,7 @@ pub(crate) struct SenderInner<T, Codec> {
     remote_send_err_rx: Mutex<tokio::sync::mpsc::UnboundedReceiver<RemoteSendError>>,
     current_err: Mutex<Option<RemoteSendError>>,
     max_item_size: usize,
+    rate_limit: Arc<Mutex<Duration>>,
     _codec: PhantomData<Codec>,
 }
 
@@ -131,10 +138,9 @@ pub(crate) struct TransportedSender<T, Codec> {
     /// Maximum item size in bytes.
     #[serde(default = "default_max_item_size")]
     max_item_size: u64,
-}
-
-const fn default_max_item_size() -> u64 {
-    u64::MAX
+    /// Minimum delay between sending value updates.
+    #[serde(default = "default_rate_limit")]
+    rate_limit: Duration,
 }
 
 impl<T, Codec> Sender<T, Codec>
@@ -146,6 +152,7 @@ where
         tx: tokio::sync::watch::Sender<Result<T, RecvError>>,
         remote_send_err_tx: tokio::sync::mpsc::UnboundedSender<RemoteSendError>,
         remote_send_err_rx: tokio::sync::mpsc::UnboundedReceiver<RemoteSendError>, max_item_size: usize,
+        rate_limit: Arc<Mutex<Duration>>,
     ) -> Self {
         let inner = SenderInner {
             tx,
@@ -153,6 +160,7 @@ where
             remote_send_err_rx: Mutex::new(remote_send_err_rx),
             current_err: Mutex::new(None),
             max_item_size,
+            rate_limit,
             _codec: PhantomData,
         };
         Self { inner: Some(inner), successor_tx: Mutex::new(None) }
@@ -238,7 +246,7 @@ where
     /// Creates a new receiver subscribed to this sender.
     pub fn subscribe(&self) -> Receiver<T, Codec> {
         let inner = self.inner.as_ref().unwrap();
-        Receiver::new(inner.tx.subscribe(), inner.remote_send_err_tx.clone(), None)
+        Receiver::new(inner.tx.subscribe(), inner.remote_send_err_tx.clone(), None, inner.rate_limit.clone())
     }
 
     fn update_error(&self) {
@@ -307,6 +315,23 @@ where
     pub fn set_max_item_size(&mut self, max_item_size: usize) {
         self.inner.as_mut().unwrap().max_item_size = max_item_size;
     }
+
+    /// Minimum delay between sending value updates.
+    ///
+    /// By default this is [`Duration::ZERO`], thus rate limiting is disabled.
+    pub fn rate_limit(&self) -> Duration {
+        *self.inner.as_ref().unwrap().rate_limit.lock().unwrap()
+    }
+
+    /// Sets the minimum delay between sending value updates.
+    ///
+    /// Transmission of value updates to remote endpoints is throttled accordingly.
+    /// It is guaranteed that the latest value will be transmitted with a delay
+    /// of at most `rate_limit`. The final value is transmitted immediately when
+    /// the sender is dropped.
+    pub fn set_rate_limit(&mut self, rate_limit: Duration) {
+        *self.inner.as_ref().unwrap().rate_limit.lock().unwrap() = rate_limit;
+    }
 }
 
 impl<T, Codec> Drop for Sender<T, Codec> {
@@ -328,6 +353,7 @@ where
         S: serde::Serializer,
     {
         let max_item_size = self.max_item_size();
+        let rate_limit = self.rate_limit();
 
         // Prepare channel for takeover.
         let (successor_tx, successor_rx) = tokio::sync::oneshot::channel();
@@ -363,8 +389,9 @@ where
         let transported = TransportedSender::<T, Codec> {
             port,
             data,
-            max_item_size: max_item_size.try_into().unwrap_or(u64::MAX),
             codec: PhantomData,
+            max_item_size: max_item_size.try_into().unwrap_or(u64::MAX),
+            rate_limit,
         };
         transported.serialize(serializer)
     }
@@ -381,9 +408,10 @@ where
         D: serde::Deserializer<'de>,
     {
         // Get chmux port number from deserialized transport type.
-        let TransportedSender { port, data, max_item_size, .. } =
+        let TransportedSender { port, data, max_item_size, rate_limit, .. } =
             TransportedSender::<T, Codec>::deserialize(deserializer)?;
         let max_item_size = usize::try_from(max_item_size).unwrap_or(usize::MAX);
+        let rate_limit = Arc::new(Mutex::new(rate_limit));
         if data.is_err() {
             return Err(serde::de::Error::custom("received watch data with error"));
         }
@@ -392,6 +420,7 @@ where
         let (tx, rx) = tokio::sync::watch::channel(data);
         let (remote_send_err_tx, remote_send_err_rx) = tokio::sync::mpsc::unbounded_channel();
         let remote_send_err_tx2 = remote_send_err_tx.clone();
+        let rate_limit2 = rate_limit.clone();
 
         // Accept chmux port request.
         PortDeserializer::accept(port, move |local_port, request| {
@@ -405,11 +434,12 @@ where
                     }
                 };
 
-                super::send_impl::<T, Codec>(rx, raw_tx, raw_rx, remote_send_err_tx, max_item_size).await;
+                super::send_impl::<T, Codec>(rx, raw_tx, raw_rx, remote_send_err_tx, max_item_size, rate_limit)
+                    .await;
             }
             .boxed()
         })?;
 
-        Ok(Self::new(tx, remote_send_err_tx2, remote_send_err_rx, max_item_size))
+        Ok(Self::new(tx, remote_send_err_tx2, remote_send_err_rx, max_item_size, rate_limit2))
     }
 }

@@ -135,6 +135,7 @@ where
 {
     let init = local_rx.borrow_and_update().clone();
     let (mut tx, rx) = channel(init);
+    let rate_limit = tx.inner.as_ref().unwrap().rate_limit.clone();
 
     let hnd = exec::spawn(async move {
         loop {
@@ -161,7 +162,7 @@ where
         tx.check()
     });
 
-    (Forwarding(hnd), rx)
+    (Forwarding { hnd, rate_limit }, rx)
 }
 
 /// Handle to obtain the result of forwarding a local receiver remotely by [`forward`].
@@ -171,7 +172,10 @@ where
 /// channel is closed or dropped.
 ///
 /// Dropping this *does not* stop forwarding.
-pub struct Forwarding(exec::task::JoinHandle<Result<(), SendError>>);
+pub struct Forwarding {
+    hnd: exec::task::JoinHandle<Result<(), SendError>>,
+    rate_limit: Arc<Mutex<Duration>>,
+}
 
 impl fmt::Debug for Forwarding {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -182,7 +186,7 @@ impl fmt::Debug for Forwarding {
 impl Future for Forwarding {
     type Output = Result<(), SendError>;
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        match ready!(self.0.poll_unpin(cx)) {
+        match ready!(self.hnd.poll_unpin(cx)) {
             Ok(res) => Poll::Ready(res),
             Err(_) => Poll::Ready(Err(SendError::Closed)),
         }
@@ -194,7 +198,24 @@ impl Forwarding {
     ///
     /// The remote sending half and local receiving half of the watch channels are dropped.
     pub fn stop(self) {
-        self.0.abort();
+        self.hnd.abort();
+    }
+
+    /// Minimum delay between sending value updates.
+    ///
+    /// By default this is [`Duration::ZERO`], thus rate limiting is disabled.
+    pub fn rate_limit(&self) -> Duration {
+        *self.rate_limit.lock().unwrap()
+    }
+
+    /// Sets the minimum delay between sending value updates.
+    ///
+    /// Transmission of value updates to remote endpoints is throttled accordingly.
+    /// It is guaranteed that the latest value will be transmitted with a delay
+    /// of at most `rate_limit`. The final value is transmitted immediately when
+    /// the sender is dropped.
+    pub fn set_rate_limit(&mut self, rate_limit: Duration) {
+        *self.rate_limit.lock().unwrap() = rate_limit;
     }
 }
 

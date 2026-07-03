@@ -106,7 +106,7 @@ impl From<RemoteSendError> for SendError {
 ///
 /// Instances are created by the [channel](super::channel) function.
 pub struct Sender<T, Codec = codec::Default> {
-    inner: Option<SenderInner<T, Codec>>,
+    pub(super) inner: Option<SenderInner<T, Codec>>,
     successor_tx: Mutex<Option<tokio::sync::oneshot::Sender<SenderInner<T, Codec>>>>,
 }
 
@@ -122,7 +122,7 @@ pub(crate) struct SenderInner<T, Codec> {
     remote_send_err_rx: Mutex<tokio::sync::mpsc::UnboundedReceiver<RemoteSendError>>,
     current_err: Mutex<Option<RemoteSendError>>,
     max_item_size: usize,
-    rate_limit: Arc<Mutex<Duration>>,
+    pub(super) rate_limit: Arc<Mutex<Duration>>,
     _codec: PhantomData<Codec>,
 }
 

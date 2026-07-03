@@ -211,6 +211,11 @@ pub fn sleep(duration: Duration) -> Sleep {
     Sleep::new(duration)
 }
 
+/// Waits until `deadline` is reached.
+pub fn sleep_until(deadline: Instant) -> Sleep {
+    sleep(deadline.duration_since(Instant::now()))
+}
+
 /// Monotonic clock backed by JavaScript's `performance.now()`.
 mod instant {
     use std::time::Duration;

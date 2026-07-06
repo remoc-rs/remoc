@@ -530,8 +530,10 @@ async fn rate_limit_monitor_throttles() {
         // immediately; the rate limiter then delays the rest, releasing two per
         // window. This requires waiting out two full windows in total.
         let start = Instant::now();
-        for _ in 0..6 {
+        for i in 0..6 {
+            println!("request {i}");
             assert_eq!(client.value_ref().await.unwrap(), 0);
+            println!("request {i} done");
         }
         start.elapsed()
     };

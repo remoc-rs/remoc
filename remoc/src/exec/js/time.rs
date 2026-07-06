@@ -218,7 +218,10 @@ pub fn sleep_until(deadline: Instant) -> Sleep {
 
 /// Monotonic clock backed by JavaScript's `performance.now()`.
 mod instant {
-    use std::time::Duration;
+    use std::{
+        ops::{Add, AddAssign, Sub, SubAssign},
+        time::Duration,
+    };
     use wasm_bindgen::JsCast;
     use web_sys::{Window, WorkerGlobalScope};
 
@@ -228,15 +231,15 @@ mod instant {
     /// within the current execution context.
     ///
     /// [`performance.now()`]: https://developer.mozilla.org/en-US/docs/Web/API/Performance/now
-    #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+    #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     pub struct Instant {
-        millis: f64,
+        micros: u64,
     }
 
     impl Instant {
         /// Returns an instant corresponding to "now".
         pub fn now() -> Self {
-            Self { millis: performance_now() }
+            Self { micros: (performance_now() * 1_000.0) as u64 }
         }
 
         /// Returns the amount of time elapsed since this instant.
@@ -247,7 +250,43 @@ mod instant {
         /// Returns the amount of time elapsed from `earlier` to this instant, or
         /// zero duration if `earlier` is later than this instant.
         pub fn duration_since(&self, earlier: Instant) -> Duration {
-            Duration::from_secs_f64(((self.millis - earlier.millis) / 1_000.0).max(0.0))
+            Duration::from_micros(self.micros.saturating_sub(earlier.micros))
+        }
+    }
+
+    impl Add<Duration> for Instant {
+        type Output = Self;
+
+        fn add(self, duration: Duration) -> Self::Output {
+            Self { micros: self.micros.saturating_add(duration.as_micros().try_into().unwrap_or(u64::MAX)) }
+        }
+    }
+
+    impl AddAssign<Duration> for Instant {
+        fn add_assign(&mut self, duration: Duration) {
+            *self = *self + duration;
+        }
+    }
+
+    impl Sub<Instant> for Instant {
+        type Output = Duration;
+
+        fn sub(self, other: Instant) -> Self::Output {
+            self.duration_since(other)
+        }
+    }
+
+    impl Sub<Duration> for Instant {
+        type Output = Self;
+
+        fn sub(self, duration: Duration) -> Self::Output {
+            Self { micros: self.micros.saturating_sub(duration.as_micros().try_into().unwrap_or(u64::MAX)) }
+        }
+    }
+
+    impl SubAssign<Duration> for Instant {
+        fn sub_assign(&mut self, duration: Duration) {
+            *self = *self - duration;
         }
     }
 

@@ -284,7 +284,7 @@ impl<T, Codec, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, MAX_ITEM_SIZE> {
     /// the maximum of both values. When multiple receivers share the same channel,
     /// the effective delay is the minimum of their requested rate limits. See the
     /// [module-level documentation](super#rate-limiting) for details.
-    /// 
+    ///
     /// Cloning a receiver copies the configured rate limit to the new clone.
     pub fn set_rate_limit(&mut self, rate_limit: Duration) {
         self.receiver_rate_limit_tx.set(rate_limit);

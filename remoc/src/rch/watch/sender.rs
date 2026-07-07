@@ -226,6 +226,28 @@ where
         self.inner.as_ref().unwrap().tx.send_if_modified(move |v| func(v.as_mut().unwrap()))
     }
 
+    /// Replaces the watched value and notifies all receivers only if the new value
+    /// differs from the current value.
+    ///
+    /// Returns `true` if the value was updated, i.e. `value` was not equal to the
+    /// previously watched value.
+    ///
+    /// This method never fails, even if all receivers have been dropped or become
+    /// disconnected.
+    pub fn send_if_different(&self, value: T) -> bool
+    where
+        T: PartialEq,
+    {
+        self.send_if_modified(move |v| {
+            if *v == value {
+                false
+            } else {
+                *v = value;
+                true
+            }
+        })
+    }
+
     /// Sends a new value via the channel, notifying all receivers and returning the
     /// previous value in the channel.
     ///

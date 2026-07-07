@@ -303,6 +303,59 @@ async fn send_if_modified() {
 
 #[cfg_attr(not(feature = "js"), tokio::test)]
 #[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn send_if_different() {
+    crate::init();
+    let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<watch::Receiver<i16>>().await;
+
+    let start_value = 2;
+    let end_value = 124;
+
+    println!("Sending remote watch channel receiver");
+    let (mut tx, rx) = watch::channel(start_value);
+    a_tx.send(rx).await.unwrap();
+    println!("Receiving remote watch channel receiver");
+    let rx = b_rx.recv().await.unwrap().unwrap();
+    let mut rx = ReceiverStream::from(rx);
+
+    let recv_task = exec::spawn(async move {
+        let mut last_value = start_value - 1;
+        while let Some(rxed_value) = rx.next().await {
+            let value = rxed_value.unwrap();
+            println!("Received value change: {value}");
+            // The same value should never be observed twice in a row, since
+            // unchanged sends are skipped.
+            assert_ne!(value, last_value);
+            last_value = value;
+        }
+        assert_eq!(last_value, end_value);
+    });
+
+    for value in (start_value + 1)..=end_value {
+        // Sending the current value again must not notify receivers.
+        let current = *tx.borrow();
+        let notified = tx.send_if_different(current);
+        assert!(!notified);
+        assert_eq!(*tx.borrow(), value - 1);
+
+        // Sending a different value must notify receivers.
+        let notified = tx.send_if_different(value);
+        assert!(notified);
+        assert_eq!(*tx.borrow(), value);
+
+        if value % 10 == 0 {
+            sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    tx.check().unwrap();
+    drop(tx);
+
+    println!("Waiting for receive task");
+    recv_task.await.unwrap();
+}
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
 async fn close() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<watch::Sender<i16>>().await;

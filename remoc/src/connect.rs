@@ -296,9 +296,20 @@ impl<'transport> Connect<'transport, io::Error, io::Error> {
         Rx: RemoteSend,
         Codec: codec::Codec,
     {
-        let buf_input = BufReader::with_capacity(buffer, input);
-        let buf_output = BufWriter::with_capacity(buffer, output);
-        Self::io(cfg, buf_input, buf_output).await
+        let max_recv_frame_length: usize = cfg.max_frame_length().try_into().unwrap();
+        let mut transport_sink = LengthDelimitedCodec::builder()
+            .little_endian()
+            .length_field_length(4)
+            .max_frame_length(u32::MAX as _)
+            .new_write(output);
+        transport_sink.set_backpressure_boundary(buffer);
+        let transport_stream = LengthDelimitedCodec::builder()
+            .little_endian()
+            .length_field_length(4)
+            .max_frame_length(max_recv_frame_length)
+            .new_read(BufReader::with_capacity(buffer, input))
+            .map_ok(|item| item.freeze());
+        Self::framed(cfg, transport_sink, transport_stream).await
     }
 }
 

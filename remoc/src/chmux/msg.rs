@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use super::{Cfg, ChMuxError};
+use super::{Cfg, ChMuxError, sizer::GlobalCreditsReport};
 
 fn invalid_data(msg: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, format!("invalid value for {msg} received"))
@@ -67,6 +67,8 @@ pub enum MultiplexMsg {
         first: bool,
         /// Last chunk of data.
         last: bool,
+        /// Credit source.
+        credits: DataCredits,
     },
     /// Ports sent over a port.
     PortData {
@@ -94,6 +96,16 @@ pub enum MultiplexMsg {
         /// Number of credits in bytes.
         credits: u32,
     },
+    /// Port should stop using global credits.
+    InhibitGlobalCreditUsageByPort {
+        /// Port that should stop using global credits.
+        port: u32,
+    },
+    /// Port should start using global credits again.
+    AllowGlobalCreditUsageByPort {
+        /// Port that should start using global credits.
+        port: u32,
+    },
     /// No more data will be sent to specified remote port.
     SendFinish {
         /// Port of side that receives this message.
@@ -110,6 +122,10 @@ pub enum MultiplexMsg {
         /// Port of side that receives this message.
         port: u32,
     },
+    /// Give global credits, usable on any port.
+    GlobalCredits(GlobalCredits),
+    /// Report of held global credits.
+    GlobalCreditsReport(GlobalCreditsReport),
     /// All clients have been dropped, therefore no more OpenPort requests will occur.
     ClientFinish,
     /// Listener has been dropped, therefore no more OpenPort requests will be handled.
@@ -133,6 +149,10 @@ pub const MSG_RECEIVE_FINISH: u8 = 12;
 pub const MSG_CLIENT_FINISH: u8 = 13;
 pub const MSG_LISTENER_FINISH: u8 = 14;
 pub const MSG_GOODBYE: u8 = 15;
+pub const MSG_GLOBAL_CREDITS: u8 = 16;
+pub const MSG_GLOBAL_CREDITS_REPORT: u8 = 17;
+pub const MSG_INHIBIT_GLOBAL_CREDIT_USAGE_BY_PORT: u8 = 18;
+pub const MSG_ALLOW_GLOBAL_CREDIT_USAGE_BY_PORT: u8 = 19;
 
 pub const MSG_OPEN_PORT_FLAG_WAIT: u8 = 0b0000_0001;
 pub const MSG_OPEN_PORT_FLAG_ID: u8 = 0b0000_0010;
@@ -141,6 +161,8 @@ pub const MSG_REJECTED_FLAG_NO_PORTS: u8 = 0b0000_0001;
 
 pub const MSG_DATA_FLAG_FIRST: u8 = 0b0000_0001;
 pub const MSG_DATA_FLAG_LAST: u8 = 0b0000_0010;
+pub const MSG_DATA_FLAG_CREDITS_GLOBAL: u8 = 0b0000_0100;
+pub const MSG_DATA_FLAG_CREDITS_SPLIT: u8 = 0b0000_1000;
 
 pub const MSG_PORT_DATA_FLAG_FIRST: u8 = 0b0000_0001;
 pub const MSG_PORT_DATA_FLAG_LAST: u8 = 0b0000_0010;
@@ -193,7 +215,7 @@ impl MultiplexMsg {
                 writer.write_u32::<LE>(*client_port)?;
                 writer.write_u8(if *no_ports { MSG_REJECTED_FLAG_NO_PORTS } else { 0 })?;
             }
-            MultiplexMsg::Data { port, first, last } => {
+            MultiplexMsg::Data { port, first, last, credits } => {
                 writer.write_u8(MSG_DATA)?;
                 writer.write_u32::<LE>(*port)?;
                 let mut flags = 0;
@@ -203,7 +225,15 @@ impl MultiplexMsg {
                 if *last {
                     flags |= MSG_DATA_FLAG_LAST;
                 }
+                match &credits {
+                    DataCredits::PortOnly => (),
+                    DataCredits::GlobalOnly => flags |= MSG_DATA_FLAG_CREDITS_GLOBAL,
+                    DataCredits::GlobalAndPort(_) => flags |= MSG_DATA_FLAG_CREDITS_SPLIT,
+                }
                 writer.write_u8(flags)?;
+                if let DataCredits::GlobalAndPort(global_credits) = credits {
+                    writer.write_u32::<LE>(*global_credits)?;
+                }
             }
             MultiplexMsg::PortData { port, first, last, wait, ports, ids } => {
                 writer.write_u8(MSG_PORT_DATA)?;
@@ -242,6 +272,14 @@ impl MultiplexMsg {
                 writer.write_u32::<LE>(*port)?;
                 writer.write_u32::<LE>(*credits)?;
             }
+            MultiplexMsg::InhibitGlobalCreditUsageByPort { port } => {
+                writer.write_u8(MSG_INHIBIT_GLOBAL_CREDIT_USAGE_BY_PORT)?;
+                writer.write_u32::<LE>(*port)?;
+            }
+            MultiplexMsg::AllowGlobalCreditUsageByPort { port } => {
+                writer.write_u8(MSG_ALLOW_GLOBAL_CREDIT_USAGE_BY_PORT)?;
+                writer.write_u32::<LE>(*port)?;
+            }
             MultiplexMsg::SendFinish { port } => {
                 writer.write_u8(MSG_SEND_FINISH)?;
                 writer.write_u32::<LE>(*port)?;
@@ -253,6 +291,17 @@ impl MultiplexMsg {
             MultiplexMsg::ReceiveFinish { port } => {
                 writer.write_u8(MSG_RECEIVE_FINISH)?;
                 writer.write_u32::<LE>(*port)?;
+            }
+            MultiplexMsg::GlobalCredits(GlobalCredits { credits, seq }) => {
+                writer.write_u8(MSG_GLOBAL_CREDITS)?;
+                writer.write_u32::<LE>(*credits)?;
+                writer.write_u8(*seq)?;
+            }
+            MultiplexMsg::GlobalCreditsReport(GlobalCreditsReport { current, min, seq }) => {
+                writer.write_u8(MSG_GLOBAL_CREDITS_REPORT)?;
+                writer.write_u32::<LE>(*current)?;
+                writer.write_u32::<LE>(*min)?;
+                writer.write_u8(*seq)?;
             }
             MultiplexMsg::ClientFinish => {
                 writer.write_u8(MSG_CLIENT_FINISH)?;
@@ -299,10 +348,18 @@ impl MultiplexMsg {
             MSG_DATA => {
                 let port = reader.read_u32::<LE>()?;
                 let flags = reader.read_u8()?;
+                let credits = if flags & MSG_DATA_FLAG_CREDITS_GLOBAL != 0 {
+                    DataCredits::GlobalOnly
+                } else if flags & MSG_DATA_FLAG_CREDITS_SPLIT != 0 {
+                    DataCredits::GlobalAndPort(reader.read_u32::<LE>()?)
+                } else {
+                    DataCredits::PortOnly
+                };
                 Self::Data {
                     port,
                     first: flags & MSG_DATA_FLAG_FIRST != 0,
                     last: flags & MSG_DATA_FLAG_LAST != 0,
+                    credits,
                 }
             }
             MSG_PORT_DATA => {
@@ -328,9 +385,23 @@ impl MultiplexMsg {
             MSG_PORT_CREDITS => {
                 Self::PortCredits { port: reader.read_u32::<LE>()?, credits: reader.read_u32::<LE>()? }
             }
+            MSG_INHIBIT_GLOBAL_CREDIT_USAGE_BY_PORT => {
+                Self::InhibitGlobalCreditUsageByPort { port: reader.read_u32::<LE>()? }
+            }
+            MSG_ALLOW_GLOBAL_CREDIT_USAGE_BY_PORT => {
+                Self::AllowGlobalCreditUsageByPort { port: reader.read_u32::<LE>()? }
+            }
             MSG_SEND_FINISH => Self::SendFinish { port: reader.read_u32::<LE>()? },
             MSG_RECEIVE_CLOSE => Self::ReceiveClose { port: reader.read_u32::<LE>()? },
             MSG_RECEIVE_FINISH => Self::ReceiveFinish { port: reader.read_u32::<LE>()? },
+            MSG_GLOBAL_CREDITS => {
+                Self::GlobalCredits(GlobalCredits { credits: reader.read_u32::<LE>()?, seq: reader.read_u8()? })
+            }
+            MSG_GLOBAL_CREDITS_REPORT => Self::GlobalCreditsReport(GlobalCreditsReport {
+                current: reader.read_u32::<LE>()?,
+                min: reader.read_u32::<LE>()?,
+                seq: reader.read_u8()?,
+            }),
             MSG_CLIENT_FINISH => Self::ClientFinish,
             MSG_LISTENER_FINISH => Self::ListenerFinish,
             MSG_GOODBYE => Self::Goodbye,
@@ -363,9 +434,22 @@ pub struct ExchangedCfg {
     pub port_receive_buffer: u32,
     /// Length of connection request queue.
     pub connect_queue: u16,
+    /// Initial global credits, if supported.
+    pub global_credits: Option<u32>,
 }
 
 impl ExchangedCfg {
+    /// Create exchanged configuration.
+    pub fn new(cfg: &Cfg, global_credits: u32) -> Self {
+        Self {
+            connection_timeout: cfg.connection_timeout,
+            chunk_size: cfg.chunk_size,
+            port_receive_buffer: cfg.port_receive_buffer,
+            connect_queue: cfg.connect_queue,
+            global_credits: Some(global_credits),
+        }
+    }
+
     pub(crate) fn write(&self, mut writer: impl io::Write) -> Result<(), io::Error> {
         writer.write_u64::<LE>(
             self.connection_timeout.unwrap_or_default().as_millis().min(u64::MAX as u128) as u64
@@ -373,11 +457,14 @@ impl ExchangedCfg {
         writer.write_u32::<LE>(self.chunk_size)?;
         writer.write_u32::<LE>(self.port_receive_buffer)?;
         writer.write_u16::<LE>(self.connect_queue)?;
+        if let Some(global_credits) = self.global_credits {
+            writer.write_u32::<LE>(global_credits)?;
+        }
         Ok(())
     }
 
     pub(crate) fn read(mut reader: impl io::Read) -> Result<Self, io::Error> {
-        let this = Self {
+        let mut this = Self {
             connection_timeout: match reader.read_u64::<LE>()? {
                 0 => None,
                 millis => Some(Duration::from_millis(millis)),
@@ -394,18 +481,34 @@ impl ExchangedCfg {
                 cq if cq >= 1 => cq,
                 _ => return Err(invalid_data("connect_queue must not be zero")),
             },
+            global_credits: None,
         };
+
+        let Ok(gc) = reader.read_u32::<LE>() else { return Ok(this) };
+        this.global_credits = Some(gc);
+
         Ok(this)
     }
 }
 
-impl From<&Cfg> for ExchangedCfg {
-    fn from(cfg: &Cfg) -> Self {
-        Self {
-            connection_timeout: cfg.connection_timeout,
-            chunk_size: cfg.chunk_size,
-            port_receive_buffer: cfg.receive_buffer,
-            connect_queue: cfg.connect_queue,
-        }
-    }
+/// Credits used for data.
+#[derive(Default, Debug, Clone)]
+#[must_use]
+pub enum DataCredits {
+    /// Use only port credits.
+    #[default]
+    PortOnly,
+    /// Use only global credits.
+    GlobalOnly,
+    /// Use then specified number of global credits and rest port credits.
+    GlobalAndPort(u32),
+}
+
+/// Provided global credits.
+#[derive(Debug, Clone)]
+pub struct GlobalCredits {
+    /// Number of credits in bytes.
+    pub credits: u32,
+    /// Sequence number in [GlobalCreditsStatus::seq] for credit status reporting.
+    pub seq: u8,
 }

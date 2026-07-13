@@ -10,7 +10,7 @@ use tokio_util::sync::ReusableBoxFuture;
 
 use super::{
     AnyStorage, ForwardError, PortAllocator, Request, Sender,
-    credit::{ChannelCreditReturner, UsedCredit},
+    credit::{PortCreditReturner, UsedGlobalCredit, UsedPortCredit},
     forward,
     mux::PortEvt,
 };
@@ -126,8 +126,11 @@ pub(crate) struct ReceivedData {
     pub first: bool,
     /// Last chunk of data.
     pub last: bool,
-    /// Flow-control credit.
-    pub credit: UsedCredit,
+    /// Port flow-control credit.
+    pub port_credit: UsedPortCredit,
+    /// Global flow-control credit.
+    #[expect(unused)]
+    pub global_credit: UsedGlobalCredit,
 }
 
 /// Container for received port open requests.
@@ -139,7 +142,7 @@ pub(crate) struct ReceivedPortRequests {
     /// Last chunk of ports.
     pub last: bool,
     /// Flow-control credit.
-    pub credit: UsedCredit,
+    pub credit: UsedPortCredit,
 }
 
 /// Port receive message.
@@ -288,9 +291,10 @@ pub struct Receiver {
     max_data_size: usize,
     max_ports: usize,
     tx: mpsc::Sender<PortEvt>,
+    high_priority_tx: mpsc::Sender<PortEvt>,
     rx: mpsc::UnboundedReceiver<PortReceiveMsg>,
     receiving: Receiving,
-    credits: ChannelCreditReturner,
+    channel_credits: PortCreditReturner,
     closed: bool,
     finished: bool,
     port_allocator: PortAllocator,
@@ -315,7 +319,8 @@ impl Receiver {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         local_port: u32, remote_port: u32, max_data_size: usize, max_port_count: usize,
-        tx: mpsc::Sender<PortEvt>, rx: mpsc::UnboundedReceiver<PortReceiveMsg>, credits: ChannelCreditReturner,
+        tx: mpsc::Sender<PortEvt>, high_priority_tx: mpsc::Sender<PortEvt>,
+        rx: mpsc::UnboundedReceiver<PortReceiveMsg>, channel_credits: PortCreditReturner,
         port_allocator: PortAllocator, storage: AnyStorage,
     ) -> Self {
         let (_drop_tx, drop_rx) = oneshot::channel();
@@ -331,9 +336,10 @@ impl Receiver {
             max_data_size,
             max_ports: max_port_count,
             tx,
+            high_priority_tx,
             rx,
             receiving: Receiving::Nothing,
-            credits,
+            channel_credits,
             closed: false,
             finished: false,
             port_allocator,
@@ -409,7 +415,7 @@ impl Receiver {
         }
 
         loop {
-            self.credits.return_flush().await;
+            self.channel_credits.ready().await;
 
             match &mut self.receiving {
                 // Chunks from receive operation started by recv_any available.
@@ -426,7 +432,11 @@ impl Receiver {
                 // Try to receive next chunk.
                 _ => match self.rx.recv().await {
                     Some(PortReceiveMsg::Data(data)) => {
-                        self.credits.start_return(data.credit, self.remote_port, &self.tx);
+                        self.channel_credits.start_return(
+                            data.port_credit,
+                            self.remote_port,
+                            &self.high_priority_tx,
+                        );
 
                         match (&self.receiving, data.first) {
                             // First segment without last segment indicates that last transmission
@@ -449,7 +459,7 @@ impl Receiver {
 
                     // Either aborted transmission or port data to ignore.
                     Some(PortReceiveMsg::PortRequests(req)) => {
-                        self.credits.start_return(req.credit, self.remote_port, &self.tx);
+                        self.channel_credits.start_return(req.credit, self.remote_port, &self.high_priority_tx);
                         if let Receiving::Chunks { .. } = &self.receiving {
                             self.receiving = Receiving::Nothing;
                             return Err(RecvChunkError::Cancelled);
@@ -480,12 +490,12 @@ impl Receiver {
         }
 
         loop {
-            self.credits.return_flush().await;
+            self.channel_credits.ready().await;
 
             match self.rx.recv().await {
                 // Data message.
                 Some(PortReceiveMsg::Data(data)) => {
-                    self.credits.start_return(data.credit, self.remote_port, &self.tx);
+                    self.channel_credits.start_return(data.port_credit, self.remote_port, &self.high_priority_tx);
 
                     if data.first {
                         self.receiving = Receiving::Data(DataBuf::new());
@@ -516,7 +526,7 @@ impl Receiver {
 
                 // Port connection requests.
                 Some(PortReceiveMsg::PortRequests(req)) => {
-                    self.credits.start_return(req.credit, self.remote_port, &self.tx);
+                    self.channel_credits.start_return(req.credit, self.remote_port, &self.high_priority_tx);
 
                     if req.first {
                         self.receiving = Receiving::Requests(Vec::new());

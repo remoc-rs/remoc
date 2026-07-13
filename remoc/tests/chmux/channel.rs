@@ -20,7 +20,7 @@ fn cfg() -> chmux::Cfg {
         max_data_size: 1_000_000,
         max_received_ports: 100,
         chunk_size: 9,
-        receive_buffer: 4,
+        port_receive_buffer: 4,
         shared_send_queue: 3,
         connect_queue: 2,
         ..Default::default()
@@ -35,7 +35,7 @@ fn cfg2() -> chmux::Cfg {
         max_data_size: 1_000_000,
         max_received_ports: 100,
         chunk_size: 4,
-        receive_buffer: 4,
+        port_receive_buffer: 4,
         shared_send_queue: 1,
         connect_queue: 1,
         ..Default::default()

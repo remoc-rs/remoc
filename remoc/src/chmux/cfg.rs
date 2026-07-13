@@ -2,7 +2,10 @@
 
 use std::time::Duration;
 
-use super::msg::MAX_MSG_LENGTH;
+use super::{
+    msg::MAX_MSG_LENGTH,
+    sizer::{BufferSizer, DynamicBuffer},
+};
 
 /// Behavior when ports are exhausted and a connect is requested.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -21,9 +24,8 @@ pub enum PortsExhausted {
 /// provides a good balance between throughput, memory usage and latency.
 ///
 /// In case of unsatisfactory performance (low throughput) your first step should be
-/// to increase the [receive buffer size](Self::receive_buffer).
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+/// to increase the [receive buffer size](Self::shared_receive_buffer).
+#[derive(Debug, Clone)]
 pub struct Cfg {
     /// Time after which connection is closed when no data is.
     ///
@@ -33,7 +35,7 @@ pub struct Cfg {
     /// Maximum number of open ports.
     ///
     /// This must not exceed 2^31 = 2147483648.
-    /// By default this is 16384.
+    /// By default this is 4096.
     pub max_ports: u32,
     /// Default behavior when ports are exhausted and a connect is requested.
     ///
@@ -64,7 +66,7 @@ pub struct Cfg {
     pub max_received_ports: usize,
     /// Size of a chunk of data in bytes.
     ///
-    /// By default this is 16 kB.
+    /// By default this is 32 kB.
     /// This must be at least 4 bytes.
     /// This must not exceed 2^32 - 16 = 4294967279.
     pub chunk_size: u32,
@@ -73,12 +75,21 @@ pub struct Cfg {
     /// This controls the maximum amout of in-flight data per port, that is data on the transport
     /// plus received but yet unprocessed data.
     ///
-    /// Increase this value if the throughput (bytes per second) is significantly
+    /// By default this is 128 kB.
+    /// This must be at least 4 bytes.
+    pub port_receive_buffer: u32,
+    /// Receive buffer level at which to throttle a port in bytes.
+    ///
+    /// By default this is 64 kB.
+    pub port_receive_throttle: u32,
+    /// Sizer for global receive buffer shared by all ports in bytes.
+    ///
+    /// Use a larger receive buffer if the throughput (bytes per second) is significantly
     /// lower than you would expect from your underlying transport connection.
     ///
-    /// By default this is 512 kB.
-    /// This must be at least 4 bytes.
-    pub receive_buffer: u32,
+    /// By default this is [dynamically adjusted](DynamicBuffer) with a minimum size
+    /// of 64 kB and a maximum size of 8 MB.
+    pub shared_receive_buffer: Box<dyn BufferSizer>,
     /// Length of global send queue.
     /// Each element holds a chunk.
     ///
@@ -86,7 +97,7 @@ pub struct Cfg {
     /// [Sender::try_send](super::Sender::try_send).
     /// It will not affect [remote channels](crate::rch).
     ///
-    /// By default this is 128.
+    /// By default this is 32.
     /// This must not be zero.
     pub shared_send_queue: usize,
     /// Length of transport send queue.
@@ -95,7 +106,7 @@ pub struct Cfg {
     /// Raising this may improve performance but might incur a slight increase in latency.
     /// For minimum latency this should be set to 1.
     ///
-    /// By default this is 128.
+    /// By default this is 32.
     /// This must not be zero.
     pub transport_send_queue: usize,
     /// Length of transport receive queue.
@@ -104,7 +115,7 @@ pub struct Cfg {
     /// Raising this may improve performance but might incur a slight increase in latency.
     /// For minimum latency this should be set to 1.
     ///
-    /// By default this is 128.
+    /// By default this is 64.
     /// This must not be zero.
     pub transport_receive_queue: usize,
     /// Maximum number of outstanding connection requests.
@@ -122,15 +133,17 @@ impl Default for Cfg {
     fn default() -> Self {
         Self {
             connection_timeout: Some(Duration::from_secs(60)),
-            max_ports: 16_384,
+            max_ports: 4096,
             ports_exhausted: PortsExhausted::Wait(Some(Duration::from_secs(60))),
             max_data_size: 524_288,
             max_received_ports: 128,
-            chunk_size: 16_384,
-            receive_buffer: 524_288,
-            shared_send_queue: 128,
-            transport_send_queue: 128,
-            transport_receive_queue: 128,
+            chunk_size: 32_768,
+            port_receive_buffer: 131_072,
+            port_receive_throttle: 65_536,
+            shared_receive_buffer: DynamicBuffer::new(65_536, 134_217_728),
+            shared_send_queue: 32,
+            transport_send_queue: 32,
+            transport_receive_queue: 64,
             connect_queue: 128,
             _non_exhaustive: (),
         }
@@ -151,8 +164,8 @@ impl Cfg {
             panic!("chunk size must be at least 4");
         }
 
-        if self.receive_buffer < 4 {
-            panic!("receive buffer must be at least 4 bytes");
+        if self.port_receive_buffer < 4 {
+            panic!("port receive buffer must be at least 4 bytes");
         }
 
         if self.shared_send_queue == 0 {
@@ -179,36 +192,5 @@ impl Cfg {
     /// Panics if the configuration is invalid.
     pub fn max_frame_length(&self) -> u32 {
         (MAX_MSG_LENGTH as u32).checked_add(self.chunk_size).expect("maximum frame size exceeds u32::MAX")
-    }
-
-    /// Configuration that is balanced between memory usage, latency and throughput.
-    pub fn balanced() -> Self {
-        Self::default()
-    }
-
-    /// Configuration that is optimized for low memory usage and low latency
-    /// but may be throughput-limited.
-    pub fn compact() -> Self {
-        Self {
-            shared_send_queue: 1,
-            transport_receive_queue: 1,
-            transport_send_queue: 1,
-            receive_buffer: 16_384,
-            chunk_size: 4096,
-            ..Default::default()
-        }
-    }
-
-    /// Configuration that is throughput-optimized but may use more memory per
-    /// channel and may have higher latency.
-    pub fn throughput() -> Self {
-        Self {
-            shared_send_queue: 64,
-            transport_receive_queue: 64,
-            transport_send_queue: 64,
-            receive_buffer: 1_048_576,
-            chunk_size: 32_768,
-            ..Default::default()
-        }
     }
 }

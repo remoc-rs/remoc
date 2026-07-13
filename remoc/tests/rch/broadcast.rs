@@ -16,7 +16,7 @@ use remoc::{
 #[cfg_attr(feature = "js", wasm_bindgen_test)]
 async fn simple() {
     crate::init();
-    let cfg = remoc::chmux::Cfg { chunk_size: 4, receive_buffer: 4, ..Default::default() };
+    let cfg = remoc::chmux::Cfg { chunk_size: 4, port_receive_buffer: 4, ..Default::default() };
     let ((mut a_tx, _), (_, mut b_rx)) =
         loop_channel_with_cfg::<broadcast::Receiver<(i16, mpsc::Sender<()>), codec::Default, 16>>(cfg).await;
 
@@ -117,7 +117,7 @@ async fn simple() {
 #[cfg_attr(feature = "js", wasm_bindgen_test)]
 async fn simple_stream() {
     crate::init();
-    let cfg = remoc::chmux::Cfg { chunk_size: 4, receive_buffer: 4, ..Default::default() };
+    let cfg = remoc::chmux::Cfg { chunk_size: 4, port_receive_buffer: 4, ..Default::default() };
     let ((mut a_tx, _), (_, mut b_rx)) =
         loop_channel_with_cfg::<broadcast::Receiver<(i16, mpsc::Sender<()>), codec::Default, 16>>(cfg).await;
 

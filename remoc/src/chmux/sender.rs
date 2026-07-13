@@ -20,7 +20,7 @@ use tokio_util::sync::ReusableBoxFuture;
 use super::{
     AnyStorage, Connect, ConnectError, PortAllocator, PortReq,
     client::ConnectResponse,
-    credit::{AssignedCredits, CreditUser},
+    credit::{AssignedCredits, CreditPool, MixedAssignedCredits, MixedCreditUser},
     mux::PortEvt,
 };
 use crate::exec;
@@ -194,7 +194,7 @@ pub struct Sender {
     chunk_size: usize,
     max_data_size: usize,
     tx: mpsc::Sender<PortEvt>,
-    credits: CreditUser,
+    credits: MixedCreditUser,
     hangup_recved: Weak<AtomicBool>,
     hangup_notify: Weak<std::sync::Mutex<Option<Vec<oneshot::Sender<()>>>>>,
     port_allocator: PortAllocator,
@@ -219,7 +219,7 @@ impl Sender {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         local_port: u32, remote_port: u32, chunk_size: usize, max_data_size: usize, tx: mpsc::Sender<PortEvt>,
-        credits: CreditUser, hangup_recved: Weak<AtomicBool>,
+        credits: MixedCreditUser, hangup_recved: Weak<AtomicBool>,
         hangup_notify: Weak<std::sync::Mutex<Option<Vec<oneshot::Sender<()>>>>>, port_allocator: PortAllocator,
         storage: AnyStorage,
     ) -> Self {
@@ -280,26 +280,30 @@ impl Sender {
     pub async fn send(&mut self, mut data: Bytes) -> Result<(), SendError> {
         if data.is_empty() {
             let mut credits = self.credits.request(1, 1).await?;
-            credits.take(1);
 
-            let msg = PortEvt::SendData { remote_port: self.remote_port, data, first: true, last: true };
+            let msg = PortEvt::SendData {
+                remote_port: self.remote_port,
+                data,
+                first: true,
+                last: true,
+                credits: credits.take(1),
+            };
             self.tx.send(msg).await?;
         } else {
             let mut first = true;
-            let mut credits = AssignedCredits::default();
+            let mut credits = MixedAssignedCredits::default();
 
             while !data.is_empty() {
                 if credits.is_empty() {
-                    credits = self.credits.request(data.len().min(u32::MAX as usize) as u32, 1).await?;
+                    credits = self.credits.request(data.len().try_into().unwrap_or(u32::MAX), 1).await?;
                 }
 
                 let at = data.len().min(self.chunk_size).min(credits.available() as usize);
                 let chunk = data.split_to(at);
 
-                credits.take(chunk.len() as u32);
-
                 let msg = PortEvt::SendData {
                     remote_port: self.remote_port,
+                    credits: credits.take(chunk.len() as u32),
                     data: chunk,
                     first,
                     last: data.is_empty(),
@@ -315,7 +319,7 @@ impl Sender {
 
     /// Streams a message by sending individual chunks.
     pub fn send_chunks(&mut self) -> ChunkSender<'_> {
-        ChunkSender { sender: self, credits: AssignedCredits::default(), first: true }
+        ChunkSender { sender: self, credits: MixedAssignedCredits::default(), first: true }
     }
 
     /// Tries to send data over the channel.
@@ -327,27 +331,32 @@ impl Sender {
         let mut data = data.clone();
 
         if data.is_empty() {
-            match self.credits.try_request(1)? {
+            match self.credits.try_request(1, 1)? {
                 Some(mut credits) => {
-                    credits.take(1);
-                    let msg = PortEvt::SendData { remote_port: self.remote_port, data, first: true, last: true };
+                    let msg = PortEvt::SendData {
+                        remote_port: self.remote_port,
+                        data,
+                        first: true,
+                        last: true,
+                        credits: credits.take(1),
+                    };
                     self.tx.try_send(msg)?;
                     Ok(())
                 }
                 None => Err(TrySendError::Full),
             }
         } else {
-            match self.credits.try_request(data.len().min(u32::MAX as usize) as u32)? {
+            let req = data.len().try_into().unwrap_or(u32::MAX);
+            match self.credits.try_request(req, req)? {
                 Some(mut credits) => {
                     let mut first = true;
                     while !data.is_empty() {
                         let at = data.len().min(self.chunk_size);
                         let chunk = data.split_to(at);
 
-                        credits.take(chunk.len() as u32);
-
                         let msg = PortEvt::SendData {
                             remote_port: self.remote_port,
+                            credits: credits.take(chunk.len() as u32),
                             data: chunk,
                             first,
                             last: data.is_empty(),
@@ -397,13 +406,16 @@ impl Sender {
         }
 
         let mut first = true;
-        let mut credits = AssignedCredits::default();
+        let mut credits = AssignedCredits::empty(CreditPool::Port);
 
         while !ports_response.is_empty() {
             if credits.is_empty() {
                 let data_len = ports_response.len() * size_of::<u32>();
-                credits =
-                    self.credits.request(data_len.min(u32::MAX as usize) as u32, size_of::<u32>() as u32).await?;
+                credits = self
+                    .credits
+                    .port
+                    .request(data_len.min(u32::MAX as usize) as u32, size_of::<u32>() as u32)
+                    .await?;
             }
 
             let max_ports = self.chunk_size.min(credits.available() as usize) / size_of::<u32>();
@@ -445,7 +457,7 @@ impl Sender {
     ///
     /// By default this is false.
     pub fn is_graceful_close_overridden(&self) -> bool {
-        self.credits.override_graceful_close
+        self.credits.port.override_graceful_close
     }
 
     /// Sets whether data should be sent anyway, even if remote endpoint closed the channel gracefully.
@@ -453,7 +465,7 @@ impl Sender {
     /// Sending always fails if remote endpoint closed the channel non-gracefully, for example
     /// by dropping the receiver.
     pub fn set_override_graceful_close(&mut self, override_graceful_close: bool) {
-        self.credits.override_graceful_close = override_graceful_close;
+        self.credits.port.override_graceful_close = override_graceful_close;
     }
 
     /// Convert this into a sink.
@@ -484,7 +496,7 @@ impl Drop for Sender {
 /// Drop the chunk sender to cancel the message.
 pub struct ChunkSender<'a> {
     sender: &'a mut Sender,
-    credits: AssignedCredits,
+    credits: MixedAssignedCredits,
     first: bool,
 }
 
@@ -494,10 +506,14 @@ impl<'a> ChunkSender<'a> {
             if self.credits.is_empty() {
                 self.credits = self.sender.credits.request(1, 1).await?;
             }
-            self.credits.take(1);
 
-            let msg =
-                PortEvt::SendData { remote_port: self.sender.remote_port, data, first: self.first, last: finish };
+            let msg = PortEvt::SendData {
+                remote_port: self.sender.remote_port,
+                data,
+                first: self.first,
+                last: finish,
+                credits: self.credits.take(1),
+            };
             self.sender.tx.send(msg).await?;
 
             self.first = false;
@@ -505,16 +521,15 @@ impl<'a> ChunkSender<'a> {
             while !data.is_empty() {
                 if self.credits.is_empty() {
                     self.credits =
-                        self.sender.credits.request(data.len().min(u32::MAX as usize) as u32, 1).await?;
+                        self.sender.credits.request(data.len().try_into().unwrap_or(u32::MAX), 1).await?;
                 }
 
                 let at = data.len().min(self.sender.chunk_size).min(self.credits.available() as usize);
                 let chunk = data.split_to(at);
 
-                self.credits.take(chunk.len() as u32);
-
                 let msg = PortEvt::SendData {
                     remote_port: self.sender.remote_port,
+                    credits: self.credits.take(chunk.len() as u32),
                     data: chunk,
                     first: self.first,
                     last: data.is_empty() && finish,

@@ -720,18 +720,19 @@ where
 
                 loop {
                     // Send inhibit global credit usage request for ports that requested it.
-                    if let Some(port) = self.outstanding_inhibit_global_credit_usage_ports.pop_first()
-                        && let Some(PortState::Connected { remote_port, receiver_credit_monitor, .. }) =
+                    while let Some(port) = self.outstanding_inhibit_global_credit_usage_ports.pop_first() {
+                        if let Some(PortState::Connected { remote_port, receiver_credit_monitor, .. }) =
                             self.ports.get(&port)
-                        && receiver_credit_monitor.inhibiting_global_credit_usage(true)
-                    {
-                        return Some((
-                            permit,
-                            GlobalEvt::Port(PortEvt::ChangeGlobalCreditUsage {
-                                remote_port: *remote_port,
-                                allow: false,
-                            }),
-                        ));
+                            && receiver_credit_monitor.inhibiting_global_credit_usage(true)
+                        {
+                            return Some((
+                                permit,
+                                GlobalEvt::Port(PortEvt::ChangeGlobalCreditUsage {
+                                    remote_port: *remote_port,
+                                    allow: false,
+                                }),
+                            ));
+                        }
                     }
 
                     // Send global credits report.
@@ -1311,7 +1312,11 @@ where
                 send_credit_provider.provide(credits)?;
 
                 // Schedule sending of credit status report.
-                self.send_credit_report = Some(send_credit_provider.take_status(seq));
+                let mut new_report = send_credit_provider.take_status(seq);
+                if let Some(prev_report) = &self.send_credit_report {
+                    new_report.min = new_report.min.min(prev_report.min);
+                }
+                self.send_credit_report = Some(new_report);
             }
 
             // Remote provided its global credit status report.

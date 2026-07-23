@@ -776,30 +776,30 @@ where
                     // Server dropped.
                     () = server_dropped => {
                         // listen_no_wait_tx is closed simultaneously.
-                        return Some((permit, GlobalEvt::ListenerDropped));
+                        Some((permit, GlobalEvt::ListenerDropped))
                     }
 
                     // Connection request from client.
                     connect_req_opt = connect_rx.recv(), if !self.all_clients_dropped => {
                         match connect_req_opt {
-                            Some(connect_req) => return Some((permit, GlobalEvt::ConnectReq(connect_req))),
-                            None => return Some((permit, GlobalEvt::AllClientsDropped)),
+                            Some(connect_req) => Some((permit, GlobalEvt::ConnectReq(connect_req))),
+                            None => Some((permit, GlobalEvt::AllClientsDropped)),
                         }
                     }
 
                     // Request from port.
                     Some(msg) = channel_rx.recv() => {
-                        return Some((permit, GlobalEvt::Port(msg)));
+                        Some((permit, GlobalEvt::Port(msg)))
                     }
 
                     // Local request to terminate forcibly.
                     Some(()) = terminate_rx.recv(), if !self.goodbye_sent => {
-                        return Some((permit, GlobalEvt::SendGoodbye));
+                        Some((permit, GlobalEvt::SendGoodbye))
                     }
 
                     // Send Goodbye message and terminate.
                     () = future::ready(()), if should_terminate && !self.goodbye_sent => {
-                        return Some((permit, GlobalEvt::SendGoodbye));
+                        Some((permit, GlobalEvt::SendGoodbye))
                     }
                 }
             };
@@ -1306,9 +1306,9 @@ where
             // Remote provided us with global flow credits.
             MultiplexMsg::GlobalCredits(GlobalCredits { credits, seq }) => {
                 let Some(send_credit_provider) = &mut self.send_credit_provider else {
-                    return Err(protocol_err(format!(
+                    return Err(protocol_err(
                         "received GlobalCredits message from peer without global credits support",
-                    )));
+                    ));
                 };
                 send_credit_provider.provide(credits)?;
 

@@ -95,6 +95,7 @@ impl Clone for Box<dyn BufferSizer> {
 pub(crate) struct DummySizer;
 
 impl DummySizer {
+    #[allow(clippy::new_ret_no_self)]
     pub fn new() -> Box<dyn BufferSizer> {
         Box::new(Self)
     }
@@ -121,6 +122,7 @@ pub struct FixedBuffer(BufferSize);
 
 impl FixedBuffer {
     /// Creates a buffer sizer that has the specified constant size in bytes.
+    #[allow(clippy::new_ret_no_self)]
     pub fn new(size: u32) -> Box<dyn BufferSizer> {
         Box::new(Self(BufferSize::new(size)))
     }
@@ -161,6 +163,7 @@ pub struct DynamicBuffer {
 
 impl DynamicBuffer {
     /// Create a dynamic buffer sizer with specified limits.
+    #[allow(clippy::new_ret_no_self)]
     pub fn new(min: u32, max: u32) -> Box<dyn BufferSizer> {
         assert!(min <= max);
         let this = Self {

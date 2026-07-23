@@ -14,7 +14,7 @@ jobs:
 
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Check version dependencies
         run: ./check_version.sh
@@ -26,11 +26,11 @@ jobs:
     name: Check with MSRV
     runs-on: ubuntu-latest
     env:
-      minrust: 1.93
+      minrust: 1.95
 
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Rust ${{ env.minrust }}
         run: rustup default ${{ env.minrust }}
@@ -49,7 +49,7 @@ jobs:
 
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
@@ -66,7 +66,7 @@ jobs:
 
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
@@ -83,7 +83,7 @@ jobs:
 
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
@@ -104,7 +104,7 @@ jobs:
 
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
@@ -119,7 +119,7 @@ jobs:
 
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install nightly Rust
         run: |
@@ -164,7 +164,7 @@ jobs:
 
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
@@ -191,7 +191,7 @@ jobs:
 
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
@@ -217,7 +217,7 @@ jobs:
 
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
@@ -236,7 +236,7 @@ jobs:
 
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install cargo tarpaulin
         uses: baptiste0928/cargo-install@v3

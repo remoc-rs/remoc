@@ -102,14 +102,14 @@ pub enum InnerReceiver {
     /// Local received data.
     Local(Bytes),
     /// Remote receiver.
-    Remote(bin::Receiver),
+    Remote(Box<bin::Receiver>),
 }
 
 impl Receiver {
     pub async fn into_inner(self) -> Option<InnerReceiver> {
         match self.local_rx.await {
             Ok(data) => Some(InnerReceiver::Local(data)),
-            Err(_) => self.bin_rx_rx.await.ok().map(InnerReceiver::Remote),
+            Err(_) => self.bin_rx_rx.await.ok().map(|rx| InnerReceiver::Remote(Box::new(rx))),
         }
     }
 }

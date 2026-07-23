@@ -119,7 +119,7 @@ native event queue.
 ## Supported Rust versions
 
 Remoc is built against the latest stable release.
-The minimum supported Rust version (MSRV) is 1.93.
+The minimum supported Rust version (MSRV) is 1.95.
 
 ## Example
 

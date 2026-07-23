@@ -53,7 +53,7 @@ impl AssignedCredits {
 
     /// Create with specified number of credits.
     fn new(credits: u32, inner: &Arc<SendableCreditStore>) -> Self {
-        Self { pool: inner.pool, credits, inner: Arc::downgrade(&inner) }
+        Self { pool: inner.pool, credits, inner: Arc::downgrade(inner) }
     }
 
     /// True if no credits are contained.

@@ -1190,10 +1190,6 @@ where
             MultiplexMsg::PortCredits { port, credits } => {
                 if let Some(PortState::Connected { sender_credit_provider, .. }) = self.ports.get_mut(&port) {
                     sender_credit_provider.provide(credits)?;
-                } else {
-                    return Err(protocol_err(format!(
-                        "received port credits message for port {port} not in connected state",
-                    )));
                 }
             }
 

@@ -263,16 +263,19 @@ pub struct ChMux<TransportSink, TransportStream> {
     transport_stream: Option<TransportStream>,
     /// Storage.
     storage: AnyStorage,
-
+    /// Global send credit provider.
     send_credit_provider: Option<CreditProvider>,
+    /// Global send credit user.
     send_credit_user: Arc<Option<CreditUser>>,
+    /// Global send credit report queued for sending.
     send_credit_report: Option<GlobalCreditsReport>,
-
     /// Sizer that manages receive buffer size.
     receive_buffer_sizer: Box<dyn BufferSizer>,
+    /// Global receive credit monitor.
     receive_credit_monitor: Arc<GlobalCreditMonitor>,
+    /// Last received global send credit report from remote endpoint.
     remote_credits_report: GlobalCreditsReport,
-
+    /// Ports that currently request inhibitation of global credit usage.
     outstanding_inhibit_global_credit_usage_ports: BTreeSet<u32>,
 }
 

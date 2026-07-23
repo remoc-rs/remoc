@@ -3,8 +3,8 @@
 use proc_macro2::TokenStream;
 use quote::{TokenStreamExt, quote};
 use syn::{
-    Attribute, Block, FnArg, GenericArgument, Generics, Ident, Pat, PatType, Path, PathArguments, ReturnType,
-    Stmt, Token, Type, TypeParamBound, braced, parenthesized,
+    Attribute, Block, FnArg, GenericArgument, Generics, Ident, Pat, PatType, Path, PathArguments, ReceiverKind,
+    ReturnType, Stmt, Token, Type, TypeParamBound, braced, parenthesized,
     parse::{Parse, ParseStream},
     punctuated::Punctuated,
     spanned::Spanned,
@@ -153,10 +153,15 @@ impl TraitMethod {
             match arg {
                 // self, &self or &mut self receiver
                 FnArg::Receiver(recv) => {
-                    self_ref = Some(if recv.reference.is_some() {
-                        if recv.mutability.is_some() { SelfRef::RefMut } else { SelfRef::Ref }
-                    } else {
-                        SelfRef::Value
+                    self_ref = Some(match recv.kind {
+                        ReceiverKind::Reference(_, _, Some(_)) => SelfRef::RefMut,
+                        ReceiverKind::Reference(_, _, None) => SelfRef::Ref,
+                        ReceiverKind::Value => SelfRef::Value,
+                        _ => {
+                            return Err(
+                                input.error("only methods taking self, &self and &mut self are supported")
+                            );
+                        }
                     });
                 }
                 // other argument

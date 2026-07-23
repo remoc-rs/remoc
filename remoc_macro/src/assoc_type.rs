@@ -94,7 +94,7 @@ pub fn remove_self_type(ty: &Type, assoc: &[AssocType]) -> Type {
                     && let Some(a) = self.assoc.iter().find(|a| a.ident == last.ident)
                 {
                     let lifted = a.lifted_ident();
-                    *t = Type::Path(TypePath { qself: None, path: lifted.into() });
+                    *t = Type::Path(TypePath { attrs: tp.attrs.clone(), qself: None, path: lifted.into() });
                     return;
                 }
 
@@ -106,7 +106,7 @@ pub fn remove_self_type(ty: &Type, assoc: &[AssocType]) -> Type {
                         && let Some(a) = self.assoc.iter().find(|a| a.ident == segs[1].ident)
                     {
                         let lifted = a.lifted_ident();
-                        *t = Type::Path(TypePath { qself: None, path: lifted.into() });
+                        *t = Type::Path(TypePath { attrs: tp.attrs.clone(), qself: None, path: lifted.into() });
                         return;
                     }
                 }

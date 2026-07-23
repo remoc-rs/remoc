@@ -307,7 +307,7 @@ impl TraitDef {
 
         if args.with_lifetime {
             let target_lt: Lifetime = syn::parse2(quote! {'target}).unwrap();
-            ty_generics.params.insert(0, LifetimeParam::new(target_lt).into());
+            ty_generics.params.insert(0, GenericParam::Lifetime(LifetimeParam::new(target_lt)));
         }
 
         let mut impl_generics = ty_generics.clone();

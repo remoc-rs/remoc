@@ -372,6 +372,25 @@ impl Sender {
         }
     }
 
+    /// Flushes the global send queue and underlying sink of the channel multiplexer.
+    ///
+    /// Explicit flushing is usually not required, since the channel multiplexer
+    /// will automatically flush the underlying sink when there is currently no data
+    /// to send. Indeed, if this method is called too often, it may prevent the channel
+    /// multiplexer from batching small messages for sending, thus reducing send throughput.
+    ///
+    /// The returned future completes once flushing is completed.
+    /// Dropping the returned future cancels the flush, if possible.
+    pub fn flush(&mut self) -> impl Future<Output = ()> {
+        let tx = self.tx.clone();
+        let (flushed_tx, flushed_rx) = oneshot::channel();
+
+        async move {
+            let _ = tx.send(PortEvt::Flush { flushed_tx }).await;
+            let _ = flushed_rx.await;
+        }
+    }
+
     /// Sends port open requests over this port and returns the connect requests.
     ///
     /// The receiver limits the number of ports sendable per call, see
@@ -570,12 +589,37 @@ impl<'a> ChunkSender<'a> {
 /// A sink sending byte data over a channel.
 pub struct SenderSink {
     sender: Option<Arc<Mutex<Sender>>>,
-    send_fut: Option<ReusableBoxFuture<'static, Result<(), SendError>>>,
+    sending: bool,
+    send_fut: ReusableBoxFuture<'static, Result<(), SendError>>,
+    flushable: bool,
+    flushing: bool,
+    flush_fut: ReusableBoxFuture<'static, ()>,
 }
 
 impl SenderSink {
     fn new(sender: Sender) -> Self {
-        Self { sender: Some(Arc::new(Mutex::new(sender))), send_fut: None }
+        Self {
+            sender: Some(Arc::new(Mutex::new(sender))),
+            sending: false,
+            send_fut: ReusableBoxFuture::new(async { Ok(()) }),
+            flushable: false,
+            flushing: false,
+            flush_fut: ReusableBoxFuture::new(async {}),
+        }
+    }
+
+    /// Whether flushing this sink [flushes the global send queue](Sender::flush).
+    ///
+    /// By default this is false.
+    pub fn flushable(&self) -> bool {
+        self.flushable
+    }
+
+    /// Sets whether flushing this sink [flushes the global send queue](Sender::flush).
+    ///
+    /// By default this is false.    
+    pub fn set_flushable(&mut self, flushable: bool) {
+        self.flushable = flushable;
     }
 
     async fn send(sender: Arc<Mutex<Sender>>, data: Bytes) -> Result<(), SendError> {
@@ -583,29 +627,47 @@ impl SenderSink {
         sender.send(data).await
     }
 
+    async fn flush(sender: Arc<Mutex<Sender>>) {
+        let mut sender = sender.lock().await;
+        sender.flush().await
+    }
+
     fn start_send(&mut self, data: Bytes) -> Result<(), SendError> {
-        if self.send_fut.is_some() {
+        if self.sending || self.flushing {
             panic!("sink is not ready for sending");
         }
 
-        match self.sender.clone() {
-            Some(sender) => {
-                self.send_fut = Some(ReusableBoxFuture::new(Self::send(sender, data)));
-                Ok(())
-            }
-            None => panic!("start_send after sink has been closed"),
-        }
+        let Some(sender) = self.sender.clone() else { panic!("start_send after sink has been closed") };
+        self.sending = true;
+        self.send_fut.set(Self::send(sender, data));
+        Ok(())
     }
 
     fn poll_send(&mut self, cx: &mut Context) -> Poll<Result<(), SendError>> {
-        match &mut self.send_fut {
-            Some(fut) => {
-                let res = ready!(fut.poll(cx));
-                self.send_fut = None;
-                Poll::Ready(res)
-            }
-            None => Poll::Ready(Ok(())),
+        if !self.sending {
+            return Poll::Ready(Ok(()));
         }
+
+        let res = ready!(self.send_fut.poll(cx));
+        self.sending = false;
+        Poll::Ready(res)
+    }
+
+    fn poll_flush(&mut self, cx: &mut Context) -> Poll<Result<(), SendError>> {
+        if !self.flushable && !self.flushing {
+            return Poll::Ready(Ok(()));
+        }
+
+        let Some(sender) = self.sender.clone() else { panic!("poll_flush after sink has been closed") };
+
+        if !self.flushing {
+            self.flushing = true;
+            self.flush_fut.set(Self::flush(sender));
+        }
+
+        ready!(self.flush_fut.poll(cx));
+        self.flushing = false;
+        Poll::Ready(Ok(()))
     }
 
     fn close(&mut self) {
@@ -616,7 +678,10 @@ impl SenderSink {
 impl Sink<Bytes> for SenderSink {
     type Error = SendError;
 
-    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+        if self.flushing {
+            ready!(Pin::into_inner(self.as_mut()).poll_flush(cx))?;
+        }
         Pin::into_inner(self).poll_send(cx)
     }
 
@@ -624,13 +689,25 @@ impl Sink<Bytes> for SenderSink {
         Pin::into_inner(self).start_send(item)
     }
 
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
-        Pin::into_inner(self).poll_send(cx)
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+        if self.sending {
+            ready!(Pin::into_inner(self.as_mut()).poll_send(cx))?;
+        }
+        Pin::into_inner(self).poll_flush(cx)
     }
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
         ready!(Pin::into_inner(self.as_mut()).poll_send(cx))?;
+        ready!(Pin::into_inner(self.as_mut()).poll_flush(cx))?;
         Pin::into_inner(self).close();
         Poll::Ready(Ok(()))
+    }
+}
+
+impl Unpin for SenderSink {}
+
+impl From<Sender> for SenderSink {
+    fn from(sender: Sender) -> Self {
+        Self::new(sender)
     }
 }

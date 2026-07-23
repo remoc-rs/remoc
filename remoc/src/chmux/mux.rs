@@ -130,6 +130,11 @@ pub(crate) enum PortEvt {
         /// Ports to send, together with response channel.
         ports: Vec<(PortReq, oneshot::Sender<ConnectResponse>)>,
     },
+    /// Flush send queue.
+    Flush {
+        /// Notification of flush completion.
+        flushed_tx: oneshot::Sender<()>,
+    },
     /// Change whehter global credit usage is allowed.
     ChangeGlobalCreditUsage {
         /// Remote port.
@@ -202,6 +207,15 @@ impl TransportMsg {
         assert!(matches!(&msg, &MultiplexMsg::Data { .. }), "MultiplexMsg with unexpected data");
         Self { msg, data: Some(data) }
     }
+}
+
+/// Request to message sender.
+#[derive(Debug)]
+enum SendReq {
+    /// Send message.
+    Feed(TransportMsg),
+    /// Flush send queue.
+    Flush(oneshot::Sender<()>),
 }
 
 /// Channel multiplexer.
@@ -585,8 +599,8 @@ where
     ///
     /// Automatically sends pings if no data is to be transmitted.
     async fn send_task(
-        mut sink: &mut TransportSink, ping_interval: Option<Duration>, mut rx: mpsc::Receiver<TransportMsg>,
-        mut high_priority_rx: mpsc::Receiver<TransportMsg>,
+        mut sink: &mut TransportSink, ping_interval: Option<Duration>, mut rx: mpsc::Receiver<SendReq>,
+        mut high_priority_rx: mpsc::Receiver<SendReq>,
     ) -> Result<(), ChMuxError<TransportSinkError, TransportStreamError>> {
         async fn get_next_ping(ping_interval: Option<Duration>) {
             match ping_interval {
@@ -601,7 +615,7 @@ where
         loop {
             SinkReady::new(&mut sink).await.map_err(ChMuxError::SinkError)?;
 
-            let msg_opt = tokio::select! {
+            let req_opt = tokio::select! {
                 biased;
 
                 msg_opt = high_priority_rx.recv() => msg_opt,
@@ -621,18 +635,25 @@ where
                 }
             };
 
-            let Some(msg) = msg_opt else { break };
-
-            let is_goodbye = matches!(&msg, TransportMsg { msg: MultiplexMsg::Goodbye, .. });
-
-            Self::feed_msg(msg, sink).await?;
-
-            if is_goodbye {
-                break;
+            match req_opt {
+                Some(SendReq::Feed(goodbye_msg @ TransportMsg { msg: MultiplexMsg::Goodbye, .. })) => {
+                    Self::feed_msg(goodbye_msg, sink).await?;
+                    break;
+                }
+                Some(SendReq::Feed(msg)) => {
+                    Self::feed_msg(msg, sink).await?;
+                    next_ping.set(get_next_ping(ping_interval));
+                    need_flush = true;
+                }
+                Some(SendReq::Flush(flushed_tx)) => {
+                    if !flushed_tx.is_closed() && need_flush {
+                        Self::flush(sink).await?;
+                        need_flush = false;
+                    }
+                    let _ = flushed_tx.send(());
+                }
+                None => break,
             }
-
-            next_ping.set(get_next_ping(ping_interval));
-            need_flush = true;
         }
 
         // Flushing may fail after Goodbye message has been sent, because the remote
@@ -838,11 +859,11 @@ where
     /// Handle local event that results in sending a message to the remote endpoint.
     #[tracing::instrument(level = "trace", skip_all, fields(event=?event))]
     async fn handle_event(
-        &mut self, permit: Permit<'_, TransportMsg>, event: GlobalEvt,
+        &mut self, permit: Permit<'_, SendReq>, event: GlobalEvt,
     ) -> Result<(), ChMuxError<TransportSinkError, TransportStreamError>> {
-        let send_msg = |permit: Permit<'_, TransportMsg>, msg: MultiplexMsg| {
+        let send_msg = |permit: Permit<'_, SendReq>, msg: MultiplexMsg| {
             tracing::trace!(op="send", msg=?msg);
-            permit.send(TransportMsg::new(msg))
+            permit.send(SendReq::Feed(TransportMsg::new(msg)))
         };
 
         match event {
@@ -886,7 +907,7 @@ where
             GlobalEvt::Port(PortEvt::SendData { remote_port, data, first, last, credits }) => {
                 let msg = MultiplexMsg::Data { port: remote_port, first, last, credits };
                 tracing::trace!(op="send", msg=?msg);
-                permit.send(TransportMsg::with_data(msg, data));
+                permit.send(SendReq::Feed(TransportMsg::with_data(msg, data)));
             }
 
             // Send ports from port.
@@ -907,6 +928,12 @@ where
                     permit,
                     MultiplexMsg::PortData { port: remote_port, first, last, wait, ports: port_nums, ids },
                 );
+            }
+
+            // Flush send queue.
+            GlobalEvt::Port(PortEvt::Flush { flushed_tx }) => {
+                tracing::trace!(op = "flush");
+                permit.send(SendReq::Flush(flushed_tx));
             }
 
             // Return port credits to remote endpoint.

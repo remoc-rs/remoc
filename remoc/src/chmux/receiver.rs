@@ -569,7 +569,6 @@ impl Receiver {
     }
 
     /// Convert this into a stream.
-    #[deprecated = "use ReceiverStream::from instead"]
     pub fn into_stream(self) -> ReceiverStream {
         ReceiverStream::new(self)
     }

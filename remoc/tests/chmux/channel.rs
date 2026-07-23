@@ -96,6 +96,9 @@ async fn basic() {
                     }
                     other => other.unwrap(),
                 }
+                if i.is_multiple_of(100) {
+                    tx.flush().await;
+                }
                 println!("Server sent: {msg}");
             }
 

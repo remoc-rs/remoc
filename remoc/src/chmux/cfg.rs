@@ -34,7 +34,7 @@ pub struct Cfg {
     pub connection_timeout: Option<Duration>,
     /// Maximum number of open ports.
     ///
-    /// This must not exceed 2^31 = 2147483648.
+    /// This must not exceed 2^30 = 1_073_741_824.
     /// By default this is 4096.
     pub max_ports: u32,
     /// Default behavior when ports are exhausted and a connect is requested.
@@ -156,8 +156,8 @@ impl Cfg {
     /// # Panics
     /// Panics if the configuration is invalid.
     pub(crate) fn check(&self) {
-        if self.max_ports > 2u32.pow(31) {
-            panic!("maximum ports must not exceed 2^31");
+        if self.max_ports > 2u32.pow(30) {
+            panic!("maximum ports must not exceed 2^30");
         }
 
         if self.chunk_size < 4 {

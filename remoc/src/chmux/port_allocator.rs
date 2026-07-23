@@ -1,18 +1,20 @@
 use std::{
     borrow::Borrow,
-    collections::HashSet,
+    collections::{BTreeSet, HashSet, VecDeque},
     fmt,
     hash::Hash,
-    mem,
     ops::Deref,
     sync::{Arc, Mutex},
 };
-use tokio::sync::oneshot;
+use tokio::sync::Notify;
 
 struct PortAllocatorInner {
     used: HashSet<u32>,
-    limit: u32,
-    notify_tx: Vec<oneshot::Sender<()>>,
+    quarantined_set: BTreeSet<u32>,
+    quarantined_list: VecDeque<u32>,
+    limit: usize,
+    next: u32,
+    notify: Arc<Notify>,
 }
 
 impl PortAllocatorInner {
@@ -21,19 +23,19 @@ impl PortAllocatorInner {
     }
 
     fn try_allocate(&mut self, this: Arc<Mutex<PortAllocatorInner>>) -> Option<PortNumber> {
-        if self.is_available() {
-            let number = loop {
-                let cand = rand::random();
-                if !self.used.contains(&cand) {
-                    break cand;
-                }
-            };
-
-            self.used.insert(number);
-            Some(PortNumber { number, allocator: this })
-        } else {
-            None
+        if !self.is_available() {
+            return None;
         }
+
+        let number = loop {
+            self.next = self.next.wrapping_add(1);
+            if !self.used.contains(&self.next) && !self.quarantined_set.contains(&self.next) {
+                break self.next;
+            }
+        };
+
+        self.used.insert(number);
+        Some(PortNumber { number, allocator: this })
     }
 }
 
@@ -53,29 +55,35 @@ impl fmt::Debug for PortAllocator {
 impl PortAllocator {
     /// Creates a new port number allocator.
     pub(crate) fn new(limit: u32) -> PortAllocator {
-        let inner = PortAllocatorInner { used: HashSet::new(), limit, notify_tx: Vec::new() };
+        let inner = PortAllocatorInner {
+            used: HashSet::new(),
+            quarantined_set: BTreeSet::new(),
+            quarantined_list: VecDeque::new(),
+            limit: limit as usize,
+            next: 0,
+            notify: Arc::new(Notify::new()),
+        };
         PortAllocator(Arc::new(Mutex::new(inner)))
     }
 
     /// Allocates a local port number.
     ///
-    /// Port numbers are allocated randomly.
+    /// Port numbers are allocated sequentially.
     /// If all ports are currently in use, this waits for a port number to become available.
     pub async fn allocate(&self) -> PortNumber {
         loop {
-            let rx = {
-                let mut inner = self.0.lock().unwrap();
-                match inner.try_allocate(self.0.clone()) {
-                    Some(number) => return number,
-                    None => {
-                        let (tx, rx) = oneshot::channel();
-                        inner.notify_tx.push(tx);
-                        rx
-                    }
-                }
-            };
+            let notified;
 
-            let _ = rx.await;
+            {
+                let mut inner = self.0.lock().unwrap();
+                notified = inner.notify.clone().notified_owned();
+
+                if let Some(number) = inner.try_allocate(self.0.clone()) {
+                    return number;
+                }
+            }
+
+            notified.await;
         }
     }
 
@@ -150,15 +158,18 @@ impl Borrow<u32> for PortNumber {
 
 impl Drop for PortNumber {
     fn drop(&mut self) {
-        let notify_tx = {
-            let mut inner = self.allocator.lock().unwrap();
-            inner.used.remove(&self.number);
-            mem::take(&mut inner.notify_tx)
-        };
+        let mut inner = self.allocator.lock().unwrap();
 
-        for tx in notify_tx {
-            let _ = tx.send(());
+        inner.used.remove(&self.number);
+
+        inner.quarantined_set.insert(self.number);
+        inner.quarantined_list.push_back(self.number);
+        while inner.quarantined_list.len() > inner.limit + 1 {
+            let port = inner.quarantined_list.pop_front().unwrap();
+            inner.quarantined_set.remove(&port);
         }
+
+        inner.notify.notify_waiters();
     }
 }
 

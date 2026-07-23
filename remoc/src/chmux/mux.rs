@@ -85,7 +85,7 @@ enum PortState {
 }
 
 /// Event from a port to the multiplexer event loop.
-#[derive(Debug)]
+#[derive(custom_debug::Debug)]
 pub(crate) enum PortEvt {
     /// Connection has been accepted.
     Accepted {
@@ -108,6 +108,7 @@ pub(crate) enum PortEvt {
         /// Remote port that will receive data.
         remote_port: u32,
         /// Data to send.
+        #[debug(with = crate::util::dbg_bytes)]
         data: Bytes,
         /// First chunk of data.
         first: bool,
@@ -180,11 +181,12 @@ enum GlobalEvt {
 }
 
 /// Message with optionally associated data.
-#[derive(Debug)]
+#[derive(custom_debug::Debug)]
 struct TransportMsg {
     /// Message.
     msg: MultiplexMsg,
     /// Data chunk, if message is data message.
+    #[debug(with = crate::util::dbg_option_bytes)]
     data: Option<Bytes>,
 }
 
@@ -365,7 +367,7 @@ where
     }
 
     /// Feed transport message to sink and log it.
-    #[tracing::instrument(level = "trace", skip_all, fields(msg=?msg.msg, data=?msg.data))]
+    #[tracing::instrument(level = "trace", skip_all, fields(?msg))]
     async fn feed_msg(
         msg: TransportMsg, sink: &mut TransportSink,
     ) -> Result<(), ChMuxError<TransportSinkError, TransportStreamError>> {
@@ -882,7 +884,7 @@ where
             // Send data from port.
             GlobalEvt::Port(PortEvt::SendData { remote_port, data, first, last, credits }) => {
                 let msg = MultiplexMsg::Data { port: remote_port, first, last, credits };
-                tracing::trace!(op="send", msg=?msg, data=?&data);
+                tracing::trace!(op="send", msg=?msg);
                 permit.send(TransportMsg::with_data(msg, data));
             }
 
@@ -1003,7 +1005,7 @@ where
     }
 
     /// Handle message received from remote endpoint.
-    #[tracing::instrument(level = "trace", skip_all, fields(msg=?received_msg.msg, data=?received_msg.data))]
+    #[tracing::instrument(level = "trace", skip_all, fields(msg=?received_msg))]
     async fn handle_received_msg(
         &mut self, received_msg: TransportMsg,
     ) -> Result<(), ChMuxError<TransportSinkError, TransportStreamError>> {

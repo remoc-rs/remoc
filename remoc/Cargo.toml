@@ -58,6 +58,7 @@ full-codecs = [
 [dependencies]
 remoc_macro = { version = "=0.18.3", path = "../remoc_macro", optional = true }
 
+custom_debug = "0.6"
 futures = { version = "0.3.31", default-features = false, features = ["std"] }
 tokio = { version = "1.43", features = ["macros", "rt", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["codec"] }

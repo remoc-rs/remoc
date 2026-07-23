@@ -213,11 +213,11 @@ impl BufferSizer for DynamicBuffer {
             return self.current.clone();
         }
 
-        tracing::trace!("computing receive buffer size: {query:?}");
-
         if query.report.min < self.low_level {
+            tracing::trace!("computing receive buffer size: {query:?}");
             self.set_size(self.current.size.saturating_mul(4));
         } else if query.report.min > self.high_level {
+            tracing::trace!("computing receive buffer size: {query:?}");
             let diff = ((query.report.min - self.high_level) / 2).min(65_536);
             self.set_size(self.current.size.saturating_sub(diff));
         }

@@ -139,7 +139,7 @@ impl Default for Cfg {
             max_received_ports: 128,
             chunk_size: 32_768,
             port_receive_buffer: 131_072,
-            port_receive_throttle: 65_536,
+            port_receive_throttle: 1_048_576,
             shared_receive_buffer: DynamicBuffer::new(65_536, 134_217_728),
             shared_send_queue: 32,
             transport_send_queue: 32,

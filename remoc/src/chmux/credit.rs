@@ -493,7 +493,7 @@ pub(crate) struct PortCreditReturner {
 
 impl PortCreditReturner {
     /// Return quotient.
-    const RETURN_QUOT: u32 = 10;
+    const RETURN_QUOT: u32 = 4;
 
     /// Ensures the credit returner is ready.
     ///

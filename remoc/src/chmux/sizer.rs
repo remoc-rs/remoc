@@ -62,7 +62,7 @@ pub struct BufferSize {
 impl BufferSize {
     /// Creates a new buffer size with default return threshold.
     pub fn new(size: u32) -> Self {
-        Self { size, return_threshold: (size / 10).clamp(1, 65_536), force_return: false }
+        Self { size, return_threshold: (size / 10).clamp(1, 1_048_576), force_return: false }
     }
 }
 

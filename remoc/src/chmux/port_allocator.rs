@@ -19,7 +19,7 @@ struct PortAllocatorInner {
 
 impl PortAllocatorInner {
     fn is_available(&self) -> bool {
-        self.used.len() < self.limit as usize
+        self.used.len() < self.limit
     }
 
     fn try_allocate(&mut self, this: Arc<Mutex<PortAllocatorInner>>) -> Option<PortNumber> {

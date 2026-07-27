@@ -32,6 +32,12 @@ pub struct Cfg {
     /// Pings are send automatically when this is enabled and no data is transmitted.
     /// By default this is 60 seconds.
     pub connection_timeout: Option<Duration>,
+    /// Interval for flushing transport sink when more data is available to send.
+    ///
+    /// The transport sink is always flushed once there is no data readily available
+    /// for sending.
+    /// By default this is disabled (`None`).
+    pub flush_interval: Option<Duration>,
     /// Maximum number of open ports.
     ///
     /// This must not exceed 2^30 = 1_073_741_824.
@@ -133,6 +139,7 @@ impl Default for Cfg {
     fn default() -> Self {
         Self {
             connection_timeout: Some(Duration::from_secs(60)),
+            flush_interval: None,
             max_ports: 4096,
             ports_exhausted: PortsExhausted::Wait(Some(Duration::from_secs(60))),
             max_data_size: 524_288,

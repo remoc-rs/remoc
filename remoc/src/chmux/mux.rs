@@ -215,7 +215,7 @@ enum SendReq {
     /// Send message.
     Feed(TransportMsg),
     /// Flush send queue.
-    Flush(oneshot::Sender<()>),
+    Flush(Option<oneshot::Sender<()>>),
 }
 
 /// Channel multiplexer.
@@ -602,17 +602,18 @@ where
     ///
     /// Automatically sends pings if no data is to be transmitted.
     async fn send_task(
-        mut sink: &mut TransportSink, ping_interval: Option<Duration>, mut rx: mpsc::Receiver<SendReq>,
-        mut high_priority_rx: mpsc::Receiver<SendReq>,
+        mut sink: &mut TransportSink, ping_interval: Option<Duration>, flush_interval: Option<Duration>,
+        mut rx: mpsc::Receiver<SendReq>, mut high_priority_rx: mpsc::Receiver<SendReq>,
     ) -> Result<(), ChMuxError<TransportSinkError, TransportStreamError>> {
-        async fn get_next_ping(ping_interval: Option<Duration>) {
-            match ping_interval {
-                Some(interval) => sleep(interval).await,
+        async fn sleep_opt(duration: Option<Duration>) {
+            match duration {
+                Some(duration) => sleep(duration).await,
                 None => future::pending().await,
             }
         }
 
-        let mut next_ping = ReusableBoxFuture::new(get_next_ping(ping_interval));
+        let mut next_ping = ReusableBoxFuture::new(sleep_opt(ping_interval));
+        let mut next_flush = ReusableBoxFuture::new(sleep_opt(None));
         let mut need_flush = false;
 
         loop {
@@ -621,21 +622,22 @@ where
             let req_opt = tokio::select! {
                 biased;
 
+                () = &mut next_flush => {
+                    next_flush.set(sleep_opt(None));
+                    Some(SendReq::Flush(None))
+                }
+
                 msg_opt = high_priority_rx.recv() => msg_opt,
                 msg_opt = rx.recv() => msg_opt,
 
                 () = &mut next_ping => {
                     Self::feed_msg(TransportMsg::new(MultiplexMsg::Ping), sink).await?;
-                    next_ping.set(get_next_ping(ping_interval));
+                    next_ping.set(sleep_opt(ping_interval));
                     need_flush = true;
                     continue;
                 }
 
-                () = future::ready(()), if need_flush => {
-                    Self::flush(sink).await?;
-                    need_flush = false;
-                    continue;
-                }
+                () = future::ready(()), if need_flush => Some(SendReq::Flush(None)),
             };
 
             match req_opt {
@@ -645,15 +647,21 @@ where
                 }
                 Some(SendReq::Feed(msg)) => {
                     Self::feed_msg(msg, sink).await?;
-                    next_ping.set(get_next_ping(ping_interval));
-                    need_flush = true;
+                    next_ping.set(sleep_opt(ping_interval));
+                    if !need_flush {
+                        need_flush = true;
+                        next_flush.set(sleep_opt(flush_interval));
+                    }
                 }
-                Some(SendReq::Flush(flushed_tx)) => {
-                    if !flushed_tx.is_closed() && need_flush {
+                Some(SendReq::Flush(opt_flushed_tx)) => {
+                    if opt_flushed_tx.as_ref().is_none_or(|flushed_tx| !flushed_tx.is_closed()) && need_flush {
                         Self::flush(sink).await?;
                         need_flush = false;
+                        next_flush.set(sleep_opt(None));
                     }
-                    let _ = flushed_tx.send(());
+                    if let Some(flushed_tx) = opt_flushed_tx {
+                        let _ = flushed_tx.send(());
+                    }
                 }
                 None => break,
             }
@@ -718,6 +726,7 @@ where
         let send_task = Self::send_task(
             &mut transport_sink,
             self.remote_cfg.connection_timeout.map(|d| d / 2),
+            self.local_cfg.flush_interval,
             send_rx,
             high_priority_send_rx,
         )
@@ -936,7 +945,7 @@ where
             // Flush send queue.
             GlobalEvt::Port(PortEvt::Flush { flushed_tx }) => {
                 tracing::trace!(op = "flush");
-                permit.send(SendReq::Flush(flushed_tx));
+                permit.send(SendReq::Flush(Some(flushed_tx)));
             }
 
             // Return port credits to remote endpoint.

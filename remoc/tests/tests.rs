@@ -140,8 +140,8 @@ where
         let listener = TcpListener::bind((Ipv4Addr::new(127, 0, 0, 1), tcp_port)).await.unwrap();
         let (socket, _) = listener.accept().await.unwrap();
         let (socket_rx, socket_tx) = socket.into_split();
-        let (conn, tx, rx) =
-            remoc::Connect::io_buffered(Default::default(), socket_rx, socket_tx, 100_000).await.unwrap();
+        let cfg = remoc::Cfg { io_buffer_size: 100_000, ..Default::default() };
+        let (conn, tx, rx) = remoc::Connect::io(cfg, socket_rx, socket_tx).await.unwrap();
         exec::spawn(conn);
         (tx, rx)
     };
@@ -149,8 +149,8 @@ where
     let client = async move {
         let socket = TcpStream::connect((Ipv4Addr::new(127, 0, 0, 1), tcp_port)).await.unwrap();
         let (socket_rx, socket_tx) = socket.into_split();
-        let (conn, tx, rx) =
-            remoc::Connect::io_buffered(Default::default(), socket_rx, socket_tx, 8721).await.unwrap();
+        let cfg = remoc::Cfg { io_buffer_size: 8721, ..Default::default() };
+        let (conn, tx, rx) = remoc::Connect::io(cfg, socket_rx, socket_tx).await.unwrap();
         exec::spawn(conn);
         (tx, rx)
     };

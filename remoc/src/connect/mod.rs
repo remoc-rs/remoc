@@ -3,14 +3,14 @@
 use bytes::Bytes;
 use futures::{Future, FutureExt, Sink, Stream, StreamExt, TryStreamExt, future::BoxFuture};
 use std::{
-    convert::{Infallible, TryInto},
+    convert::Infallible,
     error::Error,
     fmt, io,
     pin::Pin,
     task::{Context, Poll},
 };
-use tokio::io::{AsyncRead, AsyncWrite, BufReader};
-use tokio_util::codec::LengthDelimitedCodec;
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio_util::codec::{FramedRead, FramedWrite};
 
 use crate::{
     RemoteSend,
@@ -18,6 +18,9 @@ use crate::{
     codec,
     rch::base,
 };
+
+pub mod ext;
+mod io_transport;
 
 /// Error occurred during establishing a connection over a physical transport.
 #[cfg_attr(docsrs, doc(cfg(feature = "rch")))]
@@ -229,15 +232,14 @@ impl<'transport, TransportSinkError, TransportStreamError>
 }
 
 impl<'transport> Connect<'transport, io::Error, io::Error> {
-    /// Establishes a connection over an IO transport (an [AsyncRead] and [AsyncWrite]) and
+    /// Establishes a buffered connection over an IO transport (an [AsyncRead] and [AsyncWrite]) and
     /// returns a remote [sender](base::Sender) and [receiver](base::Receiver).
     ///
     /// A [chmux](crate::chmux) connection is established over the transport and a remote channel is opened.
     /// This prepends a length header to each chmux packet for transportation over the unframed connection.
     ///
-    /// This method performs no buffering of read and writes and thus may exhibit suboptimal
-    /// performance if the underlying reader and writer are unbuffered.
-    /// In this case use [io_buffered](Self::io_buffered) instead.
+    /// This method performs internal buffering of reads and writes with the buffer size specified
+    /// by [`Cfg::io_buffer_size`](crate::Cfg::io_buffer_size).
     ///
     /// You must poll the returned [Connect] future or spawn it for the connection to work.
     ///
@@ -256,18 +258,17 @@ impl<'transport> Connect<'transport, io::Error, io::Error> {
         Rx: RemoteSend,
         Codec: codec::Codec,
     {
-        let max_recv_frame_length: usize = cfg.max_frame_length().try_into().unwrap();
-        let transport_sink = LengthDelimitedCodec::builder()
-            .little_endian()
-            .length_field_length(4)
-            .max_frame_length(u32::MAX as _)
-            .new_write(output);
-        let transport_stream = LengthDelimitedCodec::builder()
-            .little_endian()
-            .length_field_length(4)
-            .max_frame_length(max_recv_frame_length)
-            .new_read(input)
-            .map_ok(|item| item.freeze());
+        let encoder = io_transport::LengthCodec::new(u32::MAX);
+        let transport_sink = io_transport::FilterFlushOuter(FramedWrite::with_capacity(
+            io_transport::FilterFlushInner::new(output),
+            encoder,
+            cfg.io_buffer_size,
+        ));
+
+        let decoder = io_transport::LengthCodec::new(cfg.max_frame_length());
+        let transport_stream =
+            FramedRead::with_capacity(input, decoder, cfg.io_buffer_size).map_ok(|item| item.freeze());
+
         Self::framed(cfg, transport_sink, transport_stream).await
     }
 
@@ -277,14 +278,15 @@ impl<'transport> Connect<'transport, io::Error, io::Error> {
     /// A [chmux](crate::chmux) connection is established over the transport and a remote channel is opened.
     /// This prepends a length header to each chmux packet for transportation over the unframed connection.
     ///
-    /// This method performs internal buffering of reads and writes.
+    /// This method performs internal buffering of reads and writes with the specified `io_buffer_size` size.
     ///
     /// You must poll the returned [Connect] future or spawn it for the connection to work.
     ///
     /// # Panics
     /// Panics if the chmux configuration is invalid.
+    #[deprecated = "use Connect::io and set the buffer size via Cfg::io_buffer_size"]
     pub async fn io_buffered<Read, Write, Tx, Rx, Codec>(
-        cfg: crate::Cfg, input: Read, output: Write, buffer: usize,
+        mut cfg: crate::Cfg, input: Read, output: Write, io_buffer_size: usize,
     ) -> Result<
         (Connect<'transport, io::Error, io::Error>, base::Sender<Tx, Codec>, base::Receiver<Rx, Codec>),
         ConnectError<io::Error, io::Error>,
@@ -296,20 +298,8 @@ impl<'transport> Connect<'transport, io::Error, io::Error> {
         Rx: RemoteSend,
         Codec: codec::Codec,
     {
-        let max_recv_frame_length: usize = cfg.max_frame_length().try_into().unwrap();
-        let mut transport_sink = LengthDelimitedCodec::builder()
-            .little_endian()
-            .length_field_length(4)
-            .max_frame_length(u32::MAX as _)
-            .new_write(output);
-        transport_sink.set_backpressure_boundary(buffer);
-        let transport_stream = LengthDelimitedCodec::builder()
-            .little_endian()
-            .length_field_length(4)
-            .max_frame_length(max_recv_frame_length)
-            .new_read(BufReader::with_capacity(buffer, input))
-            .map_ok(|item| item.freeze());
-        Self::framed(cfg, transport_sink, transport_stream).await
+        cfg.io_buffer_size = io_buffer_size;
+        Self::io(cfg, input, output).await
     }
 }
 

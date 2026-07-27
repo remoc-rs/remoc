@@ -38,6 +38,10 @@ pub struct Cfg {
     /// for sending.
     /// By default this is disabled (`None`).
     pub flush_interval: Option<Duration>,
+    /// Buffer size for read and writes when [connecting over an IO transport](crate::chmux::Connect::io).
+    ///
+    /// By default this is 64 kB.
+    pub io_buffer_size: usize,
     /// Maximum number of open ports.
     ///
     /// This must not exceed 2^30 = 1_073_741_824.
@@ -140,6 +144,7 @@ impl Default for Cfg {
         Self {
             connection_timeout: Some(Duration::from_secs(60)),
             flush_interval: None,
+            io_buffer_size: 65_536,
             max_ports: 4096,
             ports_exhausted: PortsExhausted::Wait(Some(Duration::from_secs(60))),
             max_data_size: 524_288,

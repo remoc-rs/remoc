@@ -554,6 +554,14 @@ impl PortCreditReturner {
             }
         }
     }
+
+    /// Starts reporting that messages have been processed.
+    ///
+    /// [Self::ready] must have been called before this function is called.
+    pub fn start_report_processed(&mut self, remote_port: u32, tx: &mpsc::Sender<PortEvt>) {
+        assert!(self.tasks.is_empty(), "report_received called without ready");
+        self.queue_port_evt(tx, PortEvt::ReceivedReport { remote_port });
+    }
 }
 
 /// A pair of [PortCreditMonitor] and [PortCreditReturner].

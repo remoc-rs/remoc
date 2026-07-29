@@ -89,6 +89,16 @@ pub enum MultiplexMsg {
         /// Port ids
         ids: Option<Vec<u32>>,
     },
+    /// Request report when data has been processed up to this message.
+    RequestReceivedReport {
+        /// Port of side that receives this message.
+        port: u32,
+    },
+    /// Reports that data has been processed up to this message.
+    ReceivedReport {
+        /// Port of side that receives this message.
+        port: u32,
+    },
     /// Give flow credits to a port.
     PortCredits {
         /// Port of side that receives this message.
@@ -153,6 +163,8 @@ pub const MSG_GLOBAL_CREDITS: u8 = 16;
 pub const MSG_GLOBAL_CREDITS_REPORT: u8 = 17;
 pub const MSG_INHIBIT_GLOBAL_CREDIT_USAGE_BY_PORT: u8 = 18;
 pub const MSG_ALLOW_GLOBAL_CREDIT_USAGE_BY_PORT: u8 = 19;
+pub const MSG_REQUEST_RECEIVED_REPORT: u8 = 20;
+pub const MSG_RECEIVED_REPORT: u8 = 21;
 
 pub const MSG_OPEN_PORT_FLAG_WAIT: u8 = 0b0000_0001;
 pub const MSG_OPEN_PORT_FLAG_ID: u8 = 0b0000_0010;
@@ -266,6 +278,14 @@ impl MultiplexMsg {
                         }
                     }
                 }
+            }
+            MultiplexMsg::RequestReceivedReport { port } => {
+                writer.write_u8(MSG_REQUEST_RECEIVED_REPORT)?;
+                writer.write_u32::<LE>(*port)?;
+            }
+            MultiplexMsg::ReceivedReport { port } => {
+                writer.write_u8(MSG_RECEIVED_REPORT)?;
+                writer.write_u32::<LE>(*port)?;
             }
             MultiplexMsg::PortCredits { port, credits } => {
                 writer.write_u8(MSG_PORT_CREDITS)?;
@@ -382,6 +402,8 @@ impl MultiplexMsg {
                 }
                 Self::PortData { port, first, last, wait, ports, ids }
             }
+            MSG_REQUEST_RECEIVED_REPORT => Self::RequestReceivedReport { port: reader.read_u32::<LE>()? },
+            MSG_RECEIVED_REPORT => Self::ReceivedReport { port: reader.read_u32::<LE>()? },
             MSG_PORT_CREDITS => {
                 Self::PortCredits { port: reader.read_u32::<LE>()?, credits: reader.read_u32::<LE>()? }
             }
@@ -436,6 +458,8 @@ pub struct ExchangedCfg {
     pub connect_queue: u16,
     /// Initial global credits, if supported.
     pub global_credits: Option<u32>,
+    /// Whether sending received reports is supported.
+    pub received_report: bool,
 }
 
 impl ExchangedCfg {
@@ -447,6 +471,7 @@ impl ExchangedCfg {
             port_receive_buffer: cfg.port_receive_buffer,
             connect_queue: cfg.connect_queue,
             global_credits: Some(global_credits),
+            received_report: true,
         }
     }
 
@@ -457,9 +482,9 @@ impl ExchangedCfg {
         writer.write_u32::<LE>(self.chunk_size)?;
         writer.write_u32::<LE>(self.port_receive_buffer)?;
         writer.write_u16::<LE>(self.connect_queue)?;
-        if let Some(global_credits) = self.global_credits {
-            writer.write_u32::<LE>(global_credits)?;
-        }
+        writer.write_u32::<LE>(self.global_credits.unwrap())?;
+        writer.write_u8(self.received_report.into())?;
+
         Ok(())
     }
 
@@ -482,10 +507,14 @@ impl ExchangedCfg {
                 _ => return Err(invalid_data("connect_queue must not be zero")),
             },
             global_credits: None,
+            received_report: false,
         };
 
-        let Ok(gc) = reader.read_u32::<LE>() else { return Ok(this) };
-        this.global_credits = Some(gc);
+        let Ok(global_credits) = reader.read_u32::<LE>() else { return Ok(this) };
+        this.global_credits = Some(global_credits);
+
+        let Ok(received_report) = reader.read_u8() else { return Ok(this) };
+        this.received_report = received_report != 0;
 
         Ok(this)
     }

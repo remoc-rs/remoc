@@ -1,4 +1,9 @@
-use futures::{channel::oneshot, future::try_join, stream::StreamExt};
+use futures::{
+    channel::{mpsc, oneshot},
+    future::{join_all, try_join},
+    sink::SinkExt,
+    stream::StreamExt,
+};
 use std::time::Duration;
 use tracing::Instrument;
 
@@ -9,7 +14,7 @@ use crate::loop_transport;
 use remoc::{
     chmux::{self, PortsExhausted, ReceiverStream, SendError},
     exec,
-    exec::time::sleep,
+    exec::time::{sleep, timeout},
 };
 
 fn cfg() -> chmux::Cfg {
@@ -232,6 +237,144 @@ async fn receiver_stream() {
     drop(a_server);
 
     println!("Waiting for multiplexers");
+    a_mux_done_rx.await.unwrap();
+    b_mux_done_rx.await.unwrap();
+}
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn all_received() {
+    crate::init();
+
+    loop_transport!(0, a_tx, a_rx, b_tx, b_rx);
+    let ((a_mux, a_client, a_server), (b_mux, b_client, mut b_server)) =
+        try_join(chmux::ChMux::new(cfg(), a_tx, a_rx), chmux::ChMux::new(cfg2(), b_tx, b_rx)).await.unwrap();
+
+    let (a_mux_done_tx, a_mux_done_rx) = oneshot::channel();
+    exec::spawn(async move {
+        a_mux.run().await.expect("a_mux");
+        let _ = a_mux_done_tx.send(());
+    });
+
+    let (b_mux_done_tx, b_mux_done_rx) = oneshot::channel();
+    exec::spawn(async move {
+        b_mux.run().await.expect("b_mux");
+        let _ = b_mux_done_tx.send(());
+    });
+
+    let (mut trigger_recv_tx, mut trigger_recv_rx) = mpsc::channel(16);
+
+    const COUNT: usize = 10;
+
+    let (server_done_tx, server_done_rx) = oneshot::channel();
+    exec::spawn(async move {
+        while let Some((_tx, mut rx)) = b_server.accept().await.unwrap() {
+            let mut count = 0;
+            loop {
+                println!("waiting for trigger {count}");
+                let _ = trigger_recv_rx.recv().await;
+                println!("receiving {count}");
+                let Some(message) = rx.recv().await.unwrap() else { break };
+                let message: Vec<u8> = message.into();
+                assert_eq!(message, format!("message {count}").into_bytes());
+                count += 1;
+            }
+            assert_eq!(count, COUNT);
+        }
+
+        drop(b_client);
+        let _ = server_done_tx.send(());
+    });
+
+    let (mut tx, rx): (chmux::Sender, chmux::Receiver) = a_client.connect().await.unwrap();
+    assert!(tx.is_all_received_supported());
+    // Need one more trigger, since receive notification will be sent by subsequent rx.recv() call
+    // after receiving a message.
+    trigger_recv_tx.send(()).await.unwrap();
+    for count in 0..COUNT {
+        println!("send {count}");
+        tx.send(format!("message {count}").into()).await.unwrap();
+        timeout(Duration::from_millis(100), tx.all_received()).await.expect_err("not received yet");
+        trigger_recv_tx.send(()).await.unwrap();
+        timeout(Duration::from_millis(100), tx.all_received()).await.expect("should now have been received");
+    }
+
+    drop(trigger_recv_tx);
+    let reports: Vec<_> = (0..20).map(|_| tx.all_received()).collect();
+    timeout(Duration::from_secs(1), join_all(reports)).await.expect("received reports timed out");
+
+    drop(tx);
+    drop(rx);
+    drop(a_client);
+    server_done_rx.await.unwrap();
+
+    drop(a_server);
+    a_mux_done_rx.await.unwrap();
+    b_mux_done_rx.await.unwrap();
+}
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn all_received_receiver_dropped() {
+    crate::init();
+
+    loop_transport!(0, a_tx, a_rx, b_tx, b_rx);
+    let ((a_mux, a_client, a_server), (b_mux, b_client, mut b_server)) =
+        try_join(chmux::ChMux::new(cfg(), a_tx, a_rx), chmux::ChMux::new(cfg2(), b_tx, b_rx)).await.unwrap();
+
+    let (a_mux_done_tx, a_mux_done_rx) = oneshot::channel();
+    exec::spawn(async move {
+        a_mux.run().await.expect("a_mux");
+        let _ = a_mux_done_tx.send(());
+    });
+
+    let (b_mux_done_tx, b_mux_done_rx) = oneshot::channel();
+    exec::spawn(async move {
+        b_mux.run().await.expect("b_mux");
+        let _ = b_mux_done_tx.send(());
+    });
+
+    let (receiver_ready_tx, receiver_ready_rx) = oneshot::channel();
+    let (drop_receiver_tx, drop_receiver_rx) = oneshot::channel();
+    let (server_done_tx, server_done_rx) = oneshot::channel();
+    exec::spawn(async move {
+        let Some((_tx, rx)) = b_server.accept().await.unwrap() else { panic!("server closed unexpectedly") };
+        let _ = receiver_ready_tx.send(());
+        let _ = drop_receiver_rx.await;
+        drop(rx);
+
+        drop(b_client);
+        let _ = server_done_tx.send(());
+    });
+
+    let (mut tx, rx): (chmux::Sender, chmux::Receiver) = a_client.connect().await.unwrap();
+    assert!(tx.is_all_received_supported());
+    receiver_ready_rx.await.unwrap();
+    tx.send("message".into()).await.unwrap();
+
+    let reports = (0..4).map(|_| tx.all_received()).collect::<Vec<_>>();
+    let (reports_started_tx, reports_started_rx) = oneshot::channel();
+    let (reports_done_tx, reports_done_rx) = oneshot::channel();
+    exec::spawn(async move {
+        let _ = reports_started_tx.send(());
+        join_all(reports).await;
+        let _ = reports_done_tx.send(());
+    });
+    reports_started_rx.await.unwrap();
+    sleep(Duration::from_millis(10)).await;
+
+    drop_receiver_tx.send(()).unwrap();
+    timeout(Duration::from_secs(1), reports_done_rx)
+        .await
+        .expect("all received reports did not resolve after receiver drop")
+        .unwrap();
+
+    drop(tx);
+    drop(rx);
+    drop(a_client);
+    server_done_rx.await.unwrap();
+
+    drop(a_server);
     a_mux_done_rx.await.unwrap();
     b_mux_done_rx.await.unwrap();
 }

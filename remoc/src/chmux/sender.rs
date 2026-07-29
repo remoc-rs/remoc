@@ -1,6 +1,8 @@
 use bytes::Bytes;
 use futures::{
-    Future, FutureExt, future, ready,
+    Future, FutureExt,
+    future::{self, BoxFuture},
+    ready,
     sink::Sink,
     task::{Context, Poll},
 };
@@ -148,6 +150,7 @@ impl Error for TrySendError {}
 ///
 /// It will also resolve when the channel is closed or the channel multiplexer
 /// is shutdown.
+#[must_use = "the receiver is only closed once this has been awaited"]
 pub struct Closed {
     fut: Pin<Box<dyn Future<Output = ()> + Send>>,
 }
@@ -187,6 +190,49 @@ impl Future for Closed {
     }
 }
 
+/// This future resolves when the remote endpoint has received all data sent on the channel
+/// up to calling [`Sender::all_received`].
+///
+/// It also resolves when the channel is closed or fails.
+///
+/// There is no way to determine whether the data was received or the channel failed.
+#[must_use = "remote endpoint has received data only once this is awaited"]
+pub struct AllReceived(BoxFuture<'static, ()>);
+
+impl fmt::Debug for AllReceived {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("AllReceived").finish()
+    }
+}
+
+impl Future for AllReceived {
+    type Output = ();
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        ready!(self.0.poll_unpin(cx));
+        Poll::Ready(())
+    }
+}
+
+/// This future resolves when flush initiated by calling [`Sender::flush`] has completed.
+///
+/// Dropping this cancels the flush, if possible.
+#[must_use = "the flush is only complete once this has been awaited"]
+pub struct Flushed(BoxFuture<'static, ()>);
+
+impl fmt::Debug for Flushed {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("Flushed").finish()
+    }
+}
+
+impl Future for Flushed {
+    type Output = ();
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        ready!(self.0.poll_unpin(cx));
+        Poll::Ready(())
+    }
+}
+
 /// Sends byte data over a channel.
 pub struct Sender {
     local_port: u32,
@@ -199,6 +245,7 @@ pub struct Sender {
     hangup_notify: Weak<std::sync::Mutex<Option<Vec<oneshot::Sender<()>>>>>,
     port_allocator: PortAllocator,
     storage: AnyStorage,
+    all_received_supported: bool,
     _drop_tx: oneshot::Sender<()>,
 }
 
@@ -221,7 +268,7 @@ impl Sender {
         local_port: u32, remote_port: u32, chunk_size: usize, max_data_size: usize, tx: mpsc::Sender<PortEvt>,
         credits: MixedCreditUser, hangup_recved: Weak<AtomicBool>,
         hangup_notify: Weak<std::sync::Mutex<Option<Vec<oneshot::Sender<()>>>>>, port_allocator: PortAllocator,
-        storage: AnyStorage,
+        storage: AnyStorage, all_received_supported: bool,
     ) -> Self {
         let (_drop_tx, drop_rx) = oneshot::channel();
         let tx_drop = tx.clone();
@@ -241,6 +288,7 @@ impl Sender {
             hangup_notify,
             port_allocator,
             storage,
+            all_received_supported,
             _drop_tx,
         }
     }
@@ -381,14 +429,15 @@ impl Sender {
     ///
     /// The returned future completes once flushing is completed.
     /// Dropping the returned future cancels the flush, if possible.
-    pub fn flush(&mut self) -> impl Future<Output = ()> {
+    pub fn flush(&mut self) -> Flushed {
         let tx = self.tx.clone();
         let (flushed_tx, flushed_rx) = oneshot::channel();
 
-        async move {
+        let task = async move {
             let _ = tx.send(PortEvt::Flush { flushed_tx }).await;
             let _ = flushed_rx.await;
-        }
+        };
+        Flushed(task.boxed())
     }
 
     /// Sends port open requests over this port and returns the connect requests.
@@ -467,6 +516,45 @@ impl Sender {
     /// Returns a future that will resolve when the remote endpoint closes its receiver.
     pub fn closed(&self) -> Closed {
         Closed::new(&self.hangup_notify)
+    }
+
+    /// Returns a future that will resolve when the remote endpoints has received all
+    /// data sent on this channel up to now.
+    ///
+    /// Data is considered received once it has been returned by [`Receiver::recv`],
+    /// [`Receiver::recv_chunk`] or [`Receiver::recv_any`] on the remote endpoint.
+    ///
+    /// This does not imply that the data has actually been processed, since the remote
+    /// endpoint may have failed directly after receiving the data.
+    ///
+    /// If the remote endpoint does not support this method, the returned future will
+    /// resolve immediately.
+    ///
+    /// [`Receiver::recv`]: super::Receiver::recv
+    /// [`Receiver::recv_chunk`]: super::Receiver::recv_chunk
+    /// [`Receiver::recv_any`]: super::Receiver::recv_any
+    pub fn all_received(&self) -> AllReceived {
+        let tx = self.tx.clone();
+        let all_received_supported = self.all_received_supported;
+        let is_sendable = self.credits.port.check_sendable().is_ok();
+        let (processed_tx, processed_rx) = oneshot::channel();
+        let msg = PortEvt::RequestReceivedReport { local_port: self.local_port(), processed_tx };
+
+        let task = async move {
+            if !all_received_supported || !is_sendable {
+                return;
+            }
+
+            let _ = tx.send(msg).await;
+            let _ = processed_rx.await;
+        };
+
+        AllReceived(task.boxed())
+    }
+
+    /// Returns whehter the remote endpoint supports calling [all_received](Self::all_received).
+    pub fn is_all_received_supported(&self) -> bool {
+        self.all_received_supported
     }
 
     /// Returns whether data can be sent anyway, even if remote endpoint closed the channel gracefully.

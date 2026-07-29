@@ -5,7 +5,7 @@ use futures::{
     stream::{Stream, StreamExt},
 };
 use std::{
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet, VecDeque},
     convert::TryFrom,
     error::Error,
     fmt,
@@ -81,6 +81,8 @@ enum PortState {
         /// Remote receiver has been dropped, thus no more sent data will be processed and
         /// no port credits will be returned.
         remote_receiver_dropped: bool,
+        /// Queue for delivering processed reports from remote endpoint.
+        report_processed: VecDeque<oneshot::Sender<()>>,
     },
 }
 
@@ -134,6 +136,18 @@ pub(crate) enum PortEvt {
     Flush {
         /// Notification of flush completion.
         flushed_tx: oneshot::Sender<()>,
+    },
+    /// Request report when data has been processed up to this message.
+    RequestReceivedReport {
+        /// Local port that requests the report.
+        local_port: u32,
+        /// Reply when report has been received.
+        processed_tx: oneshot::Sender<()>,
+    },
+    /// Report that data was processed up to this message.
+    ReceivedReport {
+        /// Remote port that will receive the report.
+        remote_port: u32,
     },
     /// Change whehter global credit usage is allowed.
     ChangeGlobalCreditUsage {
@@ -527,6 +541,7 @@ where
                 receiver_dropped: false,
                 sender_dropped: false,
                 remote_receiver_dropped: false,
+                report_processed: VecDeque::new(),
             },
         ) {
             panic!(
@@ -545,6 +560,7 @@ where
             Arc::downgrade(&hangup_notify),
             self.port_allocator.clone(),
             self.storage.clone(),
+            self.remote_cfg.received_report,
         );
 
         let receiver = Receiver::new(
@@ -918,7 +934,7 @@ where
             // Send data from port.
             GlobalEvt::Port(PortEvt::SendData { remote_port, data, first, last, credits }) => {
                 let msg = MultiplexMsg::Data { port: remote_port, first, last, credits };
-                tracing::trace!(op="send", msg=?msg);
+                tracing::trace!(op = "send", msg =? msg);
                 permit.send(SendReq::Feed(TransportMsg::with_data(msg, data)));
             }
 
@@ -946,6 +962,22 @@ where
             GlobalEvt::Port(PortEvt::Flush { flushed_tx }) => {
                 tracing::trace!(op = "flush");
                 permit.send(SendReq::Flush(Some(flushed_tx)));
+            }
+
+            // Request report from remote endpoint when it processes message up to this point.
+            GlobalEvt::Port(PortEvt::RequestReceivedReport { local_port, processed_tx }) => {
+                let Some(PortState::Connected { remote_port, report_processed, .. }) =
+                    self.ports.get_mut(&local_port)
+                else {
+                    panic!("RequestReportProcessed for {local_port} in invalid state")
+                };
+                report_processed.push_back(processed_tx);
+                send_msg(permit, MultiplexMsg::RequestReceivedReport { port: *remote_port });
+            }
+
+            // Report that messages have been processed.
+            GlobalEvt::Port(PortEvt::ReceivedReport { remote_port }) => {
+                send_msg(permit, MultiplexMsg::ReceivedReport { port: remote_port });
             }
 
             // Return port credits to remote endpoint.
@@ -1228,6 +1260,27 @@ where
                 }
             }
 
+            // Request to report when data up to this point has been processed.
+            MultiplexMsg::RequestReceivedReport { port } => {
+                let Some(PortState::Connected { receiver_tx_data: Some(receiver_tx_data), .. }) =
+                    self.ports.get(&port)
+                else {
+                    return Err(protocol_err(format!(
+                        "received processed report request for non-connected or finished local port {port}",
+                    )));
+                };
+                let _ = receiver_tx_data.send(PortReceiveMsg::RequestReceivedReport);
+            }
+
+            // Remote reports that data has been processed.
+            MultiplexMsg::ReceivedReport { port } => {
+                if let Some(PortState::Connected { report_processed, .. }) = self.ports.get_mut(&port)
+                    && let Some(processed_tx) = report_processed.pop_front()
+                {
+                    let _ = processed_tx.send(());
+                }
+            }
+
             // Give flow credits to a port.
             MultiplexMsg::PortCredits { port, credits } => {
                 if let Some(PortState::Connected { sender_credit_provider, .. }) = self.ports.get_mut(&port) {
@@ -1317,6 +1370,7 @@ where
                     remote_receiver_closed_notify,
                     remote_receiver_closed,
                     remote_receiver_dropped,
+                    report_processed,
                     ..
                 }) = self.ports.get_mut(&port)
                 {
@@ -1330,6 +1384,10 @@ where
                         for tx in notifies {
                             let _ = tx.send(());
                         }
+                    }
+
+                    for processed_tx in report_processed.drain(..) {
+                        let _ = processed_tx.send(());
                     }
 
                     *remote_receiver_dropped = true;

@@ -151,6 +151,8 @@ pub(crate) enum PortReceiveMsg {
     Data(ReceivedData),
     /// Ports have been received.
     PortRequests(ReceivedPortRequests),
+    /// Request to report when messages have been processed up to this point.
+    RequestReceivedReport,
     /// Sender has closed its end.
     Finished,
 }
@@ -466,6 +468,11 @@ impl Receiver {
                         }
                     }
 
+                    // Report that message have been processed up to now.
+                    Some(PortReceiveMsg::RequestReceivedReport) => {
+                        self.channel_credits.start_report_processed(self.remote_port, &self.high_priority_tx);
+                    }
+
                     // Port closure.
                     Some(PortReceiveMsg::Finished) => {
                         self.finished = true;
@@ -546,6 +553,11 @@ impl Receiver {
                             self.receiving = Receiving::Requests(requests);
                         }
                     }
+                }
+
+                // Report that message have been processed up to now.
+                Some(PortReceiveMsg::RequestReceivedReport) => {
+                    self.channel_credits.start_report_processed(self.remote_port, &self.high_priority_tx);
                 }
 
                 // Port closure.

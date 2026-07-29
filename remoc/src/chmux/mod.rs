@@ -36,7 +36,7 @@ pub use listener::{Listener, ListenerError, ListenerStream, Request};
 pub use mux::ChMux;
 pub use port_allocator::{PortAllocator, PortNumber, PortReq};
 pub use receiver::{DataBuf, Received, Receiver, ReceiverStream, RecvAnyError, RecvChunkError, RecvError};
-pub use sender::{ChunkSender, Closed, SendError, Sender, SenderSink, TrySendError};
+pub use sender::{AllReceived, ChunkSender, Closed, SendError, Sender, SenderSink, TrySendError};
 pub use sizer::{BufferSize, BufferSizeQuery, BufferSizer, DynamicBuffer, FixedBuffer, GlobalCreditsReport};
 
 /// Channel multiplexer protocol version.

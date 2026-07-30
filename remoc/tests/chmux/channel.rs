@@ -288,6 +288,7 @@ async fn all_received() {
 
     let (mut tx, rx): (chmux::Sender, chmux::Receiver) = a_client.connect().await.unwrap();
     assert!(tx.is_all_received_supported());
+    tx.set_global_credits_use(false);
     // Need one more trigger, since receive notification will be sent by subsequent rx.recv() call
     // after receiving a message.
     trigger_recv_tx.send(()).await.unwrap();

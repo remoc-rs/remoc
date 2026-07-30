@@ -308,14 +308,14 @@ impl CreditUser {
         inner.check_sendable(self.override_graceful_close)
     }
 
-    /// Whether global credits may be used.
-    pub fn use_global_credits(&self) -> bool {
+    /// Whether remote endpoint allows global credit use.
+    pub fn remote_allows_global_credits(&self) -> bool {
         let Some(inner) = self.inner.upgrade() else { return true };
         inner.use_global_credits.load(Ordering::SeqCst)
     }
 
-    /// Waits for global credit usage to be allowed.
-    pub async fn wait_for_global_credits_usable(&self) {
+    /// Waits for global credit usage to be allowed by remote endpoint.
+    pub async fn wait_for_remote_allowing_global_credits(&self) {
         let Some(inner) = self.inner.upgrade() else { return };
 
         loop {
@@ -758,12 +758,14 @@ pub struct MixedCreditUser {
     pub port: CreditUser,
     /// Global credit user.
     pub global: Arc<Option<CreditUser>>,
+    /// Whether global credit use is enabled.
+    pub global_enabled: bool,
 }
 
 impl MixedCreditUser {
     /// Create a new instance.
     pub fn new(port: CreditUser, global: Arc<Option<CreditUser>>) -> Self {
-        Self { port, global }
+        Self { port, global, global_enabled: true }
     }
 
     /// Requests the specified number of credits for sending without blocking.
@@ -788,7 +790,8 @@ impl MixedCreditUser {
                 break 'acquire;
             }
 
-            if self.port.use_global_credits()
+            if self.global_enabled
+                && self.port.remote_allows_global_credits()
                 && let Some(global) = &*self.global
                 && let Some(credits) = global.try_request(req, min_req)?
             {
@@ -813,7 +816,7 @@ impl MixedCreditUser {
 
         'acquire: {
             match &*self.global {
-                Some(global) => {
+                Some(global) if self.global_enabled => {
                     if let Some(credits) = self.port.try_request(req, min_req)? {
                         req = req.saturating_sub(credits.available());
                         min_req = min_req.saturating_sub(credits.available());
@@ -824,7 +827,7 @@ impl MixedCreditUser {
                         break 'acquire;
                     }
 
-                    if self.port.use_global_credits()
+                    if self.port.remote_allows_global_credits()
                         && let Some(credits) = global.try_request(req, min_req)?
                     {
                         req = req.saturating_sub(credits.available());
@@ -837,7 +840,7 @@ impl MixedCreditUser {
                     }
 
                     let global_req = async {
-                        self.port.wait_for_global_credits_usable().await;
+                        self.port.wait_for_remote_allowing_global_credits().await;
                         global.request(req, min_req).await
                     };
 
@@ -847,7 +850,7 @@ impl MixedCreditUser {
                         credits = global_req => mixed.add(credits?),
                     }
                 }
-                None => {
+                _ => {
                     let credits = self.port.request(req, min_req).await?;
                     mixed.add(credits);
                 }

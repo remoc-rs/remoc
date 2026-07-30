@@ -248,8 +248,10 @@ jobs:
 
       - name: Run cargo tarpaulin
         shell: bash
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-        run: |
-          cargo tarpaulin --out Xml
-          bash <(curl -s https://codecov.io/bash)
+        run: cargo tarpaulin --engine llvm --out Xml
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}          

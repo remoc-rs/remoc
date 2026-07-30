@@ -28,7 +28,7 @@ transport type.
 [![crates.io page](https://img.shields.io/crates/v/remoc)](https://crates.io/crates/remoc)
 [![docs.rs page](https://docs.rs/remoc/badge.svg)](https://docs.rs/remoc)
 [![Apache 2 license](https://img.shields.io/crates/l/remoc)](https://raw.githubusercontent.com/ENQT-GmbH/remoc/master/LICENSE)
-[![codecov](https://codecov.io/gh/ENQT-GmbH/remoc/branch/master/graph/badge.svg?token=UDMOOK0QT8)](https://codecov.io/gh/ENQT-GmbH/remoc)
+[![codecov](https://codecov.io/gh/remoc-rs/remoc/branch/master/graph/badge.svg?token=UDMOOK0QT8)](https://codecov.io/gh/remoc-rs/remoc)
 
 ## Introduction
 

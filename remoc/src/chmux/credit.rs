@@ -83,7 +83,8 @@ impl Drop for AssignedCredits {
         if self.credits > 0
             && let Some(inner) = self.inner.upgrade()
         {
-            inner.credits.fetch_add(self.credits, Ordering::SeqCst);
+            inner.credits.fetch_add(self.credits, Ordering::Relaxed);
+            inner.notify.notify_waiters();
         }
     }
 }
@@ -185,7 +186,7 @@ impl SendableCreditStore {
             return Ok(());
         }
 
-        match self.state.load(Ordering::SeqCst) {
+        match self.state.load(Ordering::Relaxed) {
             Self::STATE_OPEN => Ok(()),
             Self::STATE_CLOSED => Err(SendError::Closed { gracefully: false }),
             Self::STATE_CLOSED_GRACEFULLY => {
@@ -203,7 +204,7 @@ impl SendableCreditStore {
     /// If insufficient, zero is returned.
     fn try_take_credits(&self, req: u32, min_req: u32) -> u32 {
         let mut taken = 0;
-        let _ = self.credits.try_update(Ordering::SeqCst, Ordering::SeqCst, |credits| {
+        let _ = self.credits.try_update(Ordering::Relaxed, Ordering::Relaxed, |credits| {
             if credits >= min_req {
                 taken = credits.min(req);
                 Some(credits - taken)
@@ -227,14 +228,14 @@ pub(crate) struct CreditProvider {
 impl CreditProvider {
     /// Creates a new instance.
     fn new(inner: Arc<SendableCreditStore>) -> Self {
-        Self { min: inner.credits.load(Ordering::SeqCst), seq: 0, inner }
+        Self { min: inner.credits.load(Ordering::Relaxed), seq: 0, inner }
     }
 
     /// Provides the given count of credits for consumption.
     pub fn provide<SinkError, StreamError>(
         &mut self, credits: u32,
     ) -> Result<(), ChMuxError<SinkError, StreamError>> {
-        let old_credits = self.inner.credits.fetch_add(credits, Ordering::SeqCst);
+        let old_credits = self.inner.credits.fetch_add(credits, Ordering::Relaxed);
         if old_credits.checked_add(credits).is_none() {
             return Err(ChMuxError::Protocol("credits overflow".to_string()));
         }
@@ -247,7 +248,7 @@ impl CreditProvider {
 
     /// Sets whether global credits should be used by a port.
     pub fn set_use_global_credits(&mut self, use_global_credits: bool) {
-        self.inner.use_global_credits.store(use_global_credits, Ordering::SeqCst);
+        self.inner.use_global_credits.store(use_global_credits, Ordering::Relaxed);
         self.inner.notify.notify_waiters();
     }
 
@@ -258,7 +259,7 @@ impl CreditProvider {
         } else {
             SendableCreditStore::STATE_CLOSED
         };
-        self.inner.state.store(state, Ordering::SeqCst);
+        self.inner.state.store(state, Ordering::Relaxed);
         self.inner.notify.notify_waiters();
     }
 
@@ -267,7 +268,7 @@ impl CreditProvider {
     /// This reset the minimum credit statistic.
     /// When the sequence number is changed, the minimum credits statistic is reset.
     pub fn take_status(&mut self, new_seq: u8) -> GlobalCreditsReport {
-        let current = self.inner.credits.load(Ordering::SeqCst);
+        let current = self.inner.credits.load(Ordering::Relaxed);
 
         if self.seq != new_seq {
             self.seq = new_seq;
@@ -284,7 +285,7 @@ impl CreditProvider {
 
 impl Drop for CreditProvider {
     fn drop(&mut self) {
-        if self.inner.state.load(Ordering::SeqCst) == SendableCreditStore::STATE_OPEN {
+        if self.inner.state.load(Ordering::Relaxed) == SendableCreditStore::STATE_OPEN {
             self.close(false);
         }
     }
@@ -311,7 +312,7 @@ impl CreditUser {
     /// Whether remote endpoint allows global credit use.
     pub fn remote_allows_global_credits(&self) -> bool {
         let Some(inner) = self.inner.upgrade() else { return true };
-        inner.use_global_credits.load(Ordering::SeqCst)
+        inner.use_global_credits.load(Ordering::Relaxed)
     }
 
     /// Waits for global credit usage to be allowed by remote endpoint.
@@ -324,7 +325,7 @@ impl CreditUser {
                 return;
             }
 
-            if inner.use_global_credits.load(Ordering::SeqCst) {
+            if inner.use_global_credits.load(Ordering::Relaxed) {
                 break;
             }
 
@@ -432,7 +433,7 @@ impl PortCreditMonitor {
         &self, port_credits: u32, global_credits: u32,
     ) -> Result<UsedPortCredit, ChMuxError<SinkError, StreamError>> {
         let Some(new_port_used) =
-            self.0.port_used.fetch_add(port_credits, Ordering::SeqCst).checked_add(port_credits)
+            self.0.port_used.fetch_add(port_credits, Ordering::Relaxed).checked_add(port_credits)
         else {
             return Err(ChMuxError::Protocol("remote endpoint overflowed used port flow credits".to_string()));
         };
@@ -445,7 +446,7 @@ impl PortCreditMonitor {
         }
 
         let Some(new_global_used) =
-            self.0.global_used.fetch_add(global_credits, Ordering::SeqCst).checked_add(global_credits)
+            self.0.global_used.fetch_add(global_credits, Ordering::Relaxed).checked_add(global_credits)
         else {
             return Err(ChMuxError::Protocol("remote endpoint overflowed used global flow credits".to_string()));
         };
@@ -455,8 +456,8 @@ impl PortCreditMonitor {
             let _ = self.0.global_credit_usage.compare_exchange(
                 PortCreditMonitorInner::GLOBAL_CREDIT_USAGE_ACTIVE,
                 PortCreditMonitorInner::GLOBAL_CREDIT_USAGE_INHIBITING,
-                Ordering::SeqCst,
-                Ordering::SeqCst,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
             );
         }
 
@@ -473,12 +474,12 @@ impl PortCreditMonitor {
                 .compare_exchange(
                     PortCreditMonitorInner::GLOBAL_CREDIT_USAGE_INHIBITING,
                     PortCreditMonitorInner::GLOBAL_CREDIT_USAGE_INHIBITED,
-                    Ordering::SeqCst,
-                    Ordering::SeqCst,
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
                 )
                 .is_ok()
         } else {
-            self.0.global_credit_usage.load(Ordering::SeqCst)
+            self.0.global_credit_usage.load(Ordering::Relaxed)
                 == PortCreditMonitorInner::GLOBAL_CREDIT_USAGE_INHIBITING
         }
     }
@@ -530,8 +531,8 @@ impl PortCreditReturner {
             return_threshold = 1;
         }
 
-        let port_used = monitor.port_used.fetch_sub(credit.port, Ordering::SeqCst) - credit.port;
-        let global_used = monitor.global_used.fetch_sub(credit.global, Ordering::SeqCst) - credit.global;
+        let port_used = monitor.port_used.fetch_sub(credit.port, Ordering::Relaxed) - credit.port;
+        let global_used = monitor.global_used.fetch_sub(credit.global, Ordering::Relaxed) - credit.global;
 
         self.to_return += credit.port;
         if self.to_return >= return_threshold {
@@ -543,7 +544,7 @@ impl PortCreditReturner {
         if total_used < monitor.throttle {
             match monitor
                 .global_credit_usage
-                .swap(PortCreditMonitorInner::GLOBAL_CREDIT_USAGE_ACTIVE, Ordering::SeqCst)
+                .swap(PortCreditMonitorInner::GLOBAL_CREDIT_USAGE_ACTIVE, Ordering::Relaxed)
             {
                 PortCreditMonitorInner::GLOBAL_CREDIT_USAGE_ACTIVE => (),
                 PortCreditMonitorInner::GLOBAL_CREDIT_USAGE_INHIBITING => (),
@@ -637,20 +638,20 @@ impl GlobalCreditMonitor {
 
     /// Total number of credits.
     pub fn total(&self) -> u32 {
-        self.total.load(Ordering::SeqCst)
+        self.total.load(Ordering::Relaxed)
     }
 
     /// Threshold that triggers returning credits to remote endpoint.
     pub fn return_threshold(&self) -> u32 {
-        self.return_threshold.load(Ordering::SeqCst)
+        self.return_threshold.load(Ordering::Relaxed)
     }
 
     /// Use global credits.
     pub fn use_credits<SinkError, StreamError>(
         self: &Arc<Self>, credits: u32,
     ) -> Result<UsedGlobalCredit, ChMuxError<SinkError, StreamError>> {
-        match self.used.fetch_add(credits, Ordering::SeqCst).checked_add(credits) {
-            Some(new_used) if new_used <= self.total.load(Ordering::SeqCst) => {
+        match self.used.fetch_add(credits, Ordering::Relaxed).checked_add(credits) {
+            Some(new_used) if new_used <= self.total.load(Ordering::Relaxed) => {
                 Ok(UsedGlobalCredit { credits, monitor: Arc::downgrade(self) })
             }
             _ => Err(ChMuxError::Protocol("remote endpoint used too many global flow credits".to_string())),
@@ -664,9 +665,9 @@ impl GlobalCreditMonitor {
             return;
         }
 
-        self.used.fetch_sub(credits, Ordering::SeqCst);
+        self.used.fetch_sub(credits, Ordering::Relaxed);
 
-        let Some(to_return) = self.to_return.fetch_add(credits, Ordering::SeqCst).checked_add(credits) else {
+        let Some(to_return) = self.to_return.fetch_add(credits, Ordering::Relaxed).checked_add(credits) else {
             panic!("global return credit overflow")
         };
 
@@ -684,14 +685,14 @@ impl GlobalCreditMonitor {
     pub fn return_to_remote(
         &self, buffer_sizer: &mut dyn BufferSizer, report: &GlobalCreditsReport,
     ) -> Option<GlobalCredits> {
-        let mut seq = self.seq.load(Ordering::SeqCst);
+        let mut seq = self.seq.load(Ordering::Relaxed);
         let mut total = self.total();
 
         // Query buffer sizer.
         let query = BufferSizeQuery {
             current_size: total,
-            used: self.used.load(Ordering::SeqCst),
-            returnable: self.to_return.load(Ordering::SeqCst),
+            used: self.used.load(Ordering::Relaxed),
+            returnable: self.to_return.load(Ordering::Relaxed),
             seq,
             report,
             report_is_current: report.seq == seq,
@@ -702,7 +703,7 @@ impl GlobalCreditMonitor {
         let total_changed = if target.size > total {
             // If buffer manager added credits, add them to the return pool.
             let additional = target.size - total;
-            self.to_return.fetch_add(additional, Ordering::SeqCst);
+            self.to_return.fetch_add(additional, Ordering::Relaxed);
             total = target.size;
             tracing::trace!(%total, "added {additional} global flow credits");
             true
@@ -710,7 +711,7 @@ impl GlobalCreditMonitor {
             // If buffer manager removed credits, consume them from the return pool.
             let superflous = total - target.size;
             let mut removed = 0;
-            self.to_return.update(Ordering::SeqCst, Ordering::SeqCst, |to_return| {
+            self.to_return.update(Ordering::Relaxed, Ordering::Relaxed, |to_return| {
                 removed = superflous.min(to_return);
                 to_return - removed
             });
@@ -728,18 +729,18 @@ impl GlobalCreditMonitor {
         // Increment sequence number, if total credit count changed.
         if total_changed {
             seq = seq.wrapping_add(1);
-            self.seq.store(seq, Ordering::SeqCst);
-            self.total.store(total, Ordering::SeqCst);
+            self.seq.store(seq, Ordering::Relaxed);
+            self.total.store(total, Ordering::Relaxed);
         }
 
         // Update return threshold.
         assert!(0 < target.return_threshold && target.return_threshold <= target.size);
-        self.return_threshold.store(target.return_threshold, Ordering::SeqCst);
+        self.return_threshold.store(target.return_threshold, Ordering::Relaxed);
 
         // Send credits to remote endpoint if required.
         let returning = self
             .to_return
-            .try_update(Ordering::SeqCst, Ordering::SeqCst, |to_return| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |to_return| {
                 if total_changed || target.force_return || to_return >= target.return_threshold {
                     Some(0)
                 } else {

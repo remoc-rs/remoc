@@ -78,7 +78,7 @@
 
 use bytes::Buf;
 use futures::FutureExt;
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     fmt,
     future::{self, Future},
@@ -146,8 +146,16 @@ where
         sender_rate_limit_rx.clone(),
         receiver_rate_limit_tx.clone(),
         receiver_rate_limit_rx,
+        TransferStrategy::default(),
     );
-    let receiver = Receiver::new(rx, remote_send_err_tx, None, sender_rate_limit_rx, receiver_rate_limit_tx);
+    let receiver = Receiver::new(
+        rx,
+        remote_send_err_tx,
+        None,
+        sender_rate_limit_rx,
+        receiver_rate_limit_tx,
+        TransferStrategy::default(),
+    );
     (sender, receiver)
 }
 
@@ -250,12 +258,46 @@ impl Forwarding {
     }
 }
 
+/// Strategy for transfering values to the remote endpoint.
+#[derive(Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TransferStrategy {
+    /// Only a single value may be in transfer.
+    ///
+    /// The next value is sent once the previous value has been received.
+    /// This limits the achievable bandwidth of the channel and increases latency.
+    Single,
+    /// A global buffer is used, allowing multiple values to be in transfer.
+    ///
+    /// Global credits and thus buffer space is being used.
+    /// This maximizes the achievable bandwidth of the channel.
+    GlobalBuffered,
+    /// A channel-specific buffer is used, allowing multiple values to be in transfer.
+    ///
+    /// No global credits and thus buffer space is being used.
+    /// This limits the achievable bandwidth of the channel.
+    #[default]
+    #[serde(other)]
+    ChannelBuffered,
+}
+
 /// Extensions for watch channels.
 pub trait WatchExt<T, Codec, const MAX_ITEM_SIZE: usize> {
     /// Sets the maximum item size for the channel.
     fn with_max_item_size<const NEW_MAX_ITEM_SIZE: usize>(
         self,
     ) -> (Sender<T, Codec>, Receiver<T, Codec, NEW_MAX_ITEM_SIZE>);
+
+    /// Sets the [transfer strategy](TransferStrategy) for the channel.
+    ///
+    /// The transfer strategy balances throughput, global buffer use and latency.
+    ///
+    /// The default is [`TransferStrategy::ChannelBuffered`].
+    ///
+    /// This must be called before transfering any half of the channel to a
+    /// remote endpoint.
+    fn with_transfer_strategy(
+        self, transfer_strategy: TransferStrategy,
+    ) -> (Sender<T, Codec>, Receiver<T, Codec, MAX_ITEM_SIZE>);
 }
 
 impl<T, Codec, const MAX_ITEM_SIZE: usize> WatchExt<T, Codec, MAX_ITEM_SIZE>
@@ -271,14 +313,26 @@ where
         let rx = rx.set_max_item_size();
         (tx, rx)
     }
+
+    fn with_transfer_strategy(
+        self, transfer_strategy: TransferStrategy,
+    ) -> (Sender<T, Codec>, Receiver<T, Codec, MAX_ITEM_SIZE>) {
+        let (mut tx, mut rx) = self;
+        if let Some(inner) = &mut tx.inner {
+            inner.transfer_strategy = transfer_strategy.clone();
+        }
+        rx.transfer_strategy = transfer_strategy;
+        (tx, rx)
+    }
 }
 
 /// Send implementation for deserializer of Sender and serializer of Receiver.
+#[allow(clippy::too_many_arguments)]
 async fn send_impl<T, Codec>(
     mut rx: tokio::sync::watch::Receiver<Result<T, RecvError>>, raw_tx: chmux::Sender,
     mut raw_rx: chmux::Receiver, remote_send_err_tx: tokio::sync::mpsc::UnboundedSender<RemoteSendError>,
     max_item_size: usize, mut sender_rate_limit_rx: tokio::sync::watch::Receiver<Duration>,
-    mut receiver_rate_limit_tx: RateLimitSender,
+    mut receiver_rate_limit_tx: RateLimitSender, strategy: TransferStrategy,
 ) where
     T: Serialize + Send + Clone + 'static,
     Codec: codec::Codec,
@@ -286,6 +340,7 @@ async fn send_impl<T, Codec>(
     // Encode data using remote sender for sending.
     let mut remote_tx = base::Sender::<Result<T, RecvError>, Codec>::new(raw_tx);
     remote_tx.set_max_item_size(max_item_size);
+    remote_tx.set_global_credits_use(strategy != TransferStrategy::ChannelBuffered);
 
     // Rate limiting state.
     let mut last_send: Option<Instant> = None;
@@ -364,6 +419,10 @@ async fn send_impl<T, Codec>(
 
             last_send = Some(Instant::now());
             send_pending = false;
+
+            if strategy == TransferStrategy::Single {
+                remote_tx.all_received().await;
+            }
         }
     }
 }

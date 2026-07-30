@@ -10,13 +10,11 @@ use remoc::{
     exec::time::sleep,
     rch::{
         base::SendErrorKind,
-        watch::{self, ChangedError, ReceiverStream, SendError},
+        watch::{self, ChangedError, ReceiverStream, SendError, TransferStrategy, WatchExt},
     },
 };
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
-async fn simple() {
+async fn simple(transfer_strategy: TransferStrategy) {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<watch::Receiver<i16>>().await;
 
@@ -24,7 +22,7 @@ async fn simple() {
     let end_value = 124;
 
     println!("Sending remote mpsc channel receiver");
-    let (mut tx, rx) = watch::channel(start_value);
+    let (mut tx, rx) = watch::channel(start_value).with_transfer_strategy(transfer_strategy);
     a_tx.send(rx).await.unwrap();
     println!("Receiving remote mpsc channel receiver");
     let mut rx = b_rx.recv().await.unwrap().unwrap();
@@ -62,6 +60,24 @@ async fn simple() {
 
     println!("Waiting for receive task");
     recv_task.await.unwrap();
+}
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn simple_single_transfer_strategy() {
+    simple(TransferStrategy::Single).await;
+}
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn simple_global_buffered_transfer_strategy() {
+    simple(TransferStrategy::GlobalBuffered).await;
+}
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn simple_channel_buffered_transfer_strategy() {
+    simple(TransferStrategy::ChannelBuffered).await;
 }
 
 #[cfg_attr(not(feature = "js"), tokio::test)]

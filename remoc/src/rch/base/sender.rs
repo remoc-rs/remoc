@@ -22,7 +22,7 @@ use super::{
     io::{ChannelBytesWriter, LimitedBytesWriter},
 };
 use crate::{
-    chmux::{self, AnyStorage, PortReq},
+    chmux::{self, AllReceived, AnyStorage, PortReq},
     codec::{self, SerializationError, StreamingUnavailable},
     exec::{self, task},
     rch::base::io::IoWriter,
@@ -494,5 +494,34 @@ where
     /// trying to receive the item.
     pub fn set_max_item_size(&mut self, max_item_size: usize) {
         self.max_item_size = max_item_size;
+    }
+
+    /// Returns whehter the remote endpoint supports calling [all_received](Self::all_received).
+    ///
+    /// See [chmux::Sender::is_all_received_supported](crate::chmux::Sender::is_all_received_supported) for details.
+    pub fn is_all_received_supported(&self) -> bool {
+        self.sender.is_all_received_supported()
+    }
+
+    /// Returns a future that will resolve when the remote endpoints has received all
+    /// items sent on this channel up to now.    
+    ///
+    /// See [chmux::Sender::all_received](crate::chmux::Sender::all_received) for details.
+    pub fn all_received(&self) -> AllReceived {
+        self.sender.all_received()
+    }
+
+    /// Returns whether this channel may use global credits for sending items.
+    ///
+    /// See [chmux::Sender::are_global_credits_used](crate::chmux::Sender::are_global_credits_used) for details.
+    pub fn are_global_credits_used(&self) -> bool {
+        self.sender.are_global_credits_used()
+    }
+
+    /// Sets whether this channel may use global credits for sending items.
+    ///
+    /// See [chmux::Sender::set_global_credits_use](crate::chmux::Sender::set_global_credits_use) for details.
+    pub fn set_global_credits_use(&mut self, use_global_credits: bool) {
+        self.sender.set_global_credits_use(use_global_credits);
     }
 }

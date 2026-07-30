@@ -7,8 +7,8 @@ use super::{
         RemoteSendError, SendErrorExt,
         base::{self, PortDeserializer, PortSerializer},
     },
-    RateLimitReceiver, RateLimitSender, Receiver, Ref, default_max_item_size, default_rate_limit,
-    rate_limit_channel,
+    RateLimitReceiver, RateLimitSender, Receiver, Ref, TransferStrategy, default_max_item_size,
+    default_rate_limit, rate_limit_channel,
     receiver::RecvError,
 };
 use crate::{RemoteSend, chmux, codec};
@@ -121,6 +121,7 @@ pub(crate) struct SenderInner<T, Codec> {
     sender_rate_limit_rx: tokio::sync::watch::Receiver<Duration>,
     receiver_rate_limit_tx: RateLimitSender,
     receiver_rate_limit_rx: RateLimitReceiver,
+    pub(super) transfer_strategy: TransferStrategy,
     _codec: PhantomData<Codec>,
 }
 
@@ -142,6 +143,9 @@ pub(crate) struct TransportedSender<T, Codec> {
     /// Minimum delay between receiving value updates.
     #[serde(default = "default_rate_limit")]
     receiver_rate_limit: Duration,
+    /// Transfer strategy.
+    #[serde(default)]
+    transfer_strategy: TransferStrategy,
 }
 
 impl<T, Codec> Sender<T, Codec>
@@ -156,7 +160,7 @@ where
         remote_send_err_rx: tokio::sync::mpsc::UnboundedReceiver<RemoteSendError>, max_item_size: usize,
         sender_rate_limit_tx: tokio::sync::watch::Sender<Duration>,
         sender_rate_limit_rx: tokio::sync::watch::Receiver<Duration>, receiver_rate_limit_tx: RateLimitSender,
-        receiver_rate_limit_rx: RateLimitReceiver,
+        receiver_rate_limit_rx: RateLimitReceiver, transfer_strategy: TransferStrategy,
     ) -> Self {
         let inner = SenderInner {
             tx,
@@ -168,6 +172,7 @@ where
             sender_rate_limit_rx,
             receiver_rate_limit_tx,
             receiver_rate_limit_rx,
+            transfer_strategy,
             _codec: PhantomData,
         };
         Self { inner: Some(inner), successor_tx: Mutex::new(None) }
@@ -281,6 +286,7 @@ where
             None,
             inner.sender_rate_limit_rx.clone(),
             inner.receiver_rate_limit_tx.clone(),
+            inner.transfer_strategy.clone(),
         )
     }
 
@@ -397,6 +403,7 @@ where
         let max_item_size = self.max_item_size();
         let sender_rate_limit = self.rate_limit();
         let receiver_rate_limit = self.inner.as_ref().unwrap().receiver_rate_limit_rx.get();
+        let transfer_strategy = self.inner.as_ref().unwrap().transfer_strategy.clone();
 
         // Prepare channel for takeover.
         let (successor_tx, successor_rx) = tokio::sync::oneshot::channel();
@@ -445,6 +452,7 @@ where
             max_item_size: max_item_size.try_into().unwrap_or(u64::MAX),
             sender_rate_limit,
             receiver_rate_limit,
+            transfer_strategy,
         };
         transported.serialize(serializer)
     }
@@ -461,8 +469,15 @@ where
         D: serde::Deserializer<'de>,
     {
         // Get chmux port number from deserialized transport type.
-        let TransportedSender { port, data, max_item_size, sender_rate_limit, receiver_rate_limit, .. } =
-            TransportedSender::<T, Codec>::deserialize(deserializer)?;
+        let TransportedSender {
+            port,
+            data,
+            max_item_size,
+            sender_rate_limit,
+            receiver_rate_limit,
+            transfer_strategy,
+            ..
+        } = TransportedSender::<T, Codec>::deserialize(deserializer)?;
         let max_item_size = usize::try_from(max_item_size).unwrap_or(usize::MAX);
         let (sender_rate_limit_tx, sender_rate_limit_rx) = tokio::sync::watch::channel(sender_rate_limit);
         if data.is_err() {
@@ -476,6 +491,7 @@ where
         let sender_rate_limit_rx2 = sender_rate_limit_rx.clone();
         let (receiver_rate_limit_tx, receiver_rate_limit_rx) = rate_limit_channel(receiver_rate_limit);
         let receiver_rate_limit_tx2 = receiver_rate_limit_tx.clone();
+        let transfer_strategy2 = transfer_strategy.clone();
 
         // Accept chmux port request.
         PortDeserializer::accept(port, move |local_port, request| {
@@ -497,6 +513,7 @@ where
                     max_item_size,
                     sender_rate_limit_rx,
                     receiver_rate_limit_tx,
+                    transfer_strategy,
                 )
                 .await;
             }
@@ -512,6 +529,7 @@ where
             sender_rate_limit_rx2,
             receiver_rate_limit_tx2,
             receiver_rate_limit_rx,
+            transfer_strategy2,
         ))
     }
 }

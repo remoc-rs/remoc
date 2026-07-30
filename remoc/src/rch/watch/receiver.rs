@@ -16,7 +16,7 @@ use super::{
         DEFAULT_MAX_ITEM_SIZE, RemoteSendError,
         base::{self, PortDeserializer, PortSerializer},
     },
-    RateLimitSender, Ref, default_max_item_size, default_rate_limit, rate_limit_channel,
+    RateLimitSender, Ref, TransferStrategy, default_max_item_size, default_rate_limit, rate_limit_channel,
 };
 use crate::{RemoteSend, chmux, codec};
 
@@ -100,6 +100,7 @@ pub struct Receiver<T, Codec = codec::Default, const MAX_ITEM_SIZE: usize = DEFA
     remote_max_item_size: Option<usize>,
     sender_rate_limit_rx: tokio::sync::watch::Receiver<Duration>,
     receiver_rate_limit_tx: RateLimitSender,
+    pub(super) transfer_strategy: TransferStrategy,
     _codec: PhantomData<Codec>,
 }
 
@@ -124,6 +125,9 @@ pub(crate) struct TransportedReceiver<T, Codec> {
     /// Minimum delay between sending value updates.
     #[serde(default = "default_rate_limit")]
     rate_limit: Duration,
+    /// Transfer strategy.
+    #[serde(default)]
+    transfer_strategy: TransferStrategy,
 }
 
 impl<T, Codec> Receiver<T, Codec>
@@ -147,7 +151,7 @@ impl<T, Codec, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, MAX_ITEM_SIZE> {
         rx: tokio::sync::watch::Receiver<Result<T, RecvError>>,
         remote_send_err_tx: tokio::sync::mpsc::UnboundedSender<RemoteSendError>,
         remote_max_item_size: Option<usize>, sender_rate_limit_rx: tokio::sync::watch::Receiver<Duration>,
-        receiver_rate_limit_tx: RateLimitSender,
+        receiver_rate_limit_tx: RateLimitSender, transfer_strategy: TransferStrategy,
     ) -> Self {
         Self {
             rx,
@@ -155,6 +159,7 @@ impl<T, Codec, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, MAX_ITEM_SIZE> {
             remote_max_item_size,
             sender_rate_limit_rx,
             receiver_rate_limit_tx,
+            transfer_strategy,
             _codec: PhantomData,
         }
     }
@@ -249,6 +254,7 @@ impl<T, Codec, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, MAX_ITEM_SIZE> {
             remote_max_item_size: self.remote_max_item_size,
             sender_rate_limit_rx: self.sender_rate_limit_rx.clone(),
             receiver_rate_limit_tx: self.receiver_rate_limit_tx.clone(),
+            transfer_strategy: self.transfer_strategy.clone(),
             _codec: PhantomData,
         }
     }
@@ -314,6 +320,7 @@ where
         let sender_rate_limit_rx = self.sender_rate_limit_rx.clone();
         let receiver_rate_limit_tx = self.receiver_rate_limit_tx.clone();
         let receiver_rate_limit = receiver_rate_limit_tx.get();
+        let transfer_strategy = self.transfer_strategy.clone();
 
         let port = PortSerializer::connect(move |connect| {
             async move {
@@ -334,6 +341,7 @@ where
                     MAX_ITEM_SIZE,
                     sender_rate_limit_rx,
                     receiver_rate_limit_tx,
+                    transfer_strategy,
                 )
                 .await;
             }
@@ -346,6 +354,7 @@ where
             data,
             max_item_size: self.max_item_size().try_into().unwrap_or(u64::MAX),
             rate_limit: receiver_rate_limit,
+            transfer_strategy: self.transfer_strategy.clone(),
             codec: PhantomData,
         };
         transported.serialize(serializer)
@@ -363,8 +372,14 @@ where
         D: serde::Deserializer<'de>,
     {
         // Get chmux port number from deserialized transport type.
-        let TransportedReceiver { port, data, max_item_size, rate_limit: receiver_rate_limit, .. } =
-            TransportedReceiver::<T, Codec>::deserialize(deserializer)?;
+        let TransportedReceiver {
+            port,
+            data,
+            max_item_size,
+            rate_limit: receiver_rate_limit,
+            transfer_strategy,
+            ..
+        } = TransportedReceiver::<T, Codec>::deserialize(deserializer)?;
 
         let max_item_size = usize::try_from(max_item_size).unwrap_or(usize::MAX);
         if max_item_size > MAX_ITEM_SIZE {
@@ -408,7 +423,14 @@ where
         // for which it would be redundant to apply rate limiting.
         let sender_rate_limit_rx = tokio::sync::watch::channel(Duration::ZERO).1;
 
-        Ok(Self::new(rx, remote_send_err_tx, Some(max_item_size), sender_rate_limit_rx, receiver_rate_limit_tx))
+        Ok(Self::new(
+            rx,
+            remote_send_err_tx,
+            Some(max_item_size),
+            sender_rate_limit_rx,
+            receiver_rate_limit_tx,
+            transfer_strategy,
+        ))
     }
 }
 

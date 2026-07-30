@@ -189,10 +189,10 @@ impl DynamicBuffer {
         self.high_level = 4 * self.low_level;
 
         const MB: f32 = 1_048_576.;
-        tracing::debug!("adjusting receive buffer size to {:.1} MB", size as f32 / MB);
+        tracing::trace!("adjusting receive buffer size to {:.1} MB", size as f32 / MB);
         if size > self.record_max {
             self.record_max = size;
-            tracing::info!("maximum receive buffer size is {:.1} MB", self.record_max as f32 / MB);
+            tracing::debug!("maximum receive buffer size increased to {:.1} MB", self.record_max as f32 / MB);
         }
     }
 }

@@ -38,7 +38,7 @@ pub struct Cfg {
     /// for sending.
     /// By default this is disabled (`None`).
     pub flush_interval: Option<Duration>,
-    /// Buffer size for read and writes when [connecting over an IO transport](crate::chmux::Connect::io).
+    /// Buffer size for read and writes when [connecting over an IO transport](crate::Connect::io).
     ///
     /// By default this is 64 kB.
     pub io_buffer_size: usize,

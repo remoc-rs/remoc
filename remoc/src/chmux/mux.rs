@@ -997,53 +997,48 @@ where
 
             // Local port sender has been dropped.
             GlobalEvt::Port(PortEvt::SenderDropped { local_port }) => {
-                if let Some(PortState::Connected { remote_port, sender_dropped, .. }) =
+                let Some(PortState::Connected { remote_port, sender_dropped, .. }) =
                     self.ports.get_mut(&local_port)
-                {
-                    if *sender_dropped {
-                        panic!("PortEvt SenderDropped more than once for port {}", local_port);
-                    }
-                    *sender_dropped = true;
-                    send_msg(permit, MultiplexMsg::SendFinish { port: *remote_port });
-                    self.maybe_free_port(local_port);
-                } else {
-                    panic!("PortEvt SenderDropped for port {} in invalid state", local_port);
+                else {
+                    panic!("PortEvt SenderDropped for port {local_port} in invalid state");
+                };
+                if *sender_dropped {
+                    panic!("PortEvt SenderDropped more than once for port {}", local_port);
                 }
+                *sender_dropped = true;
+                send_msg(permit, MultiplexMsg::SendFinish { port: *remote_port });
+                self.maybe_free_port(local_port);
             }
 
             // Local port receiver has been closed.
             GlobalEvt::Port(PortEvt::ReceiverClosed { local_port }) => {
-                if let Some(PortState::Connected { remote_port, receiver_closed, receiver_dropped, .. }) =
+                let Some(PortState::Connected { remote_port, receiver_closed, receiver_dropped, .. }) =
                     self.ports.get_mut(&local_port)
-                {
-                    if *receiver_closed || *receiver_dropped {
-                        panic!(
-                            "PortEvt ReceiverClosed or ReceiverDropped more than once for port {}",
-                            local_port
-                        );
-                    }
-                    *receiver_closed = true;
-                    send_msg(permit, MultiplexMsg::ReceiveClose { port: *remote_port });
-                } else {
-                    panic!("PortEvt ReceiverClosed for non-connected port {}", local_port);
+                else {
+                    panic!("PortEvt ReceiverClosed for non-connected port {local_port}");
+                };
+                if *receiver_closed || *receiver_dropped {
+                    panic!("PortEvt ReceiverClosed or ReceiverDropped more than once for port {local_port}");
                 }
+                *receiver_closed = true;
+                send_msg(permit, MultiplexMsg::ReceiveClose { port: *remote_port });
             }
 
             // Local port receiver has been dropped.
             // No port credits can be returned afterwards.
-            GlobalEvt::Port(PortEvt::ReceiverDropped { local_port }) => match self.ports.get_mut(&local_port) {
-                Some(PortState::Connected { remote_port, receiver_dropped, .. }) => {
-                    if *receiver_dropped {
-                        panic!("PortEvt ReceiverDropped more than once for port {}.", local_port);
-                    }
-                    *receiver_dropped = true;
-                    send_msg(permit, MultiplexMsg::ReceiveFinish { port: *remote_port });
-                    self.maybe_free_port(local_port);
+            GlobalEvt::Port(PortEvt::ReceiverDropped { local_port }) => {
+                let Some(PortState::Connected { remote_port, receiver_dropped, .. }) =
+                    self.ports.get_mut(&local_port)
+                else {
+                    panic!("PortEvt ReceiverDropped for port {local_port} in invalid state.");
+                };
+                if *receiver_dropped {
+                    panic!("PortEvt ReceiverDropped more than once for port {local_port}");
                 }
-                _ => {
-                    panic!("PortEvt ReceiverDropped for port {} in invalid state.", local_port);
-                }
-            },
+                *receiver_dropped = true;
+                send_msg(permit, MultiplexMsg::ReceiveFinish { port: *remote_port });
+                self.maybe_free_port(local_port);
+            }
 
             // Process that all clients has been dropped.
             GlobalEvt::AllClientsDropped => {
@@ -1123,141 +1118,137 @@ where
 
             // Port opened response from remote endpoint.
             MultiplexMsg::PortOpened { client_port, server_port } => {
-                match self.ports.remove_entry(&client_port) {
-                    Some((local_port, PortState::Connecting { response_tx })) => {
-                        let (sender, receiver) = self.create_port(local_port, server_port);
-                        let _ = response_tx.send(ConnectResponse::Accepted(sender, receiver));
-                    }
-                    _ => {
-                        return Err(protocol_err(format!(
-                            "received PortOpened message for port {client_port} not in connecting state"
-                        )));
-                    }
-                }
+                let Some((local_port, PortState::Connecting { response_tx })) =
+                    self.ports.remove_entry(&client_port)
+                else {
+                    return Err(protocol_err(format!(
+                        "received PortOpened message for port {client_port} not in connecting state"
+                    )));
+                };
+                let (sender, receiver) = self.create_port(local_port, server_port);
+                let _ = response_tx.send(ConnectResponse::Accepted(sender, receiver));
             }
 
             // Port open rejected response from remote endpoint.
-            MultiplexMsg::Rejected { client_port, no_ports } => match self.ports.remove(&client_port) {
-                Some(PortState::Connecting { response_tx }) => {
-                    let _ = response_tx.send(ConnectResponse::Rejected { no_ports });
-                }
-                _ => {
+            MultiplexMsg::Rejected { client_port, no_ports } => {
+                let Some(PortState::Connecting { response_tx }) = self.ports.remove(&client_port) else {
                     return Err(protocol_err(format!(
                         "received Rejected message for port {client_port} not in connecting state"
                     )));
-                }
-            },
+                };
+                let _ = response_tx.send(ConnectResponse::Rejected { no_ports });
+            }
 
             // Data from remote endpoint.
             MultiplexMsg::Data { port, first, last, credits } => {
-                if let Some(PortState::Connected {
+                let Some(PortState::Connected {
                     receiver_tx_data: Some(receiver_tx_data),
                     receiver_credit_monitor,
                     ..
                 }) = self.ports.get_mut(&port)
-                {
-                    let data = data.unwrap();
-                    let Ok(size) = u32::try_from(data.len()) else {
-                        return Err(protocol_err(format!("received data exceeds maximum size on port {port}")));
-                    };
-                    if size > self.local_cfg.chunk_size {
-                        return Err(protocol_err(format!(
-                            "received data exceeds maximum chunk size {} on port {port}",
-                            self.local_cfg.chunk_size
-                        )));
-                    };
-
-                    // Determine split between port and global credits.
-                    let total = size.max(1);
-                    let port_credit;
-                    let global_credit;
-                    match credits {
-                        DataCredits::PortOnly => {
-                            global_credit = UsedGlobalCredit::default();
-                            port_credit = receiver_credit_monitor.use_credits(total, 0)?;
-                        }
-                        DataCredits::GlobalOnly => {
-                            global_credit = self.receive_credit_monitor.use_credits(total)?;
-                            port_credit = receiver_credit_monitor.use_credits(0, total)?;
-                        }
-                        DataCredits::GlobalAndPort(global) => {
-                            global_credit = self.receive_credit_monitor.use_credits(global)?;
-                            port_credit =
-                                receiver_credit_monitor.use_credits(total.saturating_sub(global), global)?;
-                        }
-                    }
-
-                    // Update remote credits report.
-                    self.remote_credits_report.consume(global_credit.credits());
-
-                    // Check if global credit usage should be inhibited on port.
-                    if receiver_credit_monitor.inhibiting_global_credit_usage(false) {
-                        self.outstanding_inhibit_global_credit_usage_ports.insert(port);
-                    }
-
-                    let _ = receiver_tx_data.send(PortReceiveMsg::Data(ReceivedData {
-                        buf: data,
-                        first,
-                        last,
-                        port_credit,
-                        global_credit,
-                    }));
-                } else {
+                else {
                     return Err(protocol_err(format!(
                         "received data for non-connected or finished local port {port}"
                     )));
+                };
+
+                let data = data.unwrap();
+                let Ok(size) = u32::try_from(data.len()) else {
+                    return Err(protocol_err(format!("received data exceeds maximum size on port {port}")));
+                };
+                if size > self.local_cfg.chunk_size {
+                    return Err(protocol_err(format!(
+                        "received data exceeds maximum chunk size {} on port {port}",
+                        self.local_cfg.chunk_size
+                    )));
+                };
+
+                // Determine split between port and global credits.
+                let total = size.max(1);
+                let port_credit;
+                let global_credit;
+                match credits {
+                    DataCredits::PortOnly => {
+                        global_credit = UsedGlobalCredit::default();
+                        port_credit = receiver_credit_monitor.use_credits(total, 0)?;
+                    }
+                    DataCredits::GlobalOnly => {
+                        global_credit = self.receive_credit_monitor.use_credits(total)?;
+                        port_credit = receiver_credit_monitor.use_credits(0, total)?;
+                    }
+                    DataCredits::GlobalAndPort(global) => {
+                        global_credit = self.receive_credit_monitor.use_credits(global)?;
+                        port_credit =
+                            receiver_credit_monitor.use_credits(total.saturating_sub(global), global)?;
+                    }
                 }
+
+                // Update remote credits report.
+                self.remote_credits_report.consume(global_credit.credits());
+
+                // Check if global credit usage should be inhibited on port.
+                if receiver_credit_monitor.inhibiting_global_credit_usage(false) {
+                    self.outstanding_inhibit_global_credit_usage_ports.insert(port);
+                }
+
+                let _ = receiver_tx_data.send(PortReceiveMsg::Data(ReceivedData {
+                    buf: data,
+                    first,
+                    last,
+                    port_credit,
+                    global_credit,
+                }));
             }
 
             // Ports from remote endpoint.
             MultiplexMsg::PortData { port, first, last, wait, ports, ids } => {
-                if let Some(PortState::Connected {
+                let Some(PortState::Connected {
                     receiver_tx_data: Some(receiver_tx_data),
                     receiver_credit_monitor,
                     ..
                 }) = self.ports.get_mut(&port)
-                {
-                    for port in &ports {
-                        if !self.outstanding_remote_port_requests.insert(*port) {
-                            return Err(protocol_err(format!(
-                                "remote endpoint sent PortData request for same remote port {port} twice"
-                            )));
-                        }
-                    }
-
-                    let used_credit =
-                        match ports.len().checked_mul(size_of::<u32>()).and_then(|v| u32::try_from(v).ok()) {
-                            Some(size) if size <= self.local_cfg.chunk_size => {
-                                receiver_credit_monitor.use_credits(size, 0)?
-                            }
-                            _ => {
-                                return Err(protocol_err(format!(
-                                    "received ports exceeds maximum chunk size on port {port}",
-                                )));
-                            }
-                        };
-
-                    let port_allocator = self.port_allocator.clone();
-                    let channel_tx = self.channel_tx.clone();
-                    let ids = ids.unwrap_or_else(|| ports.clone());
-                    let requests = ports
-                        .into_iter()
-                        .zip(ids)
-                        .map(|(remote_port, id)| {
-                            Request::new(remote_port, id, wait, port_allocator.clone(), channel_tx.clone())
-                        })
-                        .collect();
-                    let _ = receiver_tx_data.send(PortReceiveMsg::PortRequests(ReceivedPortRequests {
-                        requests,
-                        first,
-                        last,
-                        credit: used_credit,
-                    }));
-                } else {
+                else {
                     return Err(protocol_err(format!(
                         "received port data for non-connected or finished local port {port}",
                     )));
+                };
+
+                for port in &ports {
+                    if !self.outstanding_remote_port_requests.insert(*port) {
+                        return Err(protocol_err(format!(
+                            "remote endpoint sent PortData request for same remote port {port} twice"
+                        )));
+                    }
                 }
+
+                let used_credit =
+                    match ports.len().checked_mul(size_of::<u32>()).and_then(|v| u32::try_from(v).ok()) {
+                        Some(size) if size <= self.local_cfg.chunk_size => {
+                            receiver_credit_monitor.use_credits(size, 0)?
+                        }
+                        _ => {
+                            return Err(protocol_err(format!(
+                                "received ports exceeds maximum chunk size on port {port}",
+                            )));
+                        }
+                    };
+
+                let port_allocator = self.port_allocator.clone();
+                let channel_tx = self.channel_tx.clone();
+                let ids = ids.unwrap_or_else(|| ports.clone());
+                let requests = ports
+                    .into_iter()
+                    .zip(ids)
+                    .map(|(remote_port, id)| {
+                        Request::new(remote_port, id, wait, port_allocator.clone(), channel_tx.clone())
+                    })
+                    .collect();
+                let _ = receiver_tx_data.send(PortReceiveMsg::PortRequests(ReceivedPortRequests {
+                    requests,
+                    first,
+                    last,
+                    credit: used_credit,
+                }));
             }
 
             // Request to report when data up to this point has been processed.
@@ -1306,66 +1297,57 @@ where
 
             // Remote endpoint indicates that it will send no more data for port.
             MultiplexMsg::SendFinish { port } => {
-                if let Some(PortState::Connected { receiver_tx_data, .. }) = self.ports.get_mut(&port) {
-                    match receiver_tx_data.take() {
-                        Some(receiver_tx_data) => {
-                            let _ = receiver_tx_data.send(PortReceiveMsg::Finished);
-                            self.maybe_free_port(port);
-                        }
-                        _ => {
-                            return Err(protocol_err(format!(
-                                "received SendFinish message for local port {} more than once",
-                                port
-                            )));
-                        }
-                    }
-                } else {
+                let Some(PortState::Connected { receiver_tx_data, .. }) = self.ports.get_mut(&port) else {
                     return Err(protocol_err(format!(
-                        "received SendFinish message for local port {} not in connected state",
-                        port
+                        "received SendFinish message for local port {port} not in connected state",
                     )));
-                }
+                };
+                let Some(receiver_tx_data) = receiver_tx_data.take() else {
+                    return Err(protocol_err(format!(
+                        "received SendFinish message for local port {port} more than once",
+                    )));
+                };
+                let _ = receiver_tx_data.send(PortReceiveMsg::Finished);
+                self.maybe_free_port(port);
             }
 
             // Remote indicates that the receiver for a port has been closed and it wishes
             // to receive no more data on that port.
             MultiplexMsg::ReceiveClose { port } => {
-                if let Some(PortState::Connected {
+                let Some(PortState::Connected {
                     sender_credit_provider,
                     remote_receiver_closed_notify,
                     remote_receiver_closed,
                     ..
                 }) = self.ports.get_mut(&port)
-                {
-                    if !remote_receiver_closed.load(Ordering::Relaxed) {
-                        // Disable credits provider.
-                        sender_credit_provider.close(true);
-
-                        // Send hangup notifications.
-                        remote_receiver_closed.store(true, Ordering::Relaxed);
-                        let notifies = remote_receiver_closed_notify.lock().unwrap().take().unwrap();
-                        for tx in notifies {
-                            let _ = tx.send(());
-                        }
-
-                        self.maybe_free_port(port);
-                    } else {
-                        return Err(protocol_err(format!(
-                            "received more than one ReceiveClose message for port {}",
-                            port
-                        )));
-                    }
-                } else {
+                else {
                     return Err(protocol_err(format!(
-                        "received ReceiveClose message for port {} not in connected state",
-                        port
+                        "received ReceiveClose message for port {port} not in connected state",
+                    )));
+                };
+
+                if remote_receiver_closed.load(Ordering::Relaxed) {
+                    return Err(protocol_err(format!(
+                        "received more than one ReceiveClose message for port {port}",
                     )));
                 }
+
+                // Disable credits provider.
+                sender_credit_provider.close(true);
+
+                // Send hangup notifications.
+                remote_receiver_closed.store(true, Ordering::Relaxed);
+                let notifies = remote_receiver_closed_notify.lock().unwrap().take().unwrap();
+                for tx in notifies {
+                    let _ = tx.send(());
+                }
+
+                self.maybe_free_port(port);
             }
 
             // Remote hang up indicates that it will not process any more data on a port.
             MultiplexMsg::ReceiveFinish { port } => {
-                if let Some(PortState::Connected {
+                let Some(PortState::Connected {
                     sender_credit_provider,
                     remote_receiver_closed_notify,
                     remote_receiver_closed,
@@ -1373,30 +1355,30 @@ where
                     report_processed,
                     ..
                 }) = self.ports.get_mut(&port)
-                {
-                    if !remote_receiver_closed.load(Ordering::Relaxed) {
-                        // Disable credits provider.
-                        sender_credit_provider.close(false);
-
-                        // Send hangup notifications.
-                        remote_receiver_closed.store(true, Ordering::Relaxed);
-                        let notifies = remote_receiver_closed_notify.lock().unwrap().take().unwrap();
-                        for tx in notifies {
-                            let _ = tx.send(());
-                        }
-                    }
-
-                    for processed_tx in report_processed.drain(..) {
-                        let _ = processed_tx.send(());
-                    }
-
-                    *remote_receiver_dropped = true;
-                    self.maybe_free_port(port);
-                } else {
+                else {
                     return Err(protocol_err(format!(
                         "received ReceiveFinish message for port {port} not in connected state",
                     )));
+                };
+
+                if !remote_receiver_closed.load(Ordering::Relaxed) {
+                    // Disable credits provider.
+                    sender_credit_provider.close(false);
+
+                    // Send hangup notifications.
+                    remote_receiver_closed.store(true, Ordering::Relaxed);
+                    let notifies = remote_receiver_closed_notify.lock().unwrap().take().unwrap();
+                    for tx in notifies {
+                        let _ = tx.send(());
+                    }
                 }
+
+                for processed_tx in report_processed.drain(..) {
+                    let _ = processed_tx.send(());
+                }
+
+                *remote_receiver_dropped = true;
+                self.maybe_free_port(port);
             }
 
             // Remote provided us with global flow credits.

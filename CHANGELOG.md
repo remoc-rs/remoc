@@ -4,6 +4,99 @@ All notable changes to Remoc will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.19.0 - 2026-08-03
+This is a large release that significantly improves throughput and latency of the
+underlying channel multiplexer, adds monitoring and rate limiting facilities and
+makes many channels usable locally.
+
+Remoc 0.19 remains wire-compatible with Remoc 0.18, i.e. endpoints running either
+version can still talk to each other.
+
+### Added
+- rch: new [I/O channel](https://docs.rs/remoc/0.19/remoc/rch/io/index.html) that
+  implements `AsyncRead` and `AsyncWrite` for streaming binary data of known or
+  unknown size, with integrity verification once the transfer completes
+- rch: rate limiting for watch channels; both the sender (`watch::Sender::set_rate_limit`)
+  and the receiver (`watch::Receiver::set_rate_limit`) can request a minimum delay
+  between value updates; intermediate values are coalesced and the latest value is
+  always eventually delivered
+- rch: `watch::TransferStrategy` and `WatchExt::with_transfer_strategy` to trade off
+  throughput, latency and buffer usage of a watch channel
+- rch: `watch::Receiver::wait_for`, `has_changed`, `mark_changed` and `mark_unchanged`
+- rch: `watch::Sender::send_if_modified` and `send_if_different`
+- rch: `mpsc::Sender::try_reserve`
+- rch: `mpsc::forward` and `oneshot::forward` to forward a local Tokio channel to a
+  remote endpoint, plus `Receiver::forwarded` constructors for mpsc, oneshot and watch
+- rch: `broadcast::WeakSender` and `broadcast::Sender::downgrade`, `strong_count`
+  and `weak_count`
+- rch: `bin` channels can now be used fully locally; when both ends stay in the same
+  process a lightweight loopback is used and no serialization takes place
+- rch: `base::Sender::into_inner` and `base::Receiver::into_inner` to obtain the
+  underlying chmux channel
+- rtc: [monitors](https://docs.rs/remoc/0.19/remoc/rtc/monitor/index.html) that
+  observe and control every request of a client (`MonitorableClient::set_monitor`),
+  server (`MonitorableServer::set_monitor`) and request receiver
+  (`MonitorableReqReceiver::set_monitor`). A monitor can pass, delay, guard, drop or
+  reject each request. The following ready-to-use monitors are provided:
+    - `RateLimitMonitor` — limits the request rate using a sliding window,
+    - `ConcurrentLimitMonitor` — limits the number of concurrently processed requests,
+    - `IncompatibleClientMonitor` — logs and limits requests from clients that are
+      partly incompatible with the server,
+    - `IncompatibleServerMonitor` — logs and throttles calls to methods that are not
+      supported by the server.
+  
+  Monitors can be combined using `ChainedMonitor`.
+- rtc: remote traits may now declare associated types
+- rtc: request enums expose `trait_name()` and `method_name()` for logging and
+  monitoring purposes
+- rfn: the number of concurrent invocations of a remote function is now limited;
+  configurable via `RFnProvider::set_max_concurrency` (default: 32)
+- robj: lazy blobs can now be used fully locally, without any copying of the data
+- connect: `Connect::loopback` for establishing a connection to yourself, which is
+  useful for testing and for uniformly handling local and remote objects
+- chmux: `Sender::flush` for explicitly flushing the transport, together with the
+  `Cfg::flush_interval` option
+- chmux: `Sender::all_received` to await that the remote endpoint has received all
+  data sent so far
+
+### Changed
+- performance: the channel multiplexer now uses a dynamically sized, globally shared
+  receive buffer. This substantially improves throughput, especially when the underlying 
+  connection has high latency.
+- performance: connections established with `Connect::io` are now buffered internally
+  by default; the buffer size is configured via `Cfg::io_buffer_size`
+- **BREAKING**: chmux: the configuration (`Cfg`) has changed:
+    - `receive_buffer` has been replaced by `port_receive_buffer`,
+      `port_receive_throttle` and `shared_receive_buffer`,
+    - `flush_delay` has been replaced by the optional `flush_interval`,
+    - `io_buffer_size` has been added,
+    - the presets `Cfg::balanced()`, `Cfg::compact()` and `Cfg::throughput()` have
+      been removed
+    - `Cfg` no longer implements `Serialize`, `Deserialize`, `PartialEq`, `Eq`,
+      `PartialOrd`, `Ord` and `Hash`,
+- **BREAKING**: rtc: the request receiver server variant now receives requests of
+  type `rtc::Req<Value, Ref, RefMut>`, which groups the methods of a trait by how
+  they take `self`. Correspondingly the macro now generates `...ReqValue`,
+  `...ReqRef` and `...ReqRefMut` enums instead of a single `...Req` enum.
+- **BREAKING**: rtc: `ReqReceiver` no longer implements `Stream` directly; call
+  `ReqReceiver::into_stream()` to obtain a `ReqReceiverStream`
+- **BREAKING**: rtc: `OnReqReceiveError` and `ServerBase::set_on_req_receive_error`
+  have been removed; use a [server monitor](https://docs.rs/remoc/0.19/remoc/rtc/trait.ServerMonitor.html)
+  to react to failing requests
+- **BREAKING**: rch: `watch::ChangedError` has a new `Recv` variant, so that a
+  receive error is no longer misreported as a closed channel
+- update MSRV to 1.95
+- `Connect::io_buffered` is removed; just use `Connect::io` together with
+  `Cfg::io_buffer_size`
+
+### Fixed
+- robs: subscriptions to mirrors of an observable collection now end when the
+  original subscription ends
+- rfn: fixed a panic when an `RFnOnce` was dropped without being called
+- rch: `watch::Receiver::changed` on a receiver that was sent to a
+  remote endpoint no longer returns immediately for the initial value; it now waits
+  for an actual change of the value
+
 ## 0.18.3 - 2025-09-19
 ### Added
 - robs: added remotely observable VecDeque

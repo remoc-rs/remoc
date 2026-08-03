@@ -90,7 +90,7 @@ pub struct Cfg {
     pub port_receive_buffer: u32,
     /// Receive buffer level at which to throttle a port in bytes.
     ///
-    /// By default this is 64 kB.
+    /// By default this is 1 MB.
     pub port_receive_throttle: u32,
     /// Sizer for global receive buffer shared by all ports in bytes.
     ///

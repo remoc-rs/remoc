@@ -271,36 +271,6 @@ impl<'transport> Connect<'transport, io::Error, io::Error> {
 
         Self::framed(cfg, transport_sink, transport_stream).await
     }
-
-    /// Establishes a buffered connection over an IO transport (an [AsyncRead] and [AsyncWrite]) and
-    /// returns a remote [sender](base::Sender) and [receiver](base::Receiver).
-    ///
-    /// A [chmux](crate::chmux) connection is established over the transport and a remote channel is opened.
-    /// This prepends a length header to each chmux packet for transportation over the unframed connection.
-    ///
-    /// This method performs internal buffering of reads and writes with the specified `io_buffer_size` size.
-    ///
-    /// You must poll the returned [Connect] future or spawn it for the connection to work.
-    ///
-    /// # Panics
-    /// Panics if the chmux configuration is invalid.
-    #[deprecated = "use Connect::io and set the buffer size via Cfg::io_buffer_size"]
-    pub async fn io_buffered<Read, Write, Tx, Rx, Codec>(
-        mut cfg: crate::Cfg, input: Read, output: Write, io_buffer_size: usize,
-    ) -> Result<
-        (Connect<'transport, io::Error, io::Error>, base::Sender<Tx, Codec>, base::Receiver<Rx, Codec>),
-        ConnectError<io::Error, io::Error>,
-    >
-    where
-        Read: AsyncRead + Send + Sync + Unpin + 'transport,
-        Write: AsyncWrite + Send + Sync + Unpin + 'transport,
-        Tx: RemoteSend,
-        Rx: RemoteSend,
-        Codec: codec::Codec,
-    {
-        cfg.io_buffer_size = io_buffer_size;
-        Self::io(cfg, input, output).await
-    }
 }
 
 impl<TransportSinkError, TransportStreamError> Future for Connect<'_, TransportSinkError, TransportStreamError> {

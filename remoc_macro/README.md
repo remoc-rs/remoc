@@ -10,7 +10,7 @@ It is pulled in automatically when needed and should not be used directly.
 
 Remoc is licensed under the [Apache 2.0 license].
 
-[Apache 2.0 license]: https://github.com/ENQT-GmbH/remoc/blob/master/LICENSE
+[Apache 2.0 license]: https://github.com/remoc-rs/remoc/blob/master/LICENSE
 
 ### Contribution
 

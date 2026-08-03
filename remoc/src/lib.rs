@@ -3,8 +3,8 @@
 #![warn(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc(
-    html_logo_url = "https://raw.githubusercontent.com/ENQT-GmbH/remoc/master/.misc/Remoc.png",
-    html_favicon_url = "https://raw.githubusercontent.com/ENQT-GmbH/remoc/master/.misc/Remoc.png"
+    html_logo_url = "https://raw.githubusercontent.com/remoc-rs/remoc/master/.misc/Remoc.png",
+    html_favicon_url = "https://raw.githubusercontent.com/remoc-rs/remoc/master/.misc/Remoc.png"
 )]
 
 //! Remoc 🦑 — remote multiplexed objects and channels
@@ -106,7 +106,7 @@
 //! # Example
 //!
 //! This is a short example; for a fully worked remote trait calling (RTC) example
-//! see the [examples directory](https://github.com/ENQT-GmbH/remoc/tree/master/examples).
+//! see the [examples directory](https://github.com/remoc-rs/remoc/tree/master/examples).
 //!
 //! In the following example the server listens on TCP port 9870 and the client connects to it.
 //! Then both ends establish a Remoc connection using [Connect::io] over the TCP connection.

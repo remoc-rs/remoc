@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.95"
 license = "Apache-2.0"
 
-repository = "https://github.com/ENQT-GmbH/remoc/"
+repository = "https://github.com/remoc-rs/remoc/"
 authors = [
     "Sebastian Urban <surban@surban.net>",
     "ENQT GmbH <su@enqt.de>",

@@ -27,7 +27,7 @@ transport type.
 
 [![crates.io page](https://img.shields.io/crates/v/remoc)](https://crates.io/crates/remoc)
 [![docs.rs page](https://docs.rs/remoc/badge.svg)](https://docs.rs/remoc)
-[![Apache 2 license](https://img.shields.io/crates/l/remoc)](https://raw.githubusercontent.com/ENQT-GmbH/remoc/master/LICENSE)
+[![Apache 2 license](https://img.shields.io/crates/l/remoc)](https://raw.githubusercontent.com/remoc-rs/remoc/master/LICENSE)
 [![codecov](https://codecov.io/gh/remoc-rs/remoc/branch/master/graph/badge.svg?token=UDMOOK0QT8)](https://codecov.io/gh/remoc-rs/remoc)
 
 ## Introduction
@@ -124,7 +124,7 @@ The minimum supported Rust version (MSRV) is 1.95.
 ## Example
 
 This is a short example; for a fully worked remote trait calling (RTC) example
-see the [examples directory](https://github.com/ENQT-GmbH/remoc/tree/master/examples).
+see the [examples directory](https://github.com/remoc-rs/remoc/tree/master/examples).
 
 In the following example the server listens on TCP port 9870 and the client connects to it.
 Then both ends establish a Remoc connection using `Connect::io()` over the TCP connection.
@@ -255,15 +255,15 @@ work, but it currently has some issues with the interaction between WebAssembly 
 ## Sponsors
 
 Development of Remoc is partially sponsored by
-[ENQT GmbH](https://enqt.de/).
-
-[![ENQT Logo](https://raw.githubusercontent.com/ENQT-GmbH/remoc/master/.misc/ENQT.png)](https://enqt.de/)
+[ENQT GmbH](https://enqt.de/)
+and
+[mlilabs GmbH](https://www.mlilabs.de/).
 
 ## License
 
 Remoc is licensed under the [Apache 2.0 license].
 
-[Apache 2.0 license]: https://github.com/ENQT-GmbH/remoc/blob/master/LICENSE
+[Apache 2.0 license]: https://github.com/remoc-rs/remoc/blob/master/LICENSE
 
 ### Contribution
 

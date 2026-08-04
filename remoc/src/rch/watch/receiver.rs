@@ -18,7 +18,11 @@ use super::{
     },
     RateLimitSender, Ref, TransferStrategy, default_max_item_size, default_rate_limit, rate_limit_channel,
 };
-use crate::{RemoteSend, chmux, codec};
+use crate::{
+    RemoteSend, chmux,
+    codec::{self, ErasedDeserializer, ErasedSerializer},
+    rch::watch::{AnyCloneSend, Factory},
+};
 
 /// An error occurred during receiving over a watch channel.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -95,13 +99,13 @@ impl Error for ChangedError {}
 /// a [ReceiverStream].
 #[derive(Clone)]
 pub struct Receiver<T, Codec = codec::Default, const MAX_ITEM_SIZE: usize = DEFAULT_MAX_ITEM_SIZE> {
-    rx: tokio::sync::watch::Receiver<Result<T, RecvError>>,
+    rx: tokio::sync::watch::Receiver<AnyCloneSend>,
     remote_send_err_tx: tokio::sync::mpsc::UnboundedSender<RemoteSendError>,
     remote_max_item_size: Option<usize>,
     sender_rate_limit_rx: tokio::sync::watch::Receiver<Duration>,
     receiver_rate_limit_tx: RateLimitSender,
     pub(super) transfer_strategy: TransferStrategy,
-    _codec: PhantomData<Codec>,
+    _phantom: fn(T, Codec),
 }
 
 impl<T, Codec, const MAX_ITEM_SIZE: usize> fmt::Debug for Receiver<T, Codec, MAX_ITEM_SIZE> {
@@ -112,13 +116,14 @@ impl<T, Codec, const MAX_ITEM_SIZE: usize> fmt::Debug for Receiver<T, Codec, MAX
 
 /// Watch receiver in transport.
 #[derive(Serialize, Deserialize)]
-pub(crate) struct TransportedReceiver<T, Codec> {
+pub(crate) struct TransportedReceiver<T> {
     /// chmux port number.
     port: u32,
     /// Current data value.
     data: Result<T, RecvError>,
     /// Data codec.
-    codec: PhantomData<Codec>,
+    #[serde(default)]
+    codec: PhantomData<()>,
     /// Maximum item size.
     #[serde(default = "default_max_item_size")]
     max_item_size: u64,
@@ -146,9 +151,12 @@ where
     }
 }
 
-impl<T, Codec, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, MAX_ITEM_SIZE> {
+impl<T, Codec, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, MAX_ITEM_SIZE>
+where
+    T: Clone + Send + Sync + 'static,
+{
     pub(crate) fn new(
-        rx: tokio::sync::watch::Receiver<Result<T, RecvError>>,
+        rx: tokio::sync::watch::Receiver<AnyCloneSend>,
         remote_send_err_tx: tokio::sync::mpsc::UnboundedSender<RemoteSendError>,
         remote_max_item_size: Option<usize>, sender_rate_limit_rx: tokio::sync::watch::Receiver<Duration>,
         receiver_rate_limit_tx: RateLimitSender, transfer_strategy: TransferStrategy,
@@ -160,15 +168,15 @@ impl<T, Codec, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, MAX_ITEM_SIZE> {
             sender_rate_limit_rx,
             receiver_rate_limit_tx,
             transfer_strategy,
-            _codec: PhantomData,
+            _phantom: |_, _| (),
         }
     }
 
     /// Returns a reference to the most recently received value.
     pub fn borrow(&self) -> Result<Ref<'_, T>, RecvError> {
         let ref_res = self.rx.borrow();
-        match &*ref_res {
-            Ok(_) => Ok(Ref(ref_res)),
+        match &*ref_res.downcast_ref::<Result<T, RecvError>>().unwrap() {
+            Ok(_) => Ok(Ref::new(ref_res)),
             Err(err) => Err(err.clone()),
         }
     }
@@ -176,8 +184,8 @@ impl<T, Codec, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, MAX_ITEM_SIZE> {
     /// Returns a reference to the most recently received value and mark that value as seen.
     pub fn borrow_and_update(&mut self) -> Result<Ref<'_, T>, RecvError> {
         let ref_res = self.rx.borrow_and_update();
-        match &*ref_res {
-            Ok(_) => Ok(Ref(ref_res)),
+        match &*ref_res.downcast_ref::<Result<T, RecvError>>().unwrap() {
+            Ok(_) => Ok(Ref::new(ref_res)),
             Err(err) => Err(err.clone()),
         }
     }
@@ -185,7 +193,7 @@ impl<T, Codec, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, MAX_ITEM_SIZE> {
     /// Checks if this channel contains a message that this receiver has not yet seen.
     /// The current value will not be marked as seen.
     pub fn has_changed(&self) -> Result<bool, ChangedError> {
-        if let Err(err) = &*self.rx.borrow()
+        if let Err(err) = &*self.rx.borrow().downcast_ref::<Result<T, RecvError>>().unwrap()
             && err.is_final()
         {
             return Err(ChangedError::Recv(err.clone()));
@@ -195,13 +203,13 @@ impl<T, Codec, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, MAX_ITEM_SIZE> {
 
     /// Wait for a change notification, then mark the newest value as seen.
     pub async fn changed(&mut self) -> Result<(), ChangedError> {
-        if let Err(err) = &*self.rx.borrow()
+        if let Err(err) = &*self.rx.borrow().downcast_ref::<Result<T, RecvError>>().unwrap()
             && err.is_final()
         {
             return Err(ChangedError::Recv(err.clone()));
         }
         self.rx.changed().await.map_err(|_| ChangedError::Closed)?;
-        if let Err(err) = &*self.rx.borrow()
+        if let Err(err) = &*self.rx.borrow().downcast_ref::<Result<T, RecvError>>().unwrap()
             && err.is_final()
         {
             return Err(ChangedError::Recv(err.clone()));
@@ -223,15 +231,15 @@ impl<T, Codec, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, MAX_ITEM_SIZE> {
     pub async fn wait_for(&mut self, mut f: impl FnMut(&T) -> bool) -> Result<Ref<'_, T>, ChangedError> {
         let res = self
             .rx
-            .wait_for(move |res| match res {
+            .wait_for(move |res| match res.downcast_ref::<Result<T, RecvError>>().unwrap() {
                 Ok(value) => f(value),
                 Err(_) => true,
             })
             .await;
 
         match res {
-            Ok(ref_res) => match &*ref_res {
-                Ok(_) => Ok(Ref(ref_res)),
+            Ok(ref_res) => match &*ref_res.downcast_ref::<Result<T, RecvError>>().unwrap() {
+                Ok(_) => Ok(Ref::new(ref_res)),
                 Err(err) => Err(err.clone().into()),
             },
             Err(_) => Err(ChangedError::Closed),
@@ -245,17 +253,15 @@ impl<T, Codec, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, MAX_ITEM_SIZE> {
 
     /// Sets the maximum allowed item size in bytes when receiving items.
     pub fn set_max_item_size<const NEW_MAX_ITEM_SIZE: usize>(mut self) -> Receiver<T, Codec, NEW_MAX_ITEM_SIZE> {
+        let value: Result<T, RecvError> = Err(RecvError::RemoteConnect(chmux::ConnectError::ChMux));
         Receiver {
-            rx: mem::replace(
-                &mut self.rx,
-                tokio::sync::watch::channel(Err(RecvError::RemoteConnect(chmux::ConnectError::ChMux))).1,
-            ),
+            rx: mem::replace(&mut self.rx, tokio::sync::watch::channel(AnyCloneSend::new(value)).1),
             remote_send_err_tx: self.remote_send_err_tx.clone(),
             remote_max_item_size: self.remote_max_item_size,
             sender_rate_limit_rx: self.sender_rate_limit_rx.clone(),
             receiver_rate_limit_tx: self.receiver_rate_limit_tx.clone(),
             transfer_strategy: self.transfer_strategy.clone(),
-            _codec: PhantomData,
+            _phantom: |_, _| (),
         }
     }
 
@@ -313,6 +319,8 @@ where
     where
         S: serde::Serializer,
     {
+        let erased_serialzer = ErasedSerializer::new::<Result<T, RecvError>, Codec>();
+
         // Prepare channel for takeover.
         let mut rx = self.rx.clone();
         let data = rx.borrow_and_update().clone();
@@ -333,7 +341,8 @@ where
                     }
                 };
 
-                super::send_impl::<T, Codec>(
+                super::send_impl(
+                    erased_serialzer,
                     rx,
                     raw_tx,
                     raw_rx,
@@ -349,9 +358,9 @@ where
         })?;
 
         // Encode chmux port number in transport type and serialize it.
-        let transported = TransportedReceiver::<T, Codec> {
+        let transported = TransportedReceiver::<T> {
             port,
-            data,
+            data: data.downcast().unwrap(),
             max_item_size: self.max_item_size().try_into().unwrap_or(u64::MAX),
             rate_limit: receiver_rate_limit,
             transfer_strategy: self.transfer_strategy.clone(),
@@ -363,7 +372,7 @@ where
 
 impl<'de, T, Codec, const MAX_ITEM_SIZE: usize> Deserialize<'de> for Receiver<T, Codec, MAX_ITEM_SIZE>
 where
-    T: RemoteSend + Sync,
+    T: RemoteSend + Clone + Sync,
     Codec: codec::Codec,
 {
     /// Deserializes the receiver after it has been received over a chmux channel.
@@ -371,6 +380,9 @@ where
     where
         D: serde::Deserializer<'de>,
     {
+        let erased_deserialzer = ErasedDeserializer::new::<Result<T, RecvError>, Codec>();
+        let factory = Factory::new::<T>();
+
         // Get chmux port number from deserialized transport type.
         let TransportedReceiver {
             port,
@@ -379,7 +391,7 @@ where
             rate_limit: receiver_rate_limit,
             transfer_strategy,
             ..
-        } = TransportedReceiver::<T, Codec>::deserialize(deserializer)?;
+        } = TransportedReceiver::<T>::deserialize(deserializer)?;
 
         let max_item_size = usize::try_from(max_item_size).unwrap_or(usize::MAX);
         if max_item_size > MAX_ITEM_SIZE {
@@ -390,7 +402,7 @@ where
         }
 
         // Create channels.
-        let (tx, rx) = tokio::sync::watch::channel(data);
+        let (tx, rx) = tokio::sync::watch::channel(AnyCloneSend::new(data));
         let (remote_send_err_tx, remote_send_err_rx) = tokio::sync::mpsc::unbounded_channel();
         let (receiver_rate_limit_tx, receiver_rate_limit_rx) = rate_limit_channel(receiver_rate_limit);
 
@@ -400,12 +412,14 @@ where
                 let (raw_tx, raw_rx) = match request.accept_from(local_port).await {
                     Ok(tx_rx) => tx_rx,
                     Err(err) => {
-                        let _ = tx.send(Err(RecvError::RemoteListen(err)));
+                        let _ = tx.send(factory.err(RecvError::RemoteListen(err)));
                         return;
                     }
                 };
 
-                super::recv_impl::<T, Codec>(
+                super::recv_impl(
+                    erased_deserialzer,
+                    factory,
                     tx,
                     raw_tx,
                     raw_rx,
@@ -452,7 +466,7 @@ impl<T, Codec, const MAX_ITEM_SIZE: usize> fmt::Debug for ReceiverStream<T, Code
 
 impl<T, Codec, const MAX_ITEM_SIZE: usize> ReceiverStream<T, Codec, MAX_ITEM_SIZE>
 where
-    T: RemoteSend + Sync,
+    T: RemoteSend + Clone + Sync,
     Codec: Send + 'static,
 {
     /// Creates a new `ReceiverStream`.
@@ -496,7 +510,7 @@ impl<T, Codec, const MAX_ITEM_SIZE: usize> Unpin for ReceiverStream<T, Codec, MA
 impl<T, Codec, const MAX_ITEM_SIZE: usize> From<Receiver<T, Codec, MAX_ITEM_SIZE>>
     for ReceiverStream<T, Codec, MAX_ITEM_SIZE>
 where
-    T: RemoteSend + Sync,
+    T: RemoteSend + Clone + Sync,
     Codec: Send + 'static,
 {
     fn from(recv: Receiver<T, Codec, MAX_ITEM_SIZE>) -> Self {

@@ -78,8 +78,9 @@
 
 use bytes::Buf;
 use futures::FutureExt;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize};
 use std::{
+    any::Any,
     fmt,
     future::{self, Future},
     ops::Deref,
@@ -91,7 +92,8 @@ use std::{
 
 use super::{DEFAULT_MAX_ITEM_SIZE, RemoteSendError, base};
 use crate::{
-    RemoteSend, chmux, codec,
+    RemoteSend, chmux,
+    codec::{self, AnySend, ErasedDeserializer, ErasedSerializer},
     exec::{
         self,
         time::{Instant, sleep},
@@ -106,19 +108,29 @@ pub use receiver::{ChangedError, Receiver, ReceiverStream, RecvError};
 pub use sender::{SendError, Sender};
 
 /// Returns a reference to the inner value.
-pub struct Ref<'a, T>(tokio::sync::watch::Ref<'a, Result<T, RecvError>>);
+pub struct Ref<'a, T> {
+    watch_ref: tokio::sync::watch::Ref<'a, AnyCloneSend>,
+    _phantom: fn(T),
+}
 
-impl<T> Deref for Ref<'_, T> {
+impl<'a, T> Ref<'a, T> {
+    fn new(watch_ref: tokio::sync::watch::Ref<'a, AnyCloneSend>) -> Self {
+        Self { watch_ref, _phantom: |_| () }
+    }
+}
+
+impl<T: 'static> Deref for Ref<'_, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        self.0.as_ref().unwrap()
+        let value: &Result<T, RecvError> = self.watch_ref.downcast_ref().unwrap();
+        value.as_ref().unwrap()
     }
 }
 
 impl<T> fmt::Debug for Ref<'_, T>
 where
-    T: fmt::Debug,
+    T: fmt::Debug + 'static,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:?}", **self)
@@ -130,9 +142,10 @@ where
 /// The sender and receiver may be sent to remote endpoints via channels.
 pub fn channel<T, Codec>(init: T) -> (Sender<T, Codec>, Receiver<T, Codec>)
 where
-    T: RemoteSend,
+    T: RemoteSend + Sync + Clone,
 {
-    let (tx, rx) = tokio::sync::watch::channel(Ok(init));
+    let value: Result<T, RecvError> = Ok(init);
+    let (tx, rx) = tokio::sync::watch::channel(AnyCloneSend::new(value));
     let (remote_send_err_tx, remote_send_err_rx) = tokio::sync::mpsc::unbounded_channel();
     let (sender_rate_limit_tx, sender_rate_limit_rx) = tokio::sync::watch::channel(default_rate_limit());
     let (receiver_rate_limit_tx, receiver_rate_limit_rx) = rate_limit_channel(default_rate_limit());
@@ -303,7 +316,7 @@ pub trait WatchExt<T, Codec, const MAX_ITEM_SIZE: usize> {
 impl<T, Codec, const MAX_ITEM_SIZE: usize> WatchExt<T, Codec, MAX_ITEM_SIZE>
     for (Sender<T, Codec>, Receiver<T, Codec, MAX_ITEM_SIZE>)
 where
-    T: Send + 'static,
+    T: Send + Sync + Clone + 'static,
 {
     fn with_max_item_size<const NEW_MAX_ITEM_SIZE: usize>(
         self,
@@ -326,19 +339,98 @@ where
     }
 }
 
+pub(crate) trait AnyClone: Any + Send + Sync {
+    fn box_clone(&self) -> Box<dyn AnyClone + Send + Sync>;
+}
+
+impl<T> AnyClone for T
+where
+    T: Any + Clone + Send + Sync,
+{
+    fn box_clone(&self) -> Box<dyn AnyClone + Send + Sync> {
+        Box::new(self.clone())
+    }
+}
+
+pub(crate) struct AnyCloneSend(Box<dyn AnyClone + Send + Sync>);
+
+impl Clone for AnyCloneSend {
+    fn clone(&self) -> Self {
+        Self(self.0.box_clone())
+    }
+}
+
+impl AnyCloneSend {
+    pub fn new<T>(value: T) -> Self
+    where
+        T: AnyClone,
+    {
+        Self(Box::new(value))
+    }
+
+    pub fn into_any_send(self) -> AnySend {
+        self.0
+    }
+
+    pub fn downcast<T: 'static>(self) -> Option<T> {
+        let value: Box<dyn Any + Send> = self.0;
+        value.downcast::<T>().ok().map(|v| *v)
+    }
+
+    pub fn downcast_ref<T: 'static>(&self) -> Option<&T> {
+        let value: &dyn Any = &*self.0;
+        value.downcast_ref::<T>()
+    }
+
+    pub fn downcast_mut<T: 'static>(&mut self) -> Option<&mut T> {
+        let value: &mut dyn Any = &mut *self.0;
+        value.downcast_mut::<T>()
+    }
+}
+
+struct Factory {
+    clone_send: Box<dyn Fn(AnySend) -> AnyCloneSend + Send>,
+    err: Box<dyn Fn(RecvError) -> AnyCloneSend + Send>,
+}
+
+impl Factory {
+    pub fn new<T>() -> Self
+    where
+        T: Clone + Send + Sync + 'static,
+    {
+        Self {
+            clone_send: Box::new(|any_send: AnySend| {
+                let value: Result<T, RecvError> = *any_send.downcast().unwrap();
+                AnyCloneSend::new(value)
+            }),
+            err: Box::new(|err: RecvError| {
+                let value: Result<T, RecvError> = Err(err);
+                AnyCloneSend::new(value)
+            }),
+        }
+    }
+
+    pub fn clone_send(&self, any_send: AnySend) -> AnyCloneSend {
+        (self.clone_send)(any_send)
+    }
+
+    pub fn err(&self, err: RecvError) -> AnyCloneSend {
+        (self.err)(err)
+    }
+}
+
 /// Send implementation for deserializer of Sender and serializer of Receiver.
 #[allow(clippy::too_many_arguments)]
-async fn send_impl<T, Codec>(
-    mut rx: tokio::sync::watch::Receiver<Result<T, RecvError>>, raw_tx: chmux::Sender,
+async fn send_impl(
+    serializer: ErasedSerializer, mut rx: tokio::sync::watch::Receiver<AnyCloneSend>, raw_tx: chmux::Sender,
     mut raw_rx: chmux::Receiver, remote_send_err_tx: tokio::sync::mpsc::UnboundedSender<RemoteSendError>,
     max_item_size: usize, mut sender_rate_limit_rx: tokio::sync::watch::Receiver<Duration>,
     mut receiver_rate_limit_tx: RateLimitSender, strategy: TransferStrategy,
-) where
-    T: Serialize + Send + Clone + 'static,
-    Codec: codec::Codec,
-{
+) {
+    // send = Result<T, RecvError>
+
     // Encode data using remote sender for sending.
-    let mut remote_tx = base::Sender::<Result<T, RecvError>, Codec>::new(raw_tx);
+    let mut remote_tx = base::ErasedSender::new(serializer, raw_tx);
     remote_tx.set_max_item_size(max_item_size);
     remote_tx.set_global_credits_use(strategy != TransferStrategy::ChannelBuffered);
 
@@ -409,7 +501,7 @@ async fn send_impl<T, Codec>(
         // Send updated value to remote endpoint.
         if send || (send_pending && closed) {
             let value = rx.borrow_and_update().clone();
-            if let Err(err) = remote_tx.send(value).await {
+            if let Err(err) = remote_tx.send_erased(value.into_any_send()).await {
                 let _ = remote_send_err_tx.send(RemoteSendError::Send(err.kind.clone()));
                 if err.is_item_specific() {
                     tracing::warn!(%err, "sending over remote channel failed");
@@ -428,16 +520,14 @@ async fn send_impl<T, Codec>(
 }
 
 /// Receive implementation for serializer of Sender and deserializer of Receiver.
-async fn recv_impl<T, Codec>(
-    tx: tokio::sync::watch::Sender<Result<T, RecvError>>, mut raw_tx: chmux::Sender, raw_rx: chmux::Receiver,
+async fn recv_impl(
+    deserializer: ErasedDeserializer, factory: Factory, tx: tokio::sync::watch::Sender<AnyCloneSend>,
+    mut raw_tx: chmux::Sender, raw_rx: chmux::Receiver,
     mut remote_send_err_rx: tokio::sync::mpsc::UnboundedReceiver<RemoteSendError>,
     mut current_err: Option<RemoteSendError>, max_item_size: usize, mut rate_limit_rx: RateLimitReceiver,
-) where
-    T: DeserializeOwned + Send + 'static,
-    Codec: codec::Codec,
-{
+) {
     // Decode raw received data using remote receiver.
-    let mut remote_rx = base::Receiver::<Result<T, RecvError>, Codec>::new(raw_rx);
+    let mut remote_rx = base::ErasedReceiver::new(deserializer, raw_rx);
     remote_rx.set_max_item_size(max_item_size);
 
     // Rate limiting signaling to sender.
@@ -472,14 +562,14 @@ async fn recv_impl<T, Codec>(
             }
 
             // Data received from remote endpoint.
-            res = remote_rx.recv() => {
+            res = remote_rx.recv_erased() => {
                 let mut is_final_err = false;
                 let value = match res {
-                    Ok(Some(value)) => value,
+                    Ok(Some(value)) => factory.clone_send(value),
                     Ok(None) => break,
                     Err(err) => {
                         is_final_err = err.is_final();
-                        Err(RecvError::RemoteReceive(err))
+                        factory.err(RecvError::RemoteReceive(err))
                     },
                 };
                 if tx.send(value).is_err() {

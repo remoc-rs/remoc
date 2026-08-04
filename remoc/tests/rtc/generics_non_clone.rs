@@ -61,7 +61,7 @@ where
 
 impl<T> GenericCounter<T> for GenericCounterObj<T>
 where
-    T: remoc::RemoteSend + CheckedAddable + Default + Sync,
+    T: remoc::RemoteSend + CheckedAddable + Default + Clone + Sync,
 {
     async fn value(&self) -> Result<T, remoc::rtc::CallError> {
         Ok(self.value.my_clone())

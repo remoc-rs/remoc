@@ -11,7 +11,11 @@ use super::{
     default_rate_limit, rate_limit_channel,
     receiver::RecvError,
 };
-use crate::{RemoteSend, chmux, codec};
+use crate::{
+    RemoteSend, chmux,
+    codec::{self, ErasedDeserializer, ErasedSerializer},
+    rch::watch::{AnyCloneSend, Factory},
+};
 
 /// An error occurred during sending over an mpsc channel.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -101,8 +105,9 @@ impl From<RemoteSendError> for SendError {
 ///
 /// Instances are created by the [channel](super::channel) function.
 pub struct Sender<T, Codec = codec::Default> {
-    pub(super) inner: Option<SenderInner<T, Codec>>,
-    successor_tx: Mutex<Option<tokio::sync::oneshot::Sender<SenderInner<T, Codec>>>>,
+    pub(super) inner: Option<SenderInner>,
+    successor_tx: Mutex<Option<tokio::sync::oneshot::Sender<SenderInner>>>,
+    _phantom: fn(T, Codec),
 }
 
 impl<T, Codec> fmt::Debug for Sender<T, Codec> {
@@ -111,8 +116,8 @@ impl<T, Codec> fmt::Debug for Sender<T, Codec> {
     }
 }
 
-pub(crate) struct SenderInner<T, Codec> {
-    tx: tokio::sync::watch::Sender<Result<T, RecvError>>,
+pub(crate) struct SenderInner {
+    tx: tokio::sync::watch::Sender<AnyCloneSend>, // Result<T, RecvError>>
     remote_send_err_tx: tokio::sync::mpsc::UnboundedSender<RemoteSendError>,
     remote_send_err_rx: Mutex<tokio::sync::mpsc::UnboundedReceiver<RemoteSendError>>,
     current_err: Mutex<Option<RemoteSendError>>,
@@ -122,18 +127,18 @@ pub(crate) struct SenderInner<T, Codec> {
     receiver_rate_limit_tx: RateLimitSender,
     receiver_rate_limit_rx: RateLimitReceiver,
     pub(super) transfer_strategy: TransferStrategy,
-    _codec: PhantomData<Codec>,
 }
 
 /// Watch sender in transport.
 #[derive(Serialize, Deserialize)]
-pub(crate) struct TransportedSender<T, Codec> {
+pub(crate) struct TransportedSender<T> {
     /// chmux port number.
     port: u32,
     /// Current data value.
     data: Result<T, RecvError>,
     /// Data codec.
-    codec: PhantomData<Codec>,
+    #[serde(default)]
+    codec: PhantomData<()>,
     /// Maximum item size in bytes.
     #[serde(default = "default_max_item_size")]
     max_item_size: u64,
@@ -150,12 +155,12 @@ pub(crate) struct TransportedSender<T, Codec> {
 
 impl<T, Codec> Sender<T, Codec>
 where
-    T: Send + 'static,
+    T: Send + Clone + Sync + 'static,
 {
     /// Creates a new sender.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        tx: tokio::sync::watch::Sender<Result<T, RecvError>>,
+        tx: tokio::sync::watch::Sender<AnyCloneSend>,
         remote_send_err_tx: tokio::sync::mpsc::UnboundedSender<RemoteSendError>,
         remote_send_err_rx: tokio::sync::mpsc::UnboundedReceiver<RemoteSendError>, max_item_size: usize,
         sender_rate_limit_tx: tokio::sync::watch::Sender<Duration>,
@@ -173,9 +178,8 @@ where
             receiver_rate_limit_tx,
             receiver_rate_limit_rx,
             transfer_strategy,
-            _codec: PhantomData,
         };
-        Self { inner: Some(inner), successor_tx: Mutex::new(None) }
+        Self { inner: Some(inner), successor_tx: Mutex::new(None), _phantom: |_, _| () }
     }
 
     /// Sends a value over this channel, notifying all receivers.
@@ -187,7 +191,8 @@ where
     /// Thus, the reporting of an error may be delayed and this function may
     /// return errors caused by previous invocations.
     pub fn send(&self, value: T) -> Result<(), SendError> {
-        match self.inner.as_ref().unwrap().tx.send(Ok(value)) {
+        let value: Result<T, RecvError> = Ok(value);
+        match self.inner.as_ref().unwrap().tx.send(AnyCloneSend::new(value)) {
             Ok(()) => Ok(()),
             Err(_) => match self.error() {
                 Some(err) => Err(err),
@@ -207,7 +212,11 @@ where
     where
         F: FnOnce(&mut T),
     {
-        self.inner.as_ref().unwrap().tx.send_modify(move |v| func(v.as_mut().unwrap()))
+        self.inner
+            .as_ref()
+            .unwrap()
+            .tx
+            .send_modify(move |v| func(v.downcast_mut::<Result<T, RecvError>>().unwrap().as_mut().unwrap()))
     }
 
     /// Modifies the watched value conditionally in-place, notifying all receivers
@@ -228,7 +237,11 @@ where
     where
         F: FnOnce(&mut T) -> bool,
     {
-        self.inner.as_ref().unwrap().tx.send_if_modified(move |v| func(v.as_mut().unwrap()))
+        self.inner
+            .as_ref()
+            .unwrap()
+            .tx
+            .send_if_modified(move |v| func(v.downcast_mut::<Result<T, RecvError>>().unwrap().as_mut().unwrap()))
     }
 
     /// Replaces the watched value and notifies all receivers only if the new value
@@ -259,12 +272,15 @@ where
     /// This method never fails, even if all receivers have been dropped or become
     /// disconnected.
     pub fn send_replace(&self, value: T) -> T {
-        self.inner.as_ref().unwrap().tx.send_replace(Ok(value)).unwrap()
+        let value: Result<T, RecvError> = Ok(value);
+        let old_value: Result<T, RecvError> =
+            self.inner.as_ref().unwrap().tx.send_replace(AnyCloneSend::new(value)).downcast().unwrap();
+        old_value.unwrap()
     }
 
     /// Returns a reference to the most recently sent value.
     pub fn borrow(&self) -> Ref<'_, T> {
-        Ref(self.inner.as_ref().unwrap().tx.borrow())
+        Ref::new(self.inner.as_ref().unwrap().tx.borrow())
     }
 
     /// Completes when all receivers have been dropped or the connection failed.
@@ -400,6 +416,9 @@ where
     where
         S: serde::Serializer,
     {
+        let erased_deserialzer = ErasedDeserializer::new::<Result<T, RecvError>, Codec>();
+        let factory = Factory::new::<T>();
+
         let max_item_size = self.max_item_size();
         let sender_rate_limit = self.rate_limit();
         let receiver_rate_limit = self.inner.as_ref().unwrap().receiver_rate_limit_rx.get();
@@ -424,12 +443,14 @@ where
                 let (raw_tx, raw_rx) = match connect.await {
                     Ok(tx_rx) => tx_rx,
                     Err(err) => {
-                        let _ = tx.send(Err(RecvError::RemoteConnect(err)));
+                        let _ = tx.send(factory.err(RecvError::RemoteConnect(err)));
                         return;
                     }
                 };
 
-                super::recv_impl::<T, Codec>(
+                super::recv_impl(
+                    erased_deserialzer,
+                    factory,
                     tx,
                     raw_tx,
                     raw_rx,
@@ -444,8 +465,8 @@ where
         })?;
 
         // Encode chmux port number in transport type and serialize it.
-        let data = self.inner.as_ref().unwrap().tx.borrow().clone();
-        let transported = TransportedSender::<T, Codec> {
+        let data = self.inner.as_ref().unwrap().tx.borrow().clone().downcast().unwrap();
+        let transported = TransportedSender::<T> {
             port,
             data,
             codec: PhantomData,
@@ -468,6 +489,8 @@ where
     where
         D: serde::Deserializer<'de>,
     {
+        let erased_serialzer = ErasedSerializer::new::<Result<T, RecvError>, Codec>();
+
         // Get chmux port number from deserialized transport type.
         let TransportedSender {
             port,
@@ -477,7 +500,7 @@ where
             receiver_rate_limit,
             transfer_strategy,
             ..
-        } = TransportedSender::<T, Codec>::deserialize(deserializer)?;
+        } = TransportedSender::<T>::deserialize(deserializer)?;
         let max_item_size = usize::try_from(max_item_size).unwrap_or(usize::MAX);
         let (sender_rate_limit_tx, sender_rate_limit_rx) = tokio::sync::watch::channel(sender_rate_limit);
         if data.is_err() {
@@ -485,7 +508,7 @@ where
         }
 
         // Create internal communication channels.
-        let (tx, rx) = tokio::sync::watch::channel(data);
+        let (tx, rx) = tokio::sync::watch::channel(AnyCloneSend::new(data));
         let (remote_send_err_tx, remote_send_err_rx) = tokio::sync::mpsc::unbounded_channel();
         let remote_send_err_tx2 = remote_send_err_tx.clone();
         let sender_rate_limit_rx2 = sender_rate_limit_rx.clone();
@@ -505,7 +528,8 @@ where
                     }
                 };
 
-                super::send_impl::<T, Codec>(
+                super::send_impl(
+                    erased_serialzer,
                     rx,
                     raw_tx,
                     raw_rx,

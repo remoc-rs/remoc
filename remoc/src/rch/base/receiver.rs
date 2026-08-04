@@ -5,11 +5,12 @@ use futures::{
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
+    any::Any,
     cell::RefCell,
     collections::HashMap,
     error::Error,
     fmt,
-    marker::PhantomData,
+    ops::{Deref, DerefMut},
     panic,
     rc::{Rc, Weak},
 };
@@ -18,12 +19,11 @@ use tracing::Instrument;
 use super::{super::DEFAULT_MAX_ITEM_SIZE, BIG_DATA_CHUNK_QUEUE, io::ChannelBytesReader};
 use crate::{
     chmux::{self, AnyStorage, Received, RecvChunkError},
-    codec::{self, DeserializationError, StreamingUnavailable},
+    codec::{self, AnySend, DeserializationError, ErasedDeserializer, StreamingUnavailable},
     exec::{
         self,
         task::{self, JoinHandle},
     },
-    rch::base::io::IoReader,
 };
 
 /// An error that occurred during receiving from a remote endpoint.
@@ -178,30 +178,36 @@ impl PortDeserializer {
 ///
 /// Values may be or contain any channel from this crate.
 pub struct Receiver<T, Codec = codec::Default> {
-    receiver: chmux::Receiver,
-    recved: Option<Option<Received>>,
-    data: DataSource<T>,
-    item: Option<T>,
-    port_deser: Option<PortDeserializer>,
-    default_max_ports: Option<usize>,
-    max_item_size: usize,
-    _codec: PhantomData<Codec>,
+    any: AnyReceiver,
+    _phantom: fn(T, Codec),
 }
 
 impl<T, Codec> fmt::Debug for Receiver<T, Codec> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("Receiver").finish()
+        f.debug_tuple("Receiver").field(&self.any).finish()
     }
 }
 
-enum DataSource<T> {
-    None,
-    Buffered(Option<chmux::DataBuf>),
-    Streamed {
-        tx: Option<tokio::sync::mpsc::Sender<Result<Bytes, ()>>>,
-        task: JoinHandle<Result<(T, PortDeserializer), DeserializationError>>,
-        total: usize,
-    },
+impl<T, Codec> Deref for Receiver<T, Codec>
+where
+    T: DeserializeOwned + Send + 'static,
+    Codec: codec::Codec,
+{
+    type Target = AnyReceiver;
+
+    fn deref(&self) -> &Self::Target {
+        &self.any
+    }
+}
+
+impl<T, Codec> DerefMut for Receiver<T, Codec>
+where
+    T: DeserializeOwned + Send + 'static,
+    Codec: codec::Codec,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.any
+    }
 }
 
 impl<T, Codec> Receiver<T, Codec>
@@ -211,7 +217,63 @@ where
 {
     /// Creates a base remote receiver from a [chmux] receiver.
     pub fn new(receiver: chmux::Receiver) -> Self {
+        Self { any: AnyReceiver::typed::<T, Codec>(receiver), _phantom: |_, _| () }
+    }
+
+    /// Consumes this base remote receiver and returns the underlying [chmux] receiver.
+    pub fn into_inner(self) -> chmux::Receiver {
+        self.any.into_inner()
+    }
+
+    fn from_any(any_item: AnySend) -> T {
+        let Ok(item) = any_item.downcast::<T>() else { panic!("mismatched type for Receiver") };
+        *item
+    }
+
+    /// Receive an item from the remote endpoint.
+    pub async fn recv(&mut self) -> Result<Option<T>, RecvError> {
+        self.any.recv_any().await.map(|opt| opt.map(Self::from_any))
+    }
+}
+
+/// Type-erased version of [`Receiver`].
+///
+/// Values may be or contain any channel from this crate.
+pub struct AnyReceiver {
+    deserializer: ErasedDeserializer,
+    receiver: chmux::Receiver,
+    recved: Option<Option<Received>>,
+    data: DataSource,
+    item: Option<Box<dyn Any + Send>>,
+    port_deser: Option<PortDeserializer>,
+    default_max_ports: Option<usize>,
+    max_item_size: usize,
+}
+
+impl fmt::Debug for AnyReceiver {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("AnyReceiver")
+            .field("deserializer", &self.deserializer)
+            .field("receiver", &self.receiver)
+            .finish()
+    }
+}
+
+enum DataSource {
+    None,
+    Buffered(Option<chmux::DataBuf>),
+    Streamed {
+        tx: Option<tokio::sync::mpsc::Sender<Result<Bytes, ()>>>,
+        task: JoinHandle<Result<(Box<dyn Any + Send>, PortDeserializer), DeserializationError>>,
+        total: usize,
+    },
+}
+
+impl AnyReceiver {
+    /// Creates a base remote receiver from an erased deserializer and [chmux] receiver.
+    pub fn new(deserializer: ErasedDeserializer, receiver: chmux::Receiver) -> Self {
         Self {
+            deserializer,
             receiver,
             recved: None,
             data: DataSource::None,
@@ -219,17 +281,30 @@ where
             port_deser: None,
             default_max_ports: None,
             max_item_size: DEFAULT_MAX_ITEM_SIZE,
-            _codec: PhantomData,
         }
     }
 
+    /// Creates a type-erased base remote receiver for the specfied type `T` and codec from a [chmux] receiver.
+    #[inline(never)]
+    pub fn typed<T, Codec>(receiver: chmux::Receiver) -> Self
+    where
+        T: DeserializeOwned + Send + 'static,
+        Codec: codec::Codec,
+    {
+        Self::new(ErasedDeserializer::new::<T, Codec>(), receiver)
+    }
+
     /// Consumes this base remote receiver and returns the underlying [chmux] receiver.
+    #[inline(never)]
     pub fn into_inner(self) -> chmux::Receiver {
         self.receiver
     }
 
-    /// Receive an item from the remote endpoint.
-    pub async fn recv(&mut self) -> Result<Option<T>, RecvError> {
+    /// Receive an item of type `T` used for calling [`AnyReceiver::typed`] from the remote endpoint.
+    ///
+    /// The received item is returned type erased.
+    #[inline(never)]
+    pub async fn recv_any(&mut self) -> Result<Option<AnySend>, RecvError> {
         if self.default_max_ports.is_none() {
             self.default_max_ports = Some(self.receiver.max_ports());
         }
@@ -252,14 +327,16 @@ where
                         Some(Received::Data(data)) => DataSource::Buffered(Some(data)),
                         Some(Received::Chunks) => {
                             // Start deserialization thread.
+                            let deserializer = self.deserializer.clone();
                             let allocator = self.receiver.port_allocator();
                             let handle_storage = self.receiver.storage();
                             let (tx, rx) = tokio::sync::mpsc::channel(BIG_DATA_CHUNK_QUEUE);
+
                             let task = task::spawn_blocking(move || {
                                 let mut cbr = ChannelBytesReader::new(rx);
 
                                 let pds_ref = PortDeserializer::start(allocator, handle_storage);
-                                let item = <Codec as codec::Codec>::deserialize(IoReader::Channel(&mut cbr))?;
+                                let item = deserializer.deserialize(&mut cbr)?;
                                 let pds = PortDeserializer::finish(pds_ref);
 
                                 Ok((item, pds))
@@ -289,8 +366,7 @@ where
 
                         let pdf_ref =
                             PortDeserializer::start(self.receiver.port_allocator(), self.receiver.storage());
-                        let item_res =
-                            <Codec as codec::Codec>::deserialize(IoReader::DataBuf(&mut data.reader()));
+                        let item_res = self.deserializer.deserialize(&mut data.reader());
                         self.data = DataSource::None;
                         self.item = Some(item_res?);
                         self.port_deser = Some(PortDeserializer::finish(pdf_ref));
@@ -421,6 +497,7 @@ where
     ///
     /// This stops the remote endpoint from sending more data, but allows already sent data
     /// to be received.
+    #[inline(never)]
     pub async fn close(&mut self) {
         self.receiver.close().await
     }
@@ -428,11 +505,13 @@ where
     /// The maximum allowed size in bytes of an item to be received.
     ///
     /// The default value is [DEFAULT_MAX_ITEM_SIZE].
+    #[inline(never)]
     pub fn max_item_size(&self) -> usize {
         self.max_item_size
     }
 
     /// Sets the maximum allowed size in bytes of an item to be received.
+    #[inline(never)]
     pub fn set_max_item_size(&mut self, max_item_size: usize) {
         self.max_item_size = max_item_size;
     }

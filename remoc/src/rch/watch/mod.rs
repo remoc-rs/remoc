@@ -77,8 +77,8 @@
 //!
 
 use bytes::Buf;
-use futures::FutureExt;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use futures::{FutureExt, future::BoxFuture};
+use serde::{Deserialize, Serialize};
 use std::{
     fmt,
     future::{self, Future},
@@ -91,7 +91,8 @@ use std::{
 
 use super::{DEFAULT_MAX_ITEM_SIZE, RemoteSendError, base};
 use crate::{
-    RemoteSend, chmux, codec,
+    RemoteSend, chmux,
+    codec::{self, AnySend, ErasedDeserializer, ErasedSerializer},
     exec::{
         self,
         time::{Instant, sleep},
@@ -326,19 +327,35 @@ where
     }
 }
 
+trait ErasedWatchRx {
+    fn borrow_and_update_clone(&mut self) -> AnySend;
+    fn changed<'a>(&'a mut self) -> BoxFuture<'a, Result<(), tokio::sync::watch::error::RecvError>>;
+}
+
+impl<T> ErasedWatchRx for tokio::sync::watch::Receiver<Result<T, RecvError>>
+where
+    T: Clone + Send + Sync + 'static,
+{
+    fn borrow_and_update_clone(&mut self) -> AnySend {
+        Box::new(self.borrow_and_update().clone())
+    }
+
+    fn changed<'a>(&'a mut self) -> BoxFuture<'a, Result<(), tokio::sync::watch::error::RecvError>> {
+        self.changed().boxed()
+    }
+}
+
 /// Send implementation for deserializer of Sender and serializer of Receiver.
 #[allow(clippy::too_many_arguments)]
-async fn send_impl<T, Codec>(
-    mut rx: tokio::sync::watch::Receiver<Result<T, RecvError>>, raw_tx: chmux::Sender,
+#[inline(never)]
+async fn send_impl(
+    erased_serializer: ErasedSerializer, mut rx: Box<dyn ErasedWatchRx + Send>, raw_tx: chmux::Sender,
     mut raw_rx: chmux::Receiver, remote_send_err_tx: tokio::sync::mpsc::UnboundedSender<RemoteSendError>,
     max_item_size: usize, mut sender_rate_limit_rx: tokio::sync::watch::Receiver<Duration>,
     mut receiver_rate_limit_tx: RateLimitSender, strategy: TransferStrategy,
-) where
-    T: Serialize + Send + Clone + 'static,
-    Codec: codec::Codec,
-{
+) {
     // Encode data using remote sender for sending.
-    let mut remote_tx = base::Sender::<Result<T, RecvError>, Codec>::new(raw_tx);
+    let mut remote_tx = base::ErasedSender::new(erased_serializer, raw_tx);
     remote_tx.set_max_item_size(max_item_size);
     remote_tx.set_global_credits_use(strategy != TransferStrategy::ChannelBuffered);
 
@@ -408,8 +425,8 @@ async fn send_impl<T, Codec>(
 
         // Send updated value to remote endpoint.
         if send || (send_pending && closed) {
-            let value = rx.borrow_and_update().clone();
-            if let Err(err) = remote_tx.send(value).await {
+            let value = rx.borrow_and_update_clone();
+            if let Err(err) = remote_tx.send_erased(value).await {
                 let _ = remote_send_err_tx.send(RemoteSendError::Send(err.kind.clone()));
                 if err.is_item_specific() {
                     tracing::warn!(%err, "sending over remote channel failed");
@@ -427,17 +444,40 @@ async fn send_impl<T, Codec>(
     }
 }
 
-/// Receive implementation for serializer of Sender and deserializer of Receiver.
-async fn recv_impl<T, Codec>(
-    tx: tokio::sync::watch::Sender<Result<T, RecvError>>, mut raw_tx: chmux::Sender, raw_rx: chmux::Receiver,
-    mut remote_send_err_rx: tokio::sync::mpsc::UnboundedReceiver<RemoteSendError>,
-    mut current_err: Option<RemoteSendError>, max_item_size: usize, mut rate_limit_rx: RateLimitReceiver,
-) where
-    T: DeserializeOwned + Send + 'static,
-    Codec: codec::Codec,
+trait ErasedWatchTx {
+    fn send(&self, value: AnySend) -> Result<(), ()>;
+    fn send_err(&self, err: RecvError) -> Result<(), ()>;
+    fn closed(&'_ self) -> BoxFuture<'_, ()>;
+}
+
+impl<T> ErasedWatchTx for tokio::sync::watch::Sender<Result<T, RecvError>>
+where
+    T: Clone + Send + Sync + 'static,
 {
+    fn send(&self, value: AnySend) -> Result<(), ()> {
+        let value: Result<T, RecvError> = *value.downcast().expect("type mismatch in watch receiver");
+        self.send(value).map_err(|_| ())
+    }
+
+    fn send_err(&self, err: RecvError) -> Result<(), ()> {
+        let value: Result<T, RecvError> = Err(err);
+        self.send(value).map_err(|_| ())
+    }
+
+    fn closed(&'_ self) -> BoxFuture<'_, ()> {
+        self.closed().boxed()
+    }
+}
+
+/// Receive implementation for serializer of Sender and deserializer of Receiver.
+#[inline(never)]
+async fn recv_impl(
+    erased_deserializer: ErasedDeserializer, tx: Box<dyn ErasedWatchTx + Send>, mut raw_tx: chmux::Sender,
+    raw_rx: chmux::Receiver, mut remote_send_err_rx: tokio::sync::mpsc::UnboundedReceiver<RemoteSendError>,
+    mut current_err: Option<RemoteSendError>, max_item_size: usize, mut rate_limit_rx: RateLimitReceiver,
+) {
     // Decode raw received data using remote receiver.
-    let mut remote_rx = base::Receiver::<Result<T, RecvError>, Codec>::new(raw_rx);
+    let mut remote_rx = base::ErasedReceiver::new(erased_deserializer, raw_rx);
     remote_rx.set_max_item_size(max_item_size);
 
     // Rate limiting signaling to sender.
@@ -472,21 +512,23 @@ async fn recv_impl<T, Codec>(
             }
 
             // Data received from remote endpoint.
-            res = remote_rx.recv() => {
-                let mut is_final_err = false;
-                let value = match res {
-                    Ok(Some(value)) => value,
+            res = remote_rx.recv_erased() => {
+                match res {
+                    Ok(Some(value)) => {
+                        if tx.send(value).is_err() {
+                            break;
+                        }
+                    },
                     Ok(None) => break,
                     Err(err) => {
-                        is_final_err = err.is_final();
-                        Err(RecvError::RemoteReceive(err))
+                        let is_final_err = err.is_final();
+                        if tx.send_err(RecvError::RemoteReceive(err)).is_err() {
+                            break
+                        }
+                        if is_final_err {
+                            break;
+                        }
                     },
-                };
-                if tx.send(value).is_err() {
-                    break;
-                }
-                if is_final_err {
-                    break;
                 }
             }
         }

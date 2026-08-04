@@ -18,7 +18,10 @@ use super::{
     },
     RateLimitSender, Ref, TransferStrategy, default_max_item_size, default_rate_limit, rate_limit_channel,
 };
-use crate::{RemoteSend, chmux, codec};
+use crate::{
+    RemoteSend, chmux,
+    codec::{self, ErasedDeserializer, ErasedSerializer},
+};
 
 /// An error occurred during receiving over a watch channel.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -112,13 +115,14 @@ impl<T, Codec, const MAX_ITEM_SIZE: usize> fmt::Debug for Receiver<T, Codec, MAX
 
 /// Watch receiver in transport.
 #[derive(Serialize, Deserialize)]
-pub(crate) struct TransportedReceiver<T, Codec> {
+pub(crate) struct TransportedReceiver<T> {
     /// chmux port number.
     port: u32,
     /// Current data value.
     data: Result<T, RecvError>,
     /// Data codec.
-    codec: PhantomData<Codec>,
+    #[serde(default)]
+    codec: PhantomData<()>,
     /// Maximum item size.
     #[serde(default = "default_max_item_size")]
     max_item_size: u64,
@@ -333,8 +337,9 @@ where
                     }
                 };
 
-                super::send_impl::<T, Codec>(
-                    rx,
+                super::send_impl(
+                    ErasedSerializer::new::<Result<T, RecvError>, Codec>(),
+                    Box::new(rx),
                     raw_tx,
                     raw_rx,
                     remote_send_err_tx,
@@ -349,7 +354,7 @@ where
         })?;
 
         // Encode chmux port number in transport type and serialize it.
-        let transported = TransportedReceiver::<T, Codec> {
+        let transported = TransportedReceiver::<T> {
             port,
             data,
             max_item_size: self.max_item_size().try_into().unwrap_or(u64::MAX),
@@ -363,7 +368,7 @@ where
 
 impl<'de, T, Codec, const MAX_ITEM_SIZE: usize> Deserialize<'de> for Receiver<T, Codec, MAX_ITEM_SIZE>
 where
-    T: RemoteSend + Sync,
+    T: RemoteSend + Clone + Sync,
     Codec: codec::Codec,
 {
     /// Deserializes the receiver after it has been received over a chmux channel.
@@ -379,7 +384,7 @@ where
             rate_limit: receiver_rate_limit,
             transfer_strategy,
             ..
-        } = TransportedReceiver::<T, Codec>::deserialize(deserializer)?;
+        } = TransportedReceiver::<T>::deserialize(deserializer)?;
 
         let max_item_size = usize::try_from(max_item_size).unwrap_or(usize::MAX);
         if max_item_size > MAX_ITEM_SIZE {
@@ -405,8 +410,9 @@ where
                     }
                 };
 
-                super::recv_impl::<T, Codec>(
-                    tx,
+                super::recv_impl(
+                    ErasedDeserializer::new::<Result<T, RecvError>, Codec>(),
+                    Box::new(tx),
                     raw_tx,
                     raw_rx,
                     remote_send_err_rx,

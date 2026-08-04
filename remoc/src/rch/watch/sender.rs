@@ -11,7 +11,10 @@ use super::{
     default_rate_limit, rate_limit_channel,
     receiver::RecvError,
 };
-use crate::{RemoteSend, chmux, codec};
+use crate::{
+    RemoteSend, chmux,
+    codec::{self, ErasedDeserializer, ErasedSerializer},
+};
 
 /// An error occurred during sending over an mpsc channel.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -127,13 +130,14 @@ pub(crate) struct SenderInner<T, Codec> {
 
 /// Watch sender in transport.
 #[derive(Serialize, Deserialize)]
-pub(crate) struct TransportedSender<T, Codec> {
+pub(crate) struct TransportedSender<T> {
     /// chmux port number.
     port: u32,
     /// Current data value.
     data: Result<T, RecvError>,
     /// Data codec.
-    codec: PhantomData<Codec>,
+    #[serde(default)]
+    codec: PhantomData<()>,
     /// Maximum item size in bytes.
     #[serde(default = "default_max_item_size")]
     max_item_size: u64,
@@ -429,8 +433,9 @@ where
                     }
                 };
 
-                super::recv_impl::<T, Codec>(
-                    tx,
+                super::recv_impl(
+                    ErasedDeserializer::new::<Result<T, RecvError>, Codec>(),
+                    Box::new(tx),
                     raw_tx,
                     raw_rx,
                     remote_send_err_rx,
@@ -445,7 +450,7 @@ where
 
         // Encode chmux port number in transport type and serialize it.
         let data = self.inner.as_ref().unwrap().tx.borrow().clone();
-        let transported = TransportedSender::<T, Codec> {
+        let transported = TransportedSender::<T> {
             port,
             data,
             codec: PhantomData,
@@ -477,7 +482,7 @@ where
             receiver_rate_limit,
             transfer_strategy,
             ..
-        } = TransportedSender::<T, Codec>::deserialize(deserializer)?;
+        } = TransportedSender::<T>::deserialize(deserializer)?;
         let max_item_size = usize::try_from(max_item_size).unwrap_or(usize::MAX);
         let (sender_rate_limit_tx, sender_rate_limit_rx) = tokio::sync::watch::channel(sender_rate_limit);
         if data.is_err() {
@@ -505,8 +510,9 @@ where
                     }
                 };
 
-                super::send_impl::<T, Codec>(
-                    rx,
+                super::send_impl(
+                    ErasedSerializer::new::<Result<T, RecvError>, Codec>(),
+                    Box::new(rx),
                     raw_tx,
                     raw_rx,
                     remote_send_err_tx,

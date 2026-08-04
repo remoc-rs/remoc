@@ -1,0 +1,1086 @@
+{
+ "schema": 1,
+ "label": null,
+ "timestamp": "2026-08-04T07:58:56+00:00",
+ "git": {
+  "commit": "154d93d",
+  "dirty": false
+ },
+ "toolchain": {
+  "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+  "nightly": "rustc 1.99.0-nightly (1a833e165 2026-07-29)"
+ },
+ "profiles": {
+  "release": {
+   "build_time_s": 22.55,
+   "binary_size": 22223808,
+   "sections": {
+    ".interp": 28,
+    ".note.ABI-tag": 32,
+    ".note.gnu.build-id": 36,
+    ".dynsym": 2064,
+    ".gnu.version": 172,
+    ".gnu.version_r": 400,
+    ".gnu.hash": 28,
+    ".dynstr": 1361,
+    ".rela.dyn": 155592,
+    ".rela.plt": 48,
+    ".gcc_except_table": 1359656,
+    ".rodata": 144504,
+    ".eh_frame_hdr": 156092,
+    ".eh_frame": 1160896,
+    ".text": 12238270,
+    ".init": 27,
+    ".fini": 13,
+    ".plt": 48,
+    ".tdata": 208,
+    ".tbss": 104,
+    ".data.rel.ro": 97560,
+    ".fini_array": 8,
+    ".init_array": 16,
+    ".dynamic": 480,
+    ".got": 5848,
+    ".got.plt": 40,
+    ".relro_padding": 3040,
+    ".tm_clone_table": 0,
+    ".data": 3544,
+    ".bss": 243,
+    ".comment": 185,
+    ".gnu.build.attributes": 324,
+    ".annobin.notes": 247
+   },
+   "symbols_total": 39081,
+   "symbols_remoc": 19640,
+   "llvm_ir_lines": 4857000,
+   "mono": {
+    "definitions": 1626,
+    "instantiations": 62708,
+    "size_estimate": 1440612
+   },
+   "mono_items": [
+    {
+     "name": "remoc::rch::base::Receiver::<T, Codec>::recv::{closure#0}",
+     "instantiations": 236,
+     "size_estimate": 182900
+    },
+    {
+     "name": "remoc::rch::base::Sender::<T, Codec>::send::{closure#0}",
+     "instantiations": 256,
+     "size_estimate": 163072
+    },
+    {
+     "name": "<std::boxed::Box<T, A> as std::ops::Drop>::drop",
+     "instantiations": 2352,
+     "size_estimate": 44688
+    },
+    {
+     "name": "tokio::runtime::task::harness::poll_future",
+     "instantiations": 568,
+     "size_estimate": 41464
+    },
+    {
+     "name": "tokio::runtime::task::harness::Harness::<T, S>::poll_inner",
+     "instantiations": 568,
+     "size_estimate": 35216
+    },
+    {
+     "name": "loop_channel::{closure#0}",
+     "instantiations": 207,
+     "size_estimate": 27324
+    },
+    {
+     "name": "<std::sync::Arc<T, A> as std::ops::Drop>::drop",
+     "instantiations": 2598,
+     "size_estimate": 25980
+    },
+    {
+     "name": "tokio::runtime::task::harness::Harness::<T, S>::complete::{closure#0}",
+     "instantiations": 568,
+     "size_estimate": 23856
+    },
+    {
+     "name": "remoc::rch::base::Sender::<T, Codec>::serialize_streaming::{closure#0}",
+     "instantiations": 98,
+     "size_estimate": 20874
+    },
+    {
+     "name": "tokio::runtime::task::harness::Harness::<T, S>::complete",
+     "instantiations": 568,
+     "size_estimate": 20448
+    },
+    {
+     "name": "tokio::runtime::task::harness::Harness::<T, S>::drop_join_handle_slow",
+     "instantiations": 568,
+     "size_estimate": 19880
+    },
+    {
+     "name": "std::panicking::catch_unwind::do_call",
+     "instantiations": 2853,
+     "size_estimate": 17118
+    },
+    {
+     "name": "tokio::runtime::task::harness::cancel_task",
+     "instantiations": 568,
+     "size_estimate": 16472
+    },
+    {
+     "name": "remoc::rch::mpsc::send_impl::{closure#0}",
+     "instantiations": 40,
+     "size_estimate": 14320
+    },
+    {
+     "name": "std::panicking::catch_unwind::do_catch",
+     "instantiations": 2853,
+     "size_estimate": 14265
+    },
+    {
+     "name": "tokio::runtime::task::core::Core::<T, S>::take_output::{closure#0}",
+     "instantiations": 568,
+     "size_estimate": 14200
+    },
+    {
+     "name": "tokio::runtime::task::core::Core::<T, S>::poll::{closure#0}",
+     "instantiations": 568,
+     "size_estimate": 13632
+    },
+    {
+     "name": "tokio::runtime::task::core::Cell::<T, S>::new",
+     "instantiations": 568,
+     "size_estimate": 13064
+    },
+    {
+     "name": "tokio::runtime::blocking::pool::Spawner::spawn_blocking_inner",
+     "instantiations": 392,
+     "size_estimate": 12936
+    },
+    {
+     "name": "<std::sync::Weak<T, A> as std::ops::Drop>::drop",
+     "instantiations": 330,
+     "size_estimate": 12870
+    },
+    {
+     "name": "remoc::rch::mpsc::recv_impl::{closure#0}",
+     "instantiations": 40,
+     "size_estimate": 12360
+    },
+    {
+     "name": "tokio::runtime::task::harness::Harness::<T, S>::poll",
+     "instantiations": 568,
+     "size_estimate": 11928
+    },
+    {
+     "name": "remoc::rch::base::Sender::<T, Codec>::send::{closure#0}::{closure#0}",
+     "instantiations": 98,
+     "size_estimate": 11760
+    },
+    {
+     "name": "<tokio::future::maybe_done::MaybeDone<Fut> as futures::Future>::poll",
+     "instantiations": 338,
+     "size_estimate": 11492
+    },
+    {
+     "name": "tokio::runtime::task::harness::Harness::<T, S>::release",
+     "instantiations": 568,
+     "size_estimate": 11360
+    },
+    {
+     "name": "tokio::runtime::task::harness::Harness::<T, S>::try_read_output",
+     "instantiations": 568,
+     "size_estimate": 10792
+    },
+    {
+     "name": "remoc::Connect::<'transport, TransportSinkError, TransportStreamError>::framed::{closure#0}",
+     "instantiations": 69,
+     "size_estimate": 10557
+    },
+    {
+     "name": "tokio::runtime::blocking::pool::Spawner::spawn_blocking",
+     "instantiations": 196,
+     "size_estimate": 9604
+    },
+    {
+     "name": "std::boxed::Box::<T>::new",
+     "instantiations": 1314,
+     "size_estimate": 9198
+    },
+    {
+     "name": "tokio::runtime::task::core::Core::<T, S>::set_stage",
+     "instantiations": 568,
+     "size_estimate": 9088
+    },
+    {
+     "name": "tokio::runtime::task::core::Core::<T, S>::poll",
+     "instantiations": 568,
+     "size_estimate": 9088
+    },
+    {
+     "name": "<std::panic::AssertUnwindSafe<F> as std::ops::FnOnce<()>>::call_once",
+     "instantiations": 2853,
+     "size_estimate": 8559
+    },
+    {
+     "name": "tokio::runtime::task::new_task",
+     "instantiations": 568,
+     "size_estimate": 8520
+    },
+    {
+     "name": "remoc::rch::base::connect::{closure#0}",
+     "instantiations": 69,
+     "size_estimate": 8487
+    },
+    {
+     "name": "tokio::future::maybe_done::_::<impl tokio::future::maybe_done::MaybeDone<Fut>>::project_replace",
+     "instantiations": 338,
+     "size_estimate": 8450
+    },
+    {
+     "name": "remoc::rch::base::Sender::<T, Codec>::send::{closure#0}::{closure#1}",
+     "instantiations": 98,
+     "size_estimate": 8232
+    },
+    {
+     "name": "<tokio::runtime::blocking::task::BlockingTask<T> as futures::Future>::poll",
+     "instantiations": 392,
+     "size_estimate": 8232
+    },
+    {
+     "name": "remoc::rch::mpsc::Sender::<T, Codec, BUFFER>::new::{closure#0}",
+     "instantiations": 80,
+     "size_estimate": 7920
+    },
+    {
+     "name": "remoc::rch::base::Sender::<T, Codec>::serialize_streaming::{closure#0}::{closure#0}",
+     "instantiations": 98,
+     "size_estimate": 7840
+    },
+    {
+     "name": "remoc::Connect::<'transport, TransportSinkError, TransportStreamError>::framed::{closure#0}::{closure#0}",
+     "instantiations": 69,
+     "size_estimate": 6969
+    },
+    {
+     "name": "std::result::Result::<T, E>::unwrap",
+     "instantiations": 621,
+     "size_estimate": 6831
+    },
+    {
+     "name": "tokio::runtime::task::harness::Harness::<T, S>::shutdown",
+     "instantiations": 568,
+     "size_estimate": 6816
+    },
+    {
+     "name": "send_mpsc_sender::{closure#0}",
+     "instantiations": 60,
+     "size_estimate": 6720
+    },
+    {
+     "name": "send_oneshot::{closure#0}",
+     "instantiations": 60,
+     "size_estimate": 6720
+    },
+    {
+     "name": "send_mpsc_receiver::{closure#0}",
+     "instantiations": 60,
+     "size_estimate": 6660
+    },
+    {
+     "name": "tokio::runtime::task::harness::Harness::<T, S>::drop_reference",
+     "instantiations": 568,
+     "size_estimate": 6248
+    },
+    {
+     "name": "<F as std::future::IntoFuture>::into_future",
+     "instantiations": 3026,
+     "size_estimate": 6052
+    },
+    {
+     "name": "<std::result::Result<T, F> as std::ops::FromResidual<std::result::Result<std::convert::Infallible, E>>>::from_residual",
+     "instantiations": 854,
+     "size_estimate": 5978
+    },
+    {
+     "name": "remoc::rch::base::PortDeserializer::accept",
+     "instantiations": 69,
+     "size_estimate": 5934
+    },
+    {
+     "name": "postbag::ser::serialize",
+     "instantiations": 196,
+     "size_estimate": 5880
+    },
+    {
+     "name": "remoc::rch::base::PortSerializer::connect",
+     "instantiations": 69,
+     "size_estimate": 5865
+    },
+    {
+     "name": "loop_channel::{closure#0}::{closure#2}",
+     "instantiations": 69,
+     "size_estimate": 5796
+    },
+    {
+     "name": "remoc::rch::base::connect::{closure#0}::{closure#0}",
+     "instantiations": 69,
+     "size_estimate": 5796
+    },
+    {
+     "name": "<remoc::codec::Default as remoc::codec::Codec>::serialize",
+     "instantiations": 196,
+     "size_estimate": 5684
+    },
+    {
+     "name": "remoc::rch::base::Sender::<T, Codec>::serialize_buffered",
+     "instantiations": 98,
+     "size_estimate": 5586
+    },
+    {
+     "name": "<remoc::rch::mpsc::Sender<T, Codec, BUFFER> as types::_::_serde::Serialize>::serialize::{closure#0}::{closure#0}",
+     "instantiations": 40,
+     "size_estimate": 5240
+    },
+    {
+     "name": "<&mut postbag::de::deserializer::Deserializer<'de, R, CFG> as types::_::_serde::Deserializer<'de>>::deserialize_struct",
+     "instantiations": 73,
+     "size_estimate": 5183
+    },
+    {
+     "name": "tokio::future::maybe_done::MaybeDone::<Fut>::take_output",
+     "instantiations": 338,
+     "size_estimate": 5070
+    },
+    {
+     "name": "tokio::sync::mpsc::Sender::<T>::reserve_inner::{closure#0}",
+     "instantiations": 51,
+     "size_estimate": 5049
+    },
+    {
+     "name": "std::pin::Pin::<Ptr>::new_unchecked",
+     "instantiations": 2468,
+     "size_estimate": 4936
+    },
+    {
+     "name": "<remoc::rch::mpsc::receiver::_::<impl types::_::_serde::Deserialize<'de> for remoc::rch::mpsc::receiver::TransportedReceiver<T, Codec>>::deserialize::__Visitor<'de, T, Codec> as types::_::_serde::de::Visitor<'de>>::visit_map",
+     "instantiations": 20,
+     "size_estimate": 4840
+    },
+    {
+     "name": "remoc::rch::base::Receiver::<T, Codec>::recv::{closure#0}::{closure#0}",
+     "instantiations": 98,
+     "size_estimate": 4606
+    },
+    {
+     "name": "<remoc::rch::mpsc::Sender<T, Codec, BUFFER> as types::_::_serde::Deserialize<'de>>::deserialize::{closure#0}::{closure#0}",
+     "instantiations": 40,
+     "size_estimate": 4560
+    },
+    {
+     "name": "tokio::runtime::task::harness::poll_future::{closure#0}",
+     "instantiations": 568,
+     "size_estimate": 4544
+    },
+    {
+     "name": "tokio::runtime::blocking::pool::spawn_blocking",
+     "instantiations": 196,
+     "size_estimate": 4508
+    },
+    {
+     "name": "main::{closure#0}",
+     "instantiations": 3,
+     "size_estimate": 4500
+    },
+    {
+     "name": "std::pin::Pin::<Ptr>::set",
+     "instantiations": 340,
+     "size_estimate": 4420
+    },
+    {
+     "name": "<&mut postbag::ser::serializer::Serializer<W, CFG> as types::_::_serde::ser::SerializeStruct>::serialize_field",
+     "instantiations": 74,
+     "size_estimate": 4218
+    },
+    {
+     "name": "<remoc::rch::mpsc::Sender<T, Codec, BUFFER> as types::_::_serde::Deserialize<'de>>::deserialize",
+     "instantiations": 40,
+     "size_estimate": 4160
+    },
+    {
+     "name": "tokio::runtime::task::harness::Harness::<T, S>::drop_join_handle_slow::{closure#0}",
+     "instantiations": 568,
+     "size_estimate": 3976
+    },
+    {
+     "name": "<tokio::task::JoinHandle<T> as futures::Future>::poll",
+     "instantiations": 99,
+     "size_estimate": 3960
+    },
+    {
+     "name": "<postbag::de::deserializer::StructFieldAccess<'a, 'b, R, CFG> as types::_::_serde::de::MapAccess<'b>>::next_value_seed",
+     "instantiations": 76,
+     "size_estimate": 3952
+    },
+    {
+     "name": "<remoc::rch::mpsc::sender::_::<impl types::_::_serde::Deserialize<'de> for remoc::rch::mpsc::sender::TransportedSender<T, Codec>>::deserialize::__Visitor<'de, T, Codec> as types::_::_serde::de::Visitor<'de>>::visit_map",
+     "instantiations": 20,
+     "size_estimate": 3900
+    },
+    {
+     "name": "<remoc::rch::mpsc::Receiver<T, Codec, BUFFER, MAX_ITEM_SIZE> as types::_::_serde::Deserialize<'de>>::deserialize",
+     "instantiations": 20,
+     "size_estimate": 3860
+    },
+    {
+     "name": "std::sync::atomic::atomic_compare_exchange",
+     "instantiations": 64,
+     "size_estimate": 3840
+    },
+    {
+     "name": "std::sync::poison::map_result",
+     "instantiations": 253,
+     "size_estimate": 3795
+    },
+    {
+     "name": "tokio::task::spawn::spawn_inner",
+     "instantiations": 88,
+     "size_estimate": 3696
+    },
+    {
+     "name": "remoc::rch::mpsc::Sender::<T, Codec, BUFFER>::new::{closure#0}::{closure#0}",
+     "instantiations": 40,
+     "size_estimate": 3640
+    },
+    {
+     "name": "postbag::de::deserialize",
+     "instantiations": 98,
+     "size_estimate": 3528
+    },
+    {
+     "name": "tokio::sync::oneshot::Inner::<T>::poll_recv",
+     "instantiations": 23,
+     "size_estimate": 3496
+    },
+    {
+     "name": "loop_channel::{closure#0}::{closure#1}",
+     "instantiations": 69,
+     "size_estimate": 3450
+    },
+    {
+     "name": "loop_channel::{closure#0}::{closure#0}",
+     "instantiations": 69,
+     "size_estimate": 3450
+    },
+    {
+     "name": "remoc::rch::watch::send_impl::{closure#0}",
+     "instantiations": 9,
+     "size_estimate": 3411
+    },
+    {
+     "name": "tokio::runtime::task::raw::try_read_output",
+     "instantiations": 568,
+     "size_estimate": 3408
+    },
+    {
+     "name": "<std::result::Result<T, E> as std::ops::Try>::branch",
+     "instantiations": 304,
+     "size_estimate": 3344
+    },
+    {
+     "name": "tokio::runtime::scheduler::current_thread::Handle::spawn",
+     "instantiations": 88,
+     "size_estimate": 3344
+    },
+    {
+     "name": "<remoc::codec::Default as remoc::codec::Codec>::deserialize",
+     "instantiations": 98,
+     "size_estimate": 3332
+    },
+    {
+     "name": "send_watch_receiver::{closure#0}",
+     "instantiations": 27,
+     "size_estimate": 3240
+    },
+    {
+     "name": "std::thread::LocalKey::<T>::try_with",
+     "instantiations": 108,
+     "size_estimate": 3240
+    },
+    {
+     "name": "std::sync::Arc::<T, A>::try_unwrap",
+     "instantiations": 98,
+     "size_estimate": 3234
+    },
+    {
+     "name": "<remoc::rch::mpsc::Receiver<T, Codec, BUFFER, MAX_ITEM_SIZE> as types::_::_serde::Serialize>::serialize::{closure#0}::{closure#0}",
+     "instantiations": 20,
+     "size_estimate": 3100
+    },
+    {
+     "name": "<remoc::rch::mpsc::Sender<T, Codec, BUFFER> as types::_::_serde::Serialize>::serialize",
+     "instantiations": 40,
+     "size_estimate": 3080
+    },
+    {
+     "name": "tokio::runtime::scheduler::multi_thread::handle::Handle::bind_new_task",
+     "instantiations": 88,
+     "size_estimate": 3080
+    },
+    {
+     "name": "<postbag::de::deserializer::StructSeqAccess<'a, 'b, R, CFG> as types::_::_serde::de::SeqAccess<'b>>::next_element_seed",
+     "instantiations": 75,
+     "size_estimate": 2850
+    },
+    {
+     "name": "tokio::runtime::task::raw::dealloc",
+     "instantiations": 568,
+     "size_estimate": 2840
+    },
+    {
+     "name": "tokio::runtime::task::harness::poll_future::{closure#1}",
+     "instantiations": 568,
+     "size_estimate": 2840
+    },
+    {
+     "name": "remoc::rch::watch::recv_impl::{closure#0}",
+     "instantiations": 9,
+     "size_estimate": 2826
+    },
+    {
+     "name": "<remoc::rch::watch::receiver::_::<impl types::_::_serde::Deserialize<'de> for remoc::rch::watch::receiver::TransportedReceiver<T, Codec>>::deserialize::__Visitor<'de, T, Codec> as types::_::_serde::de::Visitor<'de>>::visit_map",
+     "instantiations": 9,
+     "size_estimate": 2727
+    },
+    {
+     "name": "tokio::sync::mpsc::chan::Rx::<T, S>::recv::{closure#0}",
+     "instantiations": 30,
+     "size_estimate": 2700
+    },
+    {
+     "name": "<remoc::rch::mpsc::Receiver<T, Codec, BUFFER, MAX_ITEM_SIZE> as types::_::_serde::Deserialize<'de>>::deserialize::{closure#0}::{closure#0}",
+     "instantiations": 20,
+     "size_estimate": 2600
+    },
+    {
+     "name": "<remoc::rch::mpsc::receiver::_::<impl types::_::_serde::Deserialize<'de> for remoc::rch::mpsc::receiver::TransportedReceiver<T, Codec>>::deserialize::__Visitor<'de, T, Codec> as types::_::_serde::de::Visitor<'de>>::visit_seq",
+     "instantiations": 20,
+     "size_estimate": 2560
+    },
+    {
+     "name": "tokio::sync::mpsc::Sender::<T>::send::{closure#0}",
+     "instantiations": 46,
+     "size_estimate": 2530
+    },
+    {
+     "name": "tokio::runtime::context::current::with_current::{closure#0}",
+     "instantiations": 88,
+     "size_estimate": 2464
+    },
+    {
+     "name": "tokio::sync::mpsc::Sender::<T>::reserve::{closure#0}",
+     "instantiations": 51,
+     "size_estimate": 2448
+    },
+    {
+     "name": "tokio::sync::oneshot::Sender::<T>::send",
+     "instantiations": 52,
+     "size_estimate": 2444
+    },
+    {
+     "name": "remoc::rch::mpsc::Sender::<T, Codec, BUFFER>::new",
+     "instantiations": 40,
+     "size_estimate": 2440
+    },
+    {
+     "name": "<std::boxed::Box<F, A> as std::ops::FnOnce<Args>>::call_once",
+     "instantiations": 198,
+     "size_estimate": 2376
+    },
+    {
+     "name": "remoc::rch::mpsc::recv_impl::{closure#0}::{closure#0}",
+     "instantiations": 20,
+     "size_estimate": 2320
+    },
+    {
+     "name": "tokio::runtime::task::raw::drop_join_handle_slow",
+     "instantiations": 568,
+     "size_estimate": 2272
+    },
+    {
+     "name": "tokio::runtime::task::raw::drop_abort_handle",
+     "instantiations": 568,
+     "size_estimate": 2272
+    },
+    {
+     "name": "tokio::runtime::task::raw::shutdown",
+     "instantiations": 568,
+     "size_estimate": 2272
+    },
+    {
+     "name": "tokio::runtime::task::raw::poll",
+     "instantiations": 568,
+     "size_estimate": 2272
+    },
+    {
+     "name": "tokio::runtime::task::harness::cancel_task::{closure#0}",
+     "instantiations": 568,
+     "size_estimate": 2272
+    },
+    {
+     "name": "<tokio::runtime::task::harness::poll_future::{closure#0}::Guard<'a, T, S> as std::ops::Drop>::drop",
+     "instantiations": 568,
+     "size_estimate": 2272
+    },
+    {
+     "name": "std::sync::Arc::<T, A>::drop_slow",
+     "instantiations": 206,
+     "size_estimate": 2266
+    },
+    {
+     "name": "<std::future::PollFn<F> as futures::Future>::poll",
+     "instantiations": 445,
+     "size_estimate": 2225
+    },
+    {
+     "name": "std::io::ErrorKind::from_prim",
+     "instantiations": 16,
+     "size_estimate": 2160
+    },
+    {
+     "name": "<remoc::rch::mpsc::sender::_::<impl types::_::_serde::Deserialize<'de> for remoc::rch::mpsc::sender::TransportedSender<T, Codec>>::deserialize::__Visitor<'de, T, Codec> as types::_::_serde::de::Visitor<'de>>::visit_seq",
+     "instantiations": 20,
+     "size_estimate": 2080
+    },
+    {
+     "name": "remoc::rch::mpsc::receiver::_::<impl types::_::_serde::Serialize for remoc::rch::mpsc::receiver::TransportedReceiver<T, Codec>>::serialize",
+     "instantiations": 20,
+     "size_estimate": 2080
+    },
+    {
+     "name": "<&mut postbag::de::deserializer::Deserializer<'de, R, CFG> as types::_::_serde::Deserializer<'de>>::deserialize_seq",
+     "instantiations": 21,
+     "size_estimate": 2079
+    },
+    {
+     "name": "tokio::sync::mpsc::list::Tx::<T>::find_block",
+     "instantiations": 30,
+     "size_estimate": 1980
+    },
+    {
+     "name": "std::sync::Mutex::<T>::lock",
+     "instantiations": 132,
+     "size_estimate": 1980
+    },
+    {
+     "name": "std::sync::Mutex::<T>::into_inner",
+     "instantiations": 98,
+     "size_estimate": 1960
+    },
+    {
+     "name": "<&'a mut postbag::ser::serializer::Serializer<W, CFG> as types::_::_serde::Serializer>::serialize_newtype_variant",
+     "instantiations": 39,
+     "size_estimate": 1872
+    },
+    {
+     "name": "remoc::rch::mpsc::send_impl::{closure#0}::{closure#0}",
+     "instantiations": 20,
+     "size_estimate": 1800
+    },
+    {
+     "name": "remoc::rch::mpsc::sender::_::<impl types::_::_serde::Serialize for remoc::rch::mpsc::sender::TransportedSender<T, Codec>>::serialize",
+     "instantiations": 20,
+     "size_estimate": 1780
+    },
+    {
+     "name": "tokio::runtime::task::list::OwnedTasks::<S>::bind",
+     "instantiations": 176,
+     "size_estimate": 1760
+    },
+    {
+     "name": "<std::sync::MutexGuard<'_, T> as std::ops::Drop>::drop",
+     "instantiations": 135,
+     "size_estimate": 1755
+    },
+    {
+     "name": "remoc::chmux::ChunkSender::<'a>::send_int::{closure#0}",
+     "instantiations": 6,
+     "size_estimate": 1716
+    },
+    {
+     "name": "<remoc::rch::watch::Receiver<T, Codec, MAX_ITEM_SIZE> as types::_::_serde::Deserialize<'de>>::deserialize",
+     "instantiations": 9,
+     "size_estimate": 1674
+    },
+    {
+     "name": "std::future::poll_fn",
+     "instantiations": 833,
+     "size_estimate": 1666
+    },
+    {
+     "name": "remoc::chmux::credit::MixedCreditUser::request::{closure#0}",
+     "instantiations": 6,
+     "size_estimate": 1662
+    },
+    {
+     "name": "std::sync::atomic::atomic_load",
+     "instantiations": 57,
+     "size_estimate": 1653
+    },
+    {
+     "name": "<remoc::rch::mpsc::Receiver<T, Codec, BUFFER, MAX_ITEM_SIZE> as std::ops::Drop>::drop",
+     "instantiations": 40,
+     "size_estimate": 1560
+    },
+    {
+     "name": "std::option::Option::<T>::unwrap",
+     "instantiations": 257,
+     "size_estimate": 1542
+    },
+    {
+     "name": "remoc::rch::mpsc::Sender::<T, Codec, BUFFER>::set_buffer",
+     "instantiations": 20,
+     "size_estimate": 1520
+    },
+    {
+     "name": "remoc::rch::watch::recv_impl::{closure#0}::{closure#0}",
+     "instantiations": 9,
+     "size_estimate": 1512
+    },
+    {
+     "name": "tokio::sync::oneshot::Inner::<T>::close",
+     "instantiations": 43,
+     "size_estimate": 1505
+    },
+    {
+     "name": "remoc::rch::base::Sender::<T, Codec>::serialize_streaming::{closure#0}::{closure#0}::{closure#0}",
+     "instantiations": 98,
+     "size_estimate": 1470
+    },
+    {
+     "name": "tokio::sync::mpsc::chan::channel",
+     "instantiations": 31,
+     "size_estimate": 1457
+    },
+    {
+     "name": "<remoc::rch::base::SendError<T> as std::fmt::Debug>::fmt",
+     "instantiations": 207,
+     "size_estimate": 1449
+    },
+    {
+     "name": "<remoc::rch::watch::receiver::_::<impl types::_::_serde::Deserialize<'de> for remoc::rch::watch::receiver::TransportedReceiver<T, Codec>>::deserialize::__Visitor<'de, T, Codec> as types::_::_serde::de::Visitor<'de>>::visit_seq",
+     "instantiations": 9,
+     "size_estimate": 1422
+    },
+    {
+     "name": "<std::sync::Arc<T, A> as std::clone::Clone>::clone",
+     "instantiations": 106,
+     "size_estimate": 1378
+    },
+    {
+     "name": "remoc::chmux::Sender::connect::{closure#0}",
+     "instantiations": 5,
+     "size_estimate": 1355
+    },
+    {
+     "name": "<pin_project_lite::__private::UnsafeOverwriteGuard<T> as std::ops::Drop>::drop",
+     "instantiations": 338,
+     "size_estimate": 1352
+    },
+    {
+     "name": "<pin_project_lite::__private::UnsafeDropInPlaceGuard<T> as std::ops::Drop>::drop",
+     "instantiations": 338,
+     "size_estimate": 1352
+    },
+    {
+     "name": "remoc::chmux::credit::CreditUser::request::{closure#0}",
+     "instantiations": 6,
+     "size_estimate": 1350
+    },
+    {
+     "name": "remoc::exec::are_threads_available::{closure#0}::{closure#0}::{closure#0}",
+     "instantiations": 4,
+     "size_estimate": 1296
+    },
+    {
+     "name": "tokio::sync::mpsc::block::Block::<T>::grow",
+     "instantiations": 30,
+     "size_estimate": 1260
+    },
+    {
+     "name": "tokio::sync::mpsc::list::Tx::<T>::reclaim_block",
+     "instantiations": 30,
+     "size_estimate": 1260
+    },
+    {
+     "name": "remoc::rch::watch::send_impl::{closure#0}::{closure#1}",
+     "instantiations": 9,
+     "size_estimate": 1251
+    },
+    {
+     "name": "<remoc::rch::watch::Receiver<T, Codec, MAX_ITEM_SIZE> as types::_::_serde::Serialize>::serialize",
+     "instantiations": 9,
+     "size_estimate": 1242
+    },
+    {
+     "name": "<types::_::_serde::de::impls::<impl types::_::_serde::Deserialize<'de> for std::vec::Vec<T>>::deserialize::VecVisitor<T> as types::_::_serde::de::Visitor<'de>>::visit_seq",
+     "instantiations": 21,
+     "size_estimate": 1239
+    },
+    {
+     "name": "remoc::chmux::Sender::send::{closure#0}",
+     "instantiations": 5,
+     "size_estimate": 1235
+    },
+    {
+     "name": "remoc::chmux::ChMux::<TransportSink, TransportStream>::handle_received_msg::{closure#0}::{closure#0}",
+     "instantiations": 1,
+     "size_estimate": 1227
+    },
+    {
+     "name": "<tokio::task::JoinHandle<T> as std::ops::Drop>::drop",
+     "instantiations": 102,
+     "size_estimate": 1224
+    },
+    {
+     "name": "<tokio::sync::oneshot::Receiver<T> as std::ops::Drop>::drop",
+     "instantiations": 43,
+     "size_estimate": 1161
+    },
+    {
+     "name": "tokio::sync::oneshot::channel",
+     "instantiations": 43,
+     "size_estimate": 1161
+    },
+    {
+     "name": "tokio::sync::oneshot::Inner::<T>::complete",
+     "instantiations": 52,
+     "size_estimate": 1144
+    },
+    {
+     "name": "<postbag::de::deserializer::SeqAccess<'a, 'b, R, CFG> as types::_::_serde::de::SeqAccess<'b>>::next_element_seed",
+     "instantiations": 22,
+     "size_estimate": 1144
+    },
+    {
+     "name": "<std::vec::IntoIter<T, A> as std::iter::Iterator>::next",
+     "instantiations": 30,
+     "size_estimate": 1140
+    },
+    {
+     "name": "tokio::sync::mpsc::list::Rx::<T>::reclaim_blocks",
+     "instantiations": 30,
+     "size_estimate": 1140
+    },
+    {
+     "name": "<remoc::rch::mpsc::Receiver<T, Codec, BUFFER, MAX_ITEM_SIZE> as types::_::_serde::Serialize>::serialize",
+     "instantiations": 20,
+     "size_estimate": 1140
+    },
+    {
+     "name": "types::_::_serde::Serializer::collect_seq",
+     "instantiations": 21,
+     "size_estimate": 1134
+    },
+    {
+     "name": "<remoc::rch::base::SendError<T> as std::fmt::Display>::fmt",
+     "instantiations": 29,
+     "size_estimate": 1131
+    },
+    {
+     "name": "remoc::rch::mpsc::Sender::<T, Codec, BUFFER>::new_closed",
+     "instantiations": 40,
+     "size_estimate": 1120
+    },
+    {
+     "name": "<tokio::sync::mpsc::chan::Rx<T, S> as std::ops::Drop>::drop::{closure#0}",
+     "instantiations": 31,
+     "size_estimate": 1116
+    },
+    {
+     "name": "<&mut postbag::de::deserializer::Deserializer<'de, R, CFG> as types::_::_serde::de::EnumAccess<'de>>::variant_seed",
+     "instantiations": 13,
+     "size_estimate": 1105
+    },
+    {
+     "name": "std::sync::Arc::<T, A>::downgrade",
+     "instantiations": 23,
+     "size_estimate": 1104
+    },
+    {
+     "name": "std::vec::Vec::<T, A>::push_mut",
+     "instantiations": 48,
+     "size_estimate": 1104
+    },
+    {
+     "name": "<std::vec::Vec<T, A> as std::iter::IntoIterator>::into_iter",
+     "instantiations": 31,
+     "size_estimate": 1085
+    },
+    {
+     "name": "remoc::rch::watch::receiver::_::<impl types::_::_serde::Serialize for remoc::rch::watch::receiver::TransportedReceiver<T, Codec>>::serialize",
+     "instantiations": 9,
+     "size_estimate": 1071
+    },
+    {
+     "name": "tokio::sync::watch::changed_impl::{closure#0}",
+     "instantiations": 13,
+     "size_estimate": 1066
+    },
+    {
+     "name": "<remoc::rch::watch::Receiver<T, Codec, MAX_ITEM_SIZE> as types::_::_serde::Serialize>::serialize::{closure#0}::{closure#0}",
+     "instantiations": 9,
+     "size_estimate": 1062
+    },
+    {
+     "name": "remoc::rch::mpsc::channel",
+     "instantiations": 20,
+     "size_estimate": 1040
+    },
+    {
+     "name": "<remoc::rch::watch::Receiver<T, Codec, MAX_ITEM_SIZE> as types::_::_serde::Deserialize<'de>>::deserialize::{closure#0}::{closure#0}",
+     "instantiations": 9,
+     "size_estimate": 1026
+    },
+    {
+     "name": "<types::_::_serde::de::impls::<impl types::_::_serde::Deserialize<'de> for std::result::Result<T, E>>::deserialize::ResultVisitor<T, E> as types::_::_serde::de::Visitor<'de>>::visit_enum",
+     "instantiations": 29,
+     "size_estimate": 1015
+    },
+    {
+     "name": "tokio::future::maybe_done::maybe_done",
+     "instantiations": 338,
+     "size_estimate": 1014
+    },
+    {
+     "name": "std::option::Option::<T>::take",
+     "instantiations": 249,
+     "size_estimate": 996
+    },
+    {
+     "name": "tokio::sync::mpsc::block::Block::<T>::read",
+     "instantiations": 30,
+     "size_estimate": 990
+    },
+    {
+     "name": "std::option::Option::<T>::is_none",
+     "instantiations": 242,
+     "size_estimate": 968
+    },
+    {
+     "name": "remoc::rch::watch::channel",
+     "instantiations": 9,
+     "size_estimate": 963
+    },
+    {
+     "name": "remoc::rch::mpsc::Receiver::<T, Codec, BUFFER, MAX_ITEM_SIZE>::set_buffer",
+     "instantiations": 20,
+     "size_estimate": 960
+    },
+    {
+     "name": "<tokio::sync::oneshot::Inner<T> as std::ops::Drop>::drop",
+     "instantiations": 52,
+     "size_estimate": 936
+    },
+    {
+     "name": "alloc::collections::btree::node::Handle::<alloc::collections::btree::node::NodeRef<alloc::collections::btree::node::marker::Mut<'a>, K, V, NodeType>, alloc::collections::btree::node::marker::KV>::split_leaf_data",
+     "instantiations": 10,
+     "size_estimate": 930
+    },
+    {
+     "name": "std::sync::Arc::<T>::new",
+     "instantiations": 102,
+     "size_estimate": 918
+    },
+    {
+     "name": "tokio::sync::mpsc::Receiver::<T>::recv::{closure#0}",
+     "instantiations": 26,
+     "size_estimate": 910
+    },
+    {
+     "name": "remoc::chmux::Receiver::recv_any::{closure#0}",
+     "instantiations": 3,
+     "size_estimate": 903
+    },
+    {
+     "name": "tokio::runtime::scheduler::Handle::spawn",
+     "instantiations": 88,
+     "size_estimate": 880
+    },
+    {
+     "name": "<tokio::sync::oneshot::Receiver<T> as futures::Future>::poll",
+     "instantiations": 23,
+     "size_estimate": 851
+    },
+    {
+     "name": "tokio::sync::mpsc::block::Block::<T>::try_push",
+     "instantiations": 30,
+     "size_estimate": 840
+    },
+    {
+     "name": "tokio::sync::mpsc::chan::Rx::<T, S>::recv",
+     "instantiations": 30,
+     "size_estimate": 810
+    },
+    {
+     "name": "tokio::sync::watch::Sender::<T>::closed::{closure#0}::{closure#0}",
+     "instantiations": 9,
+     "size_estimate": 810
+    },
+    {
+     "name": "<postbag::de::deserializer::StructFieldAccess<'a, 'b, R, CFG> as types::_::_serde::de::MapAccess<'b>>::next_key_seed",
+     "instantiations": 27,
+     "size_estimate": 810
+    },
+    {
+     "name": "core::io::error::repr::decode_repr",
+     "instantiations": 18,
+     "size_estimate": 810
+    },
+    {
+     "name": "remoc::rch::watch::send_impl::{closure#0}::{closure#0}",
+     "instantiations": 9,
+     "size_estimate": 801
+    },
+    {
+     "name": "std::iter::Iterator::try_fold",
+     "instantiations": 25,
+     "size_estimate": 800
+    },
+    {
+     "name": "tokio::spawn",
+     "instantiations": 44,
+     "size_estimate": 792
+    },
+    {
+     "name": "tokio::sync::watch::Sender::<T>::send_if_modified",
+     "instantiations": 11,
+     "size_estimate": 781
+    },
+    {
+     "name": "tokio::sync::mpsc::list::Rx::<T>::try_advancing_head",
+     "instantiations": 30,
+     "size_estimate": 780
+    }
+   ],
+   "passes": {
+    "total": 22.931,
+    "finish_ongoing_codegen": 17.83,
+    "LLVM_thinlto": 10.648,
+    "LLVM_passes": 9.681,
+    "codegen_crate": 4.661,
+    "codegen_to_LLVM_IR": 2.786,
+    "monomorphization_collector_graph_walk": 1.546,
+    "partition_and_assert_distinct_symbols": 0.297,
+    "MIR_borrow_checking": 0.12,
+    "link_binary": 0.093,
+    "link_crate": 0.093,
+    "link": 0.093,
+    "type_check_crate": 0.085,
+    "run_linker": 0.07,
+    "coherence_checking": 0.031,
+    "expand_crate": 0.028,
+    "macro_expand_crate": 0.028,
+    "resolve_crate": 0.006,
+    "misc_checking_3": 0.006,
+    "late_resolve_crate": 0.005
+   }
+  }
+ }
+}

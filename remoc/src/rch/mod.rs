@@ -110,7 +110,7 @@ use std::{
     task::{Context, Poll, ready},
 };
 
-use crate::chmux;
+use crate::{chmux, codec::AnySend, rch::base::SendError};
 
 mod interlock;
 
@@ -422,7 +422,10 @@ impl<T> SendingError<T> {
 /// This would massively impact the throughput of the channel.
 ///
 /// Dropping the handle *does not* abort sending the value.
-pub struct Sending<T>(tokio::sync::oneshot::Receiver<Result<(), base::SendError<T>>>);
+pub struct Sending<T> {
+    rx: tokio::sync::oneshot::Receiver<Result<(), base::SendError<AnySend>>>,
+    _phantom: fn(T),
+}
 
 impl<T> fmt::Debug for Sending<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -431,26 +434,32 @@ impl<T> fmt::Debug for Sending<T> {
 }
 
 impl<T> Sending<T> {
+    pub(crate) fn new(rx: tokio::sync::oneshot::Receiver<Result<(), base::SendError<AnySend>>>) -> Self {
+        Self { rx, _phantom: |_| () }
+    }
+}
+
+impl<T: 'static> Sending<T> {
     /// Tries to obtain the result of the sending operation.
     ///
     /// If the value is still queued for sending `None` is returned.
     pub fn try_result(&mut self) -> Option<Result<(), SendingError<T>>> {
-        match self.0.try_recv() {
+        match self.rx.try_recv() {
             Ok(Ok(())) => Some(Ok(())),
-            Ok(Err(err)) => Some(Err(SendingError::Send(err))),
+            Ok(Err(err)) => Some(Err(SendingError::Send(SendError::from_any(err)))),
             Err(tokio::sync::oneshot::error::TryRecvError::Empty) => None,
             Err(tokio::sync::oneshot::error::TryRecvError::Closed) => Some(Err(SendingError::Dropped)),
         }
     }
 }
 
-impl<T> Future for Sending<T> {
+impl<T: 'static> Future for Sending<T> {
     type Output = Result<(), SendingError<T>>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        let res = match ready!(self.0.poll_unpin(cx)) {
+        let res = match ready!(self.rx.poll_unpin(cx)) {
             Ok(Ok(())) => Ok(()),
-            Ok(Err(err)) => Err(SendingError::Send(err)),
+            Ok(Err(err)) => Err(SendingError::Send(SendError::from_any(err))),
             Err(_) => Err(SendingError::Dropped),
         };
         Poll::Ready(res)
@@ -459,7 +468,7 @@ impl<T> Future for Sending<T> {
 
 impl<T> Drop for Sending<T> {
     fn drop(&mut self) {
-        if let Ok(Err(err)) = self.0.try_recv() {
+        if let Ok(Err(err)) = self.rx.try_recv() {
             tracing::warn!(%err, "sending over remote channel failed");
         }
     }

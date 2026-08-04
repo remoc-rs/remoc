@@ -47,8 +47,8 @@
 
 use bytes::Buf;
 use futures::FutureExt;
-use serde::{Serialize, de::DeserializeOwned};
 use std::{
+    any::Any,
     fmt,
     future::Future,
     pin::Pin,
@@ -57,7 +57,9 @@ use std::{
 
 use super::{ClosedReason, RemoteSendError, Sending, base};
 use crate::{
-    RemoteSend, chmux, codec, exec,
+    RemoteSend, chmux,
+    codec::{self, AnySend, ErasedDeserializer, ErasedSerializer},
+    exec,
     rch::{BACKCHANNEL_MSG_CLOSE, BACKCHANNEL_MSG_ERROR},
 };
 
@@ -191,41 +193,75 @@ where
     }
 }
 
-pub(crate) struct SendReq<T> {
-    pub value: Result<T, RecvError>,
-    pub result_tx: tokio::sync::oneshot::Sender<Result<(), base::SendError<T>>>,
+pub(crate) struct SendReq {
+    pub value: AnySend,
+    pub result_tx: tokio::sync::oneshot::Sender<Result<(), base::SendError<AnySend>>>,
 }
 
-impl<T> SendReq<T> {
-    fn new(value: Result<T, RecvError>) -> Self {
+impl SendReq {
+    fn received(value: AnySend) -> Self {
         Self { value, result_tx: tokio::sync::oneshot::channel().0 }
     }
 
-    fn ack(self) -> Result<T, RecvError> {
+    fn err_factory<T: Send + 'static>() -> SendReqErrorFactory {
+        SendReqErrorFactory {
+            err: Box::new(|err: RecvError| {
+                let value: Result<T, RecvError> = Err(err);
+                Box::new(value)
+            }),
+            ok: Box::new(|value: AnySend| {
+                let value: Result<T, RecvError> = *value.downcast().expect("mismatched type for SendReq");
+                match value {
+                    Ok(v) => Some(Box::new(v)),
+                    Err(_) => None,
+                }
+            }),
+        }
+    }
+
+    #[track_caller]
+    fn ack<T: 'static>(self) -> Result<T, RecvError> {
         let Self { value, result_tx } = self;
+        let value = *value.downcast().expect("mismatched type for SendReq");
         let _ = result_tx.send(Ok(()));
         value
     }
 }
 
-pub(crate) fn send_req<T>(value: Result<T, RecvError>) -> (SendReq<T>, Sending<T>) {
+pub(crate) struct SendReqErrorFactory {
+    err: Box<dyn Fn(RecvError) -> AnySend + Send>,
+    ok: Box<dyn Fn(AnySend) -> Option<AnySend> + Send>,
+}
+
+impl SendReqErrorFactory {
+    fn err(&self, err: RecvError) -> SendReq {
+        SendReq { value: (self.err)(err), result_tx: tokio::sync::oneshot::channel().0 }
+    }
+
+    fn ok(&self, value: AnySend) -> Option<AnySend> {
+        (self.ok)(value)
+    }
+}
+
+pub(crate) fn send_req<T>(value: Result<T, RecvError>) -> (SendReq, Sending<T>)
+where
+    T: Any + Send,
+{
     let (result_tx, result_rx) = tokio::sync::oneshot::channel();
-    let this = SendReq { value, result_tx };
-    let sent = Sending(result_rx);
+    let this = SendReq { value: Box::new(value), result_tx };
+    let sent = Sending::new(result_rx);
     (this, sent)
 }
 
 /// Send implementation for deserializer of Sender and serializer of Receiver.
-async fn send_impl<T, Codec>(
-    mut rx: tokio::sync::mpsc::Receiver<SendReq<T>>, raw_tx: chmux::Sender, mut raw_rx: chmux::Receiver,
+async fn send_impl(
+    serializer: ErasedSerializer, err_factory: SendReqErrorFactory, mut rx: tokio::sync::mpsc::Receiver<SendReq>,
+    raw_tx: chmux::Sender, mut raw_rx: chmux::Receiver,
     remote_send_err_tx: tokio::sync::watch::Sender<Option<RemoteSendError>>,
     closed_tx: tokio::sync::watch::Sender<Option<ClosedReason>>, max_item_size: usize,
-) where
-    T: Serialize + Send + 'static,
-    Codec: codec::Codec,
-{
+) {
     // Encode data using remote sender.
-    let mut remote_tx = base::Sender::<Result<T, RecvError>, Codec>::new(raw_tx);
+    let mut remote_tx = base::AnySender::new(serializer, raw_tx);
     remote_tx.set_max_item_size(max_item_size);
 
     // Process events.
@@ -274,21 +310,19 @@ async fn send_impl<T, Codec>(
                 match value_opt {
                     Some(value) => {
                         let SendReq { value, result_tx } = value;
-                        match remote_tx.send(value).await {
+                        match remote_tx.send_any(value).await {
                             Ok(()) => {
                                 let _ = result_tx.send(Ok(()));
                             }
                             Err(err) => {
                                 let _ = remote_send_err_tx.send(Some(RemoteSendError::Send(err.kind.clone())));
                                 let _ = closed_tx.send(Some(ClosedReason::Failed));
-                                if let Ok(item) = err.item
-                                    && let Err(Err(err)) = result_tx.send(Err(base::SendError {
-                                        kind: err.kind,
-                                        item,
-                                    }))
-                                        && err.is_item_specific() {
-                                            tracing::warn!(%err, "sending over remote channel failed");
-                                        }
+                                if  let Some(item) = err_factory.ok(err.item)
+                                    && let Err(Err(err)) = result_tx.send(Err(base::SendError { kind: err.kind, item }))
+                                    && err.is_item_specific()
+                                {
+                                    tracing::warn!(%err, "sending over remote channel failed");
+                                }
                             }
                         }
                     }
@@ -300,16 +334,14 @@ async fn send_impl<T, Codec>(
 }
 
 /// Receive implementation for serializer of Sender and deserializer of Receiver.
-async fn recv_impl<T, Codec>(
-    tx: &tokio::sync::mpsc::Sender<SendReq<T>>, mut raw_tx: chmux::Sender, raw_rx: chmux::Receiver,
+async fn recv_impl(
+    deserializer: ErasedDeserializer, err_factory: SendReqErrorFactory, tx: &tokio::sync::mpsc::Sender<SendReq>,
+    mut raw_tx: chmux::Sender, raw_rx: chmux::Receiver,
     mut remote_send_err_rx: tokio::sync::watch::Receiver<Option<RemoteSendError>>,
     mut closed_rx: tokio::sync::watch::Receiver<Option<ClosedReason>>, max_item_size: usize,
-) where
-    T: DeserializeOwned + Send + 'static,
-    Codec: codec::Codec,
-{
+) {
     // Decode raw received data using remote receiver.
-    let mut remote_rx = base::Receiver::<Result<T, RecvError>, Codec>::new(raw_rx);
+    let mut remote_rx = base::AnyReceiver::new(deserializer, raw_rx);
     remote_rx.set_max_item_size(max_item_size);
 
     // Process events.
@@ -345,17 +377,17 @@ async fn recv_impl<T, Codec>(
             }
 
             // Data received from remote endpoint.
-            res = remote_rx.recv() => {
+            res = remote_rx.recv_any() => {
                 let mut is_final_err = false;
                 let value = match res {
-                    Ok(Some(value)) => value,
+                    Ok(Some(value)) => SendReq::received(value),
                     Ok(None) => break,
                     Err(err) => {
                         is_final_err = err.is_final();
-                        Err(RecvError::RemoteReceive(err))
+                        err_factory.err(RecvError::RemoteReceive(err))
                     },
                 };
-                if tx.send(SendReq::new(value)).await.is_err() {
+                if tx.send(value).await.is_err() {
                     break;
                 }
                 if is_final_err {

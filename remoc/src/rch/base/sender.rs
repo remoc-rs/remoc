@@ -40,6 +40,7 @@ pub struct SendError<T> {
 }
 
 impl<T: 'static> SendError<T> {
+    #[track_caller]
     pub(crate) fn from_any(err: SendError<Box<dyn Any + Send>>) -> Self {
         let SendError { kind, item } = err;
         let Ok(item) = item.downcast::<T>() else { panic!("mismatched type for SendError") };

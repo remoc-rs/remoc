@@ -17,7 +17,11 @@ use super::{
     },
     Distributor, SendReq,
 };
-use crate::{RemoteSend, chmux, codec, exec};
+use crate::{
+    RemoteSend, chmux,
+    codec::{self, ErasedDeserializer, ErasedSerializer},
+    exec,
+};
 
 /// An error occurred during receiving over an mpsc channel.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -127,12 +131,12 @@ pub struct Receiver<
     const BUFFER: usize = DEFAULT_BUFFER,
     const MAX_ITEM_SIZE: usize = DEFAULT_MAX_ITEM_SIZE,
 > {
-    inner: Option<ReceiverInner<T>>,
+    inner: Option<ReceiverInner>,
     #[allow(clippy::type_complexity)]
-    successor_tx: Mutex<Option<tokio::sync::oneshot::Sender<ReceiverInner<T>>>>,
+    successor_tx: Mutex<Option<tokio::sync::oneshot::Sender<ReceiverInner>>>,
     final_err: Option<RecvError>,
     remote_max_item_size: Option<usize>,
-    _codec: PhantomData<Codec>,
+    _phantom: fn(T, Codec),
 }
 
 impl<T, Codec, const BUFFER: usize, const MAX_ITEM_SIZE: usize> fmt::Debug
@@ -143,8 +147,8 @@ impl<T, Codec, const BUFFER: usize, const MAX_ITEM_SIZE: usize> fmt::Debug
     }
 }
 
-pub(crate) struct ReceiverInner<T> {
-    rx: tokio::sync::mpsc::Receiver<SendReq<T>>,
+pub(crate) struct ReceiverInner {
+    rx: tokio::sync::mpsc::Receiver<SendReq>,
     closed_tx: tokio::sync::watch::Sender<Option<ClosedReason>>,
     remote_send_err_tx: tokio::sync::watch::Sender<Option<RemoteSendError>>,
     closed: bool,
@@ -152,13 +156,15 @@ pub(crate) struct ReceiverInner<T> {
 
 /// Mpsc receiver in transport.
 #[derive(Serialize, Deserialize)]
-pub(crate) struct TransportedReceiver<T, Codec> {
+pub(crate) struct TransportedReceiver {
     /// chmux port number.
     port: u32,
     /// Data type.
-    data: PhantomData<T>,
+    #[serde(default)]
+    data: PhantomData<()>,
     /// Data codec.
-    codec: PhantomData<Codec>,
+    #[serde(default)]
+    codec: PhantomData<()>,
     /// Receiver has been closed.
     #[serde(default)]
     closed: bool,
@@ -184,9 +190,12 @@ where
     }
 }
 
-impl<T, Codec, const BUFFER: usize, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, BUFFER, MAX_ITEM_SIZE> {
+impl<T, Codec, const BUFFER: usize, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, BUFFER, MAX_ITEM_SIZE>
+where
+    T: 'static,
+{
     pub(crate) fn new(
-        rx: tokio::sync::mpsc::Receiver<SendReq<T>>, closed_tx: tokio::sync::watch::Sender<Option<ClosedReason>>,
+        rx: tokio::sync::mpsc::Receiver<SendReq>, closed_tx: tokio::sync::watch::Sender<Option<ClosedReason>>,
         closed: bool, remote_send_err_tx: tokio::sync::watch::Sender<Option<RemoteSendError>>,
         remote_max_item_size: Option<usize>,
     ) -> Self {
@@ -195,7 +204,7 @@ impl<T, Codec, const BUFFER: usize, const MAX_ITEM_SIZE: usize> Receiver<T, Code
             successor_tx: Mutex::new(None),
             final_err: None,
             remote_max_item_size,
-            _codec: PhantomData,
+            _phantom: |_, _| (),
         }
     }
 
@@ -411,7 +420,7 @@ impl<T, Codec, const BUFFER: usize, const MAX_ITEM_SIZE: usize> Receiver<T, Code
             successor_tx: Mutex::new(None),
             final_err: self.final_err.clone(),
             remote_max_item_size: self.remote_max_item_size,
-            _codec: PhantomData,
+            _phantom: |_, _| (),
         }
     }
 
@@ -423,7 +432,7 @@ impl<T, Codec, const BUFFER: usize, const MAX_ITEM_SIZE: usize> Receiver<T, Code
             successor_tx: Mutex::new(None),
             final_err: self.final_err.clone(),
             remote_max_item_size: self.remote_max_item_size,
-            _codec: PhantomData,
+            _phantom: |_, _| (),
         }
     }
 
@@ -441,7 +450,7 @@ impl<T, Codec, const BUFFER: usize, const MAX_ITEM_SIZE: usize> Receiver<T, Code
             successor_tx: Mutex::new(None),
             final_err: self.final_err.clone(),
             remote_max_item_size: self.remote_max_item_size,
-            _codec: PhantomData,
+            _phantom: |_, _| (),
         }
     }
 
@@ -502,6 +511,9 @@ where
     where
         S: serde::Serializer,
     {
+        let erased_serialzer = ErasedSerializer::new::<Result<T, RecvError>, Codec>();
+        let err_factory = SendReq::err_factory::<T>();
+
         // Register successor of this receiver.
         let (successor_tx, successor_rx) = tokio::sync::oneshot::channel();
         *self.successor_tx.lock().unwrap() = Some(successor_tx);
@@ -523,14 +535,23 @@ where
                     }
                 };
 
-                super::send_impl::<T, Codec>(rx, raw_tx, raw_rx, remote_send_err_tx, closed_tx, MAX_ITEM_SIZE)
-                    .await;
+                super::send_impl(
+                    erased_serialzer,
+                    err_factory,
+                    rx,
+                    raw_tx,
+                    raw_rx,
+                    remote_send_err_tx,
+                    closed_tx,
+                    MAX_ITEM_SIZE,
+                )
+                .await;
             }
             .boxed()
         })?;
 
         // Encode chmux port number in transport type and serialize it.
-        let transported = TransportedReceiver::<T, Codec> {
+        let transported = TransportedReceiver {
             port,
             data: PhantomData,
             codec: PhantomData,
@@ -552,11 +573,14 @@ where
     where
         D: serde::Deserializer<'de>,
     {
+        let erased_deserialzer = ErasedDeserializer::new::<Result<T, RecvError>, Codec>();
+        let err_factory = SendReq::err_factory::<T>();
+
         assert!(BUFFER > 0, "BUFFER must not be zero");
 
         // Get chmux port number from deserialized transport type.
         let TransportedReceiver { port, closed, max_item_size, .. } =
-            TransportedReceiver::<T, Codec>::deserialize(deserializer)?;
+            TransportedReceiver::deserialize(deserializer)?;
 
         let max_item_size = usize::try_from(max_item_size).unwrap_or(usize::MAX);
         if max_item_size > MAX_ITEM_SIZE {
@@ -577,13 +601,22 @@ where
                 let (raw_tx, raw_rx) = match request.accept_from(local_port).await {
                     Ok(tx_rx) => tx_rx,
                     Err(err) => {
-                        let _ = tx.send(SendReq::new(Err(RecvError::RemoteListen(err)))).await;
+                        let _ = tx.send(err_factory.err(RecvError::RemoteListen(err))).await;
                         return;
                     }
                 };
 
-                super::recv_impl::<T, Codec>(&tx, raw_tx, raw_rx, remote_send_err_rx, closed_rx, MAX_ITEM_SIZE)
-                    .await;
+                super::recv_impl(
+                    erased_deserialzer,
+                    err_factory,
+                    &tx,
+                    raw_tx,
+                    raw_rx,
+                    remote_send_err_rx,
+                    closed_rx,
+                    MAX_ITEM_SIZE,
+                )
+                .await;
             }
             .boxed()
         })?;
@@ -594,6 +627,8 @@ where
 
 impl<T, Codec, const BUFFER: usize, const MAX_ITEM_SIZE: usize> Stream
     for Receiver<T, Codec, BUFFER, MAX_ITEM_SIZE>
+where
+    T: 'static,
 {
     type Item = Result<T, RecvError>;
 

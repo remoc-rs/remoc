@@ -314,7 +314,7 @@ impl<T> fmt::Debug for Sending<T> {
     }
 }
 
-impl<T> Sending<T> {
+impl<T: 'static> Sending<T> {
     fn map_result(res: Result<(), SendingError<BroadcastMsg<T>>>) -> Result<(), SendingError<T>> {
         match res {
             Ok(()) => Ok(()),
@@ -337,7 +337,7 @@ impl<T> Sending<T> {
     }
 }
 
-impl<T> Future for Sending<T> {
+impl<T: 'static> Future for Sending<T> {
     type Output = Result<(), SendingError<T>>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {

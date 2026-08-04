@@ -20,7 +20,12 @@ use super::{
     receiver::RecvError,
     send_req,
 };
-use crate::{RemoteSend, chmux, codec, exec, rch::SendingError};
+use crate::{
+    RemoteSend, chmux,
+    codec::{self, ErasedDeserializer, ErasedSerializer},
+    exec,
+    rch::SendingError,
+};
 
 /// An error occurred during sending over an mpsc channel.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -248,12 +253,12 @@ impl<T> Error for TrySendError<T> where T: fmt::Debug {}
 ///
 /// This can be converted into a [Sink] accepting values by wrapping it into a [SenderSink].
 pub struct Sender<T, Codec = codec::Default, const BUFFER: usize = DEFAULT_BUFFER> {
-    tx: Weak<tokio::sync::mpsc::Sender<SendReq<T>>>,
+    tx: Weak<tokio::sync::mpsc::Sender<SendReq>>,
     closed_rx: tokio::sync::watch::Receiver<Option<ClosedReason>>,
     remote_send_err_rx: tokio::sync::watch::Receiver<Option<RemoteSendError>>,
     dropped_tx: tokio::sync::mpsc::Sender<()>,
     max_item_size: usize,
-    _codec: PhantomData<Codec>,
+    _phantom: fn(T, Codec),
 }
 
 impl<T, Codec, const BUFFER: usize> fmt::Debug for Sender<T, Codec, BUFFER> {
@@ -270,20 +275,22 @@ impl<T, Codec, const BUFFER: usize> Clone for Sender<T, Codec, BUFFER> {
             remote_send_err_rx: self.remote_send_err_rx.clone(),
             dropped_tx: self.dropped_tx.clone(),
             max_item_size: self.max_item_size,
-            _codec: PhantomData,
+            _phantom: |_, _| (),
         }
     }
 }
 
 /// Mpsc sender in transport.
 #[derive(Serialize, Deserialize)]
-pub(crate) struct TransportedSender<T, Codec> {
+pub(crate) struct TransportedSender {
     /// chmux port number. `None` if closed.
     port: Option<u32>,
     /// Data type.
-    data: PhantomData<T>,
+    #[serde(default)]
+    data: PhantomData<()>,
     /// Data codec.
-    codec: PhantomData<Codec>,
+    #[serde(default)]
+    codec: PhantomData<()>,
     /// Maximum item size in bytes.
     #[serde(default = "default_max_item_size")]
     max_item_size: u64,
@@ -299,7 +306,7 @@ where
 {
     /// Creates a new sender.
     pub(crate) fn new(
-        tx: tokio::sync::mpsc::Sender<SendReq<T>>,
+        tx: tokio::sync::mpsc::Sender<SendReq>,
         mut closed_rx: tokio::sync::watch::Receiver<Option<ClosedReason>>,
         remote_send_err_rx: tokio::sync::watch::Receiver<Option<RemoteSendError>>,
     ) -> Self {
@@ -312,7 +319,7 @@ where
             remote_send_err_rx,
             dropped_tx,
             max_item_size: DEFAULT_MAX_ITEM_SIZE,
-            _codec: PhantomData,
+            _phantom: |_, _| (),
         };
 
         // Drop strong reference to sender when channel is closed.
@@ -344,7 +351,7 @@ where
             remote_send_err_rx: tokio::sync::watch::channel(None).1,
             dropped_tx: tokio::sync::mpsc::channel(1).0,
             max_item_size: DEFAULT_MAX_ITEM_SIZE,
-            _codec: PhantomData,
+            _phantom: |_, _| (),
         }
     }
 
@@ -364,7 +371,7 @@ where
                 let (req, sent) = send_req(Ok(value));
                 match tx.send(req).await {
                     Ok(()) => Ok(sent),
-                    Err(err) => Err(SendError::Closed(err.0.value.expect("unreachable"))),
+                    Err(err) => Err(SendError::Closed(err.0.ack().expect("unreachable"))),
                 }
             }
             None => Err(SendError::Closed(value)),
@@ -388,10 +395,10 @@ where
                 match tx.try_send(req) {
                     Ok(()) => Ok(sent),
                     Err(tokio::sync::mpsc::error::TrySendError::Full(err)) => {
-                        Err(TrySendError::Full(err.value.expect("unreachable")))
+                        Err(TrySendError::Full(err.ack().expect("unreachable")))
                     }
                     Err(tokio::sync::mpsc::error::TrySendError::Closed(err)) => {
-                        Err(TrySendError::Closed(err.value.expect("unreachable")))
+                        Err(TrySendError::Closed(err.ack().expect("unreachable")))
                     }
                 }
             }
@@ -428,7 +435,7 @@ where
             Some(tx) => {
                 let tx = (*tx).clone();
                 match tx.reserve_owned().await {
-                    Ok(permit) => Ok(Permit(permit)),
+                    Ok(permit) => Ok(Permit { permit, _t: |_| () }),
                     Err(_) => Err(SendError::Closed(())),
                 }
             }
@@ -453,7 +460,7 @@ where
             Some(tx) => {
                 let tx = (*tx).clone();
                 match tx.try_reserve_owned() {
-                    Ok(permit) => Ok(Permit(permit)),
+                    Ok(permit) => Ok(Permit { permit, _t: |_| () }),
                     Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => Err(TrySendError::Full(())),
                     Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => Err(TrySendError::Closed(())),
                 }
@@ -510,7 +517,7 @@ where
             remote_send_err_rx: self.remote_send_err_rx.clone(),
             dropped_tx: self.dropped_tx.clone(),
             max_item_size: self.max_item_size,
-            _codec: PhantomData,
+            _phantom: |_, _| (),
         }
     }
 
@@ -523,7 +530,7 @@ where
             remote_send_err_rx: self.remote_send_err_rx.clone(),
             dropped_tx: self.dropped_tx.clone(),
             max_item_size: self.max_item_size,
-            _codec: PhantomData,
+            _phantom: |_, _| (),
         }
     }
 
@@ -539,16 +546,19 @@ where
 }
 
 /// Owned permit to send one value into the channel.
-pub struct Permit<T>(tokio::sync::mpsc::OwnedPermit<SendReq<T>>);
+pub struct Permit<T> {
+    permit: tokio::sync::mpsc::OwnedPermit<SendReq>,
+    _t: fn(T),
+}
 
 impl<T> Permit<T>
 where
-    T: Send,
+    T: Send + 'static,
 {
     /// Sends a value using the reserved capacity.
     pub fn send(self, value: T) -> Sending<T> {
         let (req, sent) = send_req(Ok(value));
-        self.0.send(req);
+        self.permit.send(req);
         sent
     }
 }
@@ -569,6 +579,9 @@ where
     where
         S: serde::Serializer,
     {
+        let erased_deserialzer = ErasedDeserializer::new::<Result<T, RecvError>, Codec>();
+        let err_factory = SendReq::err_factory::<T>();
+
         let port = match self.tx.upgrade() {
             // Channel is open.
             Some(tx) => {
@@ -583,12 +596,14 @@ where
                         let (raw_tx, raw_rx) = match connect.await {
                             Ok(tx_rx) => tx_rx,
                             Err(err) => {
-                                let _ = tx.send(SendReq::new(Err(RecvError::RemoteConnect(err)))).await;
+                                let _ = tx.send(err_factory.err(RecvError::RemoteConnect(err))).await;
                                 return;
                             }
                         };
 
-                        super::recv_impl::<T, Codec>(
+                        super::recv_impl(
+                            erased_deserialzer,
+                            err_factory,
                             &tx,
                             raw_tx,
                             raw_rx,
@@ -608,7 +623,7 @@ where
         };
 
         // Encode chmux port number in transport type and serialize it.
-        let transported = TransportedSender::<T, Codec> {
+        let transported = TransportedSender {
             port,
             data: PhantomData,
             codec: PhantomData,
@@ -630,50 +645,51 @@ where
     {
         assert!(BUFFER > 0, "BUFFER must not be zero");
 
+        let erased_serializer = ErasedSerializer::new::<Result<T, RecvError>, Codec>();
+        let err_factory = SendReq::err_factory::<T>();
+
         // Get chmux port number from deserialized transport type.
-        let TransportedSender { port, max_item_size, .. } =
-            TransportedSender::<T, Codec>::deserialize(deserializer)?;
+        let TransportedSender { port, max_item_size, .. } = TransportedSender::deserialize(deserializer)?;
         let max_item_size = usize::try_from(max_item_size).unwrap_or(usize::MAX);
 
-        match port {
-            // Received channel is open.
-            Some(port) => {
-                // Create internal communication channels.
-                let (tx, rx) = tokio::sync::mpsc::channel(BUFFER);
-                let (closed_tx, closed_rx) = tokio::sync::watch::channel(None);
-                let (remote_send_err_tx, remote_send_err_rx) = tokio::sync::watch::channel(None);
-
-                // Accept chmux port request.
-                PortDeserializer::accept(port, move |local_port, request| {
-                    async move {
-                        // Accept chmux connection request.
-                        let (raw_tx, raw_rx) = match request.accept_from(local_port).await {
-                            Ok(tx_rx) => tx_rx,
-                            Err(err) => {
-                                let _ = remote_send_err_tx.send(Some(RemoteSendError::Listen(err)));
-                                return;
-                            }
-                        };
-
-                        super::send_impl::<T, Codec>(
-                            rx,
-                            raw_tx,
-                            raw_rx,
-                            remote_send_err_tx,
-                            closed_tx,
-                            max_item_size,
-                        )
-                        .await;
-                    }
-                    .boxed()
-                })?;
-
-                Ok(Self::new(tx, closed_rx, remote_send_err_rx))
-            }
-
+        let Some(port) = port else {
             // Received closed channel.
-            None => Ok(Self::new_closed()),
-        }
+            return Ok(Self::new_closed());
+        };
+
+        // Create internal communication channels.
+        let (tx, rx) = tokio::sync::mpsc::channel(BUFFER);
+        let (closed_tx, closed_rx) = tokio::sync::watch::channel(None);
+        let (remote_send_err_tx, remote_send_err_rx) = tokio::sync::watch::channel(None);
+
+        // Accept chmux port request.
+        PortDeserializer::accept(port, move |local_port, request| {
+            async move {
+                // Accept chmux connection request.
+                let (raw_tx, raw_rx) = match request.accept_from(local_port).await {
+                    Ok(tx_rx) => tx_rx,
+                    Err(err) => {
+                        let _ = remote_send_err_tx.send(Some(RemoteSendError::Listen(err)));
+                        return;
+                    }
+                };
+
+                super::send_impl(
+                    erased_serializer,
+                    err_factory,
+                    rx,
+                    raw_tx,
+                    raw_rx,
+                    remote_send_err_tx,
+                    closed_tx,
+                    max_item_size,
+                )
+                .await;
+            }
+            .boxed()
+        })?;
+
+        Ok(Self::new(tx, closed_rx, remote_send_err_rx))
     }
 }
 

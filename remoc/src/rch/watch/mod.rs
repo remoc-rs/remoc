@@ -128,9 +128,9 @@ where
 /// Creates a new watch channel, returning the sender and receiver.
 ///
 /// The sender and receiver may be sent to remote endpoints via channels.
-pub fn channel<T, Codec>(init: T) -> (Sender<T, Codec>, Receiver<T, Codec>)
+pub fn channel<T, Codec: Send + Sync + 'static>(init: T) -> (Sender<T, Codec>, Receiver<T, Codec>)
 where
-    T: RemoteSend,
+    T: RemoteSend + Sync,
 {
     let (tx, rx) = tokio::sync::watch::channel(Ok(init));
     let (remote_send_err_tx, remote_send_err_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -170,7 +170,7 @@ where
 {
     let init = local_rx.borrow_and_update().clone();
     let (mut tx, rx) = channel(init);
-    let sender_rate_limit_tx = tx.inner.as_ref().unwrap().sender_rate_limit_tx.clone();
+    let sender_rate_limit_tx = tx.inner_ref().sender_rate_limit_tx.clone();
 
     let hnd = exec::spawn(async move {
         loop {
@@ -300,10 +300,10 @@ pub trait WatchExt<T, Codec, const MAX_ITEM_SIZE: usize> {
     ) -> (Sender<T, Codec>, Receiver<T, Codec, MAX_ITEM_SIZE>);
 }
 
-impl<T, Codec, const MAX_ITEM_SIZE: usize> WatchExt<T, Codec, MAX_ITEM_SIZE>
+impl<T, Codec: Send + Sync + 'static, const MAX_ITEM_SIZE: usize> WatchExt<T, Codec, MAX_ITEM_SIZE>
     for (Sender<T, Codec>, Receiver<T, Codec, MAX_ITEM_SIZE>)
 where
-    T: Send + 'static,
+    T: Send + Sync + 'static,
 {
     fn with_max_item_size<const NEW_MAX_ITEM_SIZE: usize>(
         self,
@@ -318,9 +318,7 @@ where
         self, transfer_strategy: TransferStrategy,
     ) -> (Sender<T, Codec>, Receiver<T, Codec, MAX_ITEM_SIZE>) {
         let (mut tx, mut rx) = self;
-        if let Some(inner) = &mut tx.inner {
-            inner.transfer_strategy = transfer_strategy.clone();
-        }
+        tx.inner_mut().transfer_strategy = transfer_strategy.clone();
         rx.transfer_strategy = transfer_strategy;
         (tx, rx)
     }

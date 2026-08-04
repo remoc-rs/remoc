@@ -261,7 +261,7 @@ async fn send_impl(
     closed_tx: tokio::sync::watch::Sender<Option<ClosedReason>>, max_item_size: usize,
 ) {
     // Encode data using remote sender.
-    let mut remote_tx = base::AnySender::new(serializer, raw_tx);
+    let mut remote_tx = base::ErasedSender::new(serializer, raw_tx);
     remote_tx.set_max_item_size(max_item_size);
 
     // Process events.
@@ -310,7 +310,7 @@ async fn send_impl(
                 match value_opt {
                     Some(value) => {
                         let SendReq { value, result_tx } = value;
-                        match remote_tx.send_any(value).await {
+                        match remote_tx.send_erased(value).await {
                             Ok(()) => {
                                 let _ = result_tx.send(Ok(()));
                             }
@@ -341,7 +341,7 @@ async fn recv_impl(
     mut closed_rx: tokio::sync::watch::Receiver<Option<ClosedReason>>, max_item_size: usize,
 ) {
     // Decode raw received data using remote receiver.
-    let mut remote_rx = base::AnyReceiver::new(deserializer, raw_rx);
+    let mut remote_rx = base::ErasedReceiver::new(deserializer, raw_rx);
     remote_rx.set_max_item_size(max_item_size);
 
     // Process events.
@@ -377,7 +377,7 @@ async fn recv_impl(
             }
 
             // Data received from remote endpoint.
-            res = remote_rx.recv_any() => {
+            res = remote_rx.recv_erased() => {
                 let mut is_final_err = false;
                 let value = match res {
                     Ok(Some(value)) => SendReq::received(value),

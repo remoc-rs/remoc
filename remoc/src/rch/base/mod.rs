@@ -48,8 +48,8 @@ mod io;
 mod receiver;
 mod sender;
 
-pub use receiver::{AnyReceiver, PortDeserializer, Receiver, RecvError};
-pub use sender::{AnySender, Closed, PortSerializer, SendError, SendErrorKind, Sender};
+pub use receiver::{ErasedReceiver, PortDeserializer, Receiver, RecvError};
+pub use sender::{Closed, ErasedSender, PortSerializer, SendError, SendErrorKind, Sender};
 
 use crate::{RemoteSend, chmux, codec};
 

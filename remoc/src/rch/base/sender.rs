@@ -239,13 +239,13 @@ impl PortSerializer {
 ///
 /// Values may be or contain any channel from this crate.
 pub struct Sender<T, Codec = codec::Default> {
-    any: AnySender,
+    erased: ErasedSender,
     _phantom: fn(T, Codec),
 }
 
 impl<T, Codec> fmt::Debug for Sender<T, Codec> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("Sender").field(&self.any).finish()
+        f.debug_tuple("Sender").field(&self.erased).finish()
     }
 }
 
@@ -254,10 +254,10 @@ where
     T: Serialize + Send + 'static,
     Codec: codec::Codec,
 {
-    type Target = AnySender;
+    type Target = ErasedSender;
 
     fn deref(&self) -> &Self::Target {
-        &self.any
+        &self.erased
     }
 }
 
@@ -267,7 +267,7 @@ where
     Codec: codec::Codec,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.any
+        &mut self.erased
     }
 }
 
@@ -278,39 +278,42 @@ where
 {
     /// Creates a base remote sender from a [chmux] sender.
     pub fn new(sender: chmux::Sender) -> Self {
-        Self { any: AnySender::typed::<T, Codec>(sender), _phantom: |_, _| () }
+        Self { erased: ErasedSender::typed::<T, Codec>(sender), _phantom: |_, _| () }
     }
 
     /// Consumes this base remote sender and returns the underlying [chmux] sender.
     pub fn into_inner(self) -> chmux::Sender {
-        self.any.into_inner()
+        self.erased.into_inner()
     }
 
     /// Sends an item over the channel.
     ///
     /// The item may contain ports that will be serialized and connected as well.
     pub async fn send(&mut self, item: T) -> Result<(), SendError<T>> {
-        self.any.send_any(Box::new(item)).await.map_err(SendError::<T>::from_any)
+        self.erased.send_erased(Box::new(item)).await.map_err(SendError::<T>::from_any)
     }
 }
 
 /// Typed-erased version of [`Sender`].
 ///
 /// Values may be or contain any channel from this crate.
-pub struct AnySender {
+pub struct ErasedSender {
     serializer: ErasedSerializer,
     sender: chmux::Sender,
     big_data: i8,
     max_item_size: usize,
 }
 
-impl fmt::Debug for AnySender {
+impl fmt::Debug for ErasedSender {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("AnySender").field("serializer", &self.serializer).field("sender", &self.sender).finish()
+        f.debug_struct("ErasedSender")
+            .field("serializer", &self.serializer)
+            .field("sender", &self.sender)
+            .finish()
     }
 }
 
-impl AnySender {
+impl ErasedSender {
     /// Creates a base remote sender from an erased serializer a [chmux] sender.
     pub fn new(serializer: ErasedSerializer, sender: chmux::Sender) -> Self {
         Self { serializer, sender, big_data: 0, max_item_size: DEFAULT_MAX_ITEM_SIZE }
@@ -405,7 +408,7 @@ impl AnySender {
     /// # Panics
     /// Panics if the underlying type of `item` does not match `T`.
     #[inline(never)]
-    pub async fn send_any(&mut self, item: AnySend) -> Result<(), SendError<AnySend>> {
+    pub async fn send_erased(&mut self, item: AnySend) -> Result<(), SendError<AnySend>> {
         self.serializer.check_type(&*item);
 
         // Determine if it is worthy to try buffered serialization.

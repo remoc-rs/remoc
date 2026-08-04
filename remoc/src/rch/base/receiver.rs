@@ -178,13 +178,13 @@ impl PortDeserializer {
 ///
 /// Values may be or contain any channel from this crate.
 pub struct Receiver<T, Codec = codec::Default> {
-    any: AnyReceiver,
+    erased: ErasedReceiver,
     _phantom: fn(T, Codec),
 }
 
 impl<T, Codec> fmt::Debug for Receiver<T, Codec> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("Receiver").field(&self.any).finish()
+        f.debug_tuple("Receiver").field(&self.erased).finish()
     }
 }
 
@@ -193,10 +193,10 @@ where
     T: DeserializeOwned + Send + 'static,
     Codec: codec::Codec,
 {
-    type Target = AnyReceiver;
+    type Target = ErasedReceiver;
 
     fn deref(&self) -> &Self::Target {
-        &self.any
+        &self.erased
     }
 }
 
@@ -206,7 +206,7 @@ where
     Codec: codec::Codec,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.any
+        &mut self.erased
     }
 }
 
@@ -217,12 +217,12 @@ where
 {
     /// Creates a base remote receiver from a [chmux] receiver.
     pub fn new(receiver: chmux::Receiver) -> Self {
-        Self { any: AnyReceiver::typed::<T, Codec>(receiver), _phantom: |_, _| () }
+        Self { erased: ErasedReceiver::typed::<T, Codec>(receiver), _phantom: |_, _| () }
     }
 
     /// Consumes this base remote receiver and returns the underlying [chmux] receiver.
     pub fn into_inner(self) -> chmux::Receiver {
-        self.any.into_inner()
+        self.erased.into_inner()
     }
 
     fn from_any(any_item: AnySend) -> T {
@@ -232,14 +232,14 @@ where
 
     /// Receive an item from the remote endpoint.
     pub async fn recv(&mut self) -> Result<Option<T>, RecvError> {
-        self.any.recv_any().await.map(|opt| opt.map(Self::from_any))
+        self.erased.recv_erased().await.map(|opt| opt.map(Self::from_any))
     }
 }
 
 /// Type-erased version of [`Receiver`].
 ///
 /// Values may be or contain any channel from this crate.
-pub struct AnyReceiver {
+pub struct ErasedReceiver {
     deserializer: ErasedDeserializer,
     receiver: chmux::Receiver,
     recved: Option<Option<Received>>,
@@ -250,9 +250,9 @@ pub struct AnyReceiver {
     max_item_size: usize,
 }
 
-impl fmt::Debug for AnyReceiver {
+impl fmt::Debug for ErasedReceiver {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("AnyReceiver")
+        f.debug_struct("ErasedReceiver")
             .field("deserializer", &self.deserializer)
             .field("receiver", &self.receiver)
             .finish()
@@ -269,7 +269,7 @@ enum DataSource {
     },
 }
 
-impl AnyReceiver {
+impl ErasedReceiver {
     /// Creates a base remote receiver from an erased deserializer and [chmux] receiver.
     pub fn new(deserializer: ErasedDeserializer, receiver: chmux::Receiver) -> Self {
         Self {
@@ -304,7 +304,7 @@ impl AnyReceiver {
     ///
     /// The received item is returned type erased.
     #[inline(never)]
-    pub async fn recv_any(&mut self) -> Result<Option<AnySend>, RecvError> {
+    pub async fn recv_erased(&mut self) -> Result<Option<AnySend>, RecvError> {
         if self.default_max_ports.is_none() {
             self.default_max_ports = Some(self.receiver.max_ports());
         }

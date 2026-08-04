@@ -17,7 +17,11 @@ use super::{
     },
     Distributor, SendReq,
 };
-use crate::{RemoteSend, chmux, codec, exec};
+use crate::{
+    RemoteSend, chmux,
+    codec::{self, ErasedDeserializer, ErasedSerializer},
+    exec,
+};
 
 /// An error occurred during receiving over an mpsc channel.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -152,13 +156,15 @@ pub(crate) struct ReceiverInner<T> {
 
 /// Mpsc receiver in transport.
 #[derive(Serialize, Deserialize)]
-pub(crate) struct TransportedReceiver<T, Codec> {
+pub(crate) struct TransportedReceiver {
     /// chmux port number.
     port: u32,
     /// Data type.
-    data: PhantomData<T>,
+    #[serde(default)]
+    data: PhantomData<()>,
     /// Data codec.
-    codec: PhantomData<Codec>,
+    #[serde(default)]
+    codec: PhantomData<()>,
     /// Receiver has been closed.
     #[serde(default)]
     closed: bool,
@@ -523,14 +529,22 @@ where
                     }
                 };
 
-                super::send_impl::<T, Codec>(rx, raw_tx, raw_rx, remote_send_err_tx, closed_tx, MAX_ITEM_SIZE)
-                    .await;
+                super::send_impl(
+                    ErasedSerializer::new::<Result<T, RecvError>, Codec>(),
+                    Box::new(rx),
+                    raw_tx,
+                    raw_rx,
+                    remote_send_err_tx,
+                    closed_tx,
+                    MAX_ITEM_SIZE,
+                )
+                .await;
             }
             .boxed()
         })?;
 
         // Encode chmux port number in transport type and serialize it.
-        let transported = TransportedReceiver::<T, Codec> {
+        let transported = TransportedReceiver {
             port,
             data: PhantomData,
             codec: PhantomData,
@@ -556,7 +570,7 @@ where
 
         // Get chmux port number from deserialized transport type.
         let TransportedReceiver { port, closed, max_item_size, .. } =
-            TransportedReceiver::<T, Codec>::deserialize(deserializer)?;
+            TransportedReceiver::deserialize(deserializer)?;
 
         let max_item_size = usize::try_from(max_item_size).unwrap_or(usize::MAX);
         if max_item_size > MAX_ITEM_SIZE {
@@ -582,8 +596,16 @@ where
                     }
                 };
 
-                super::recv_impl::<T, Codec>(&tx, raw_tx, raw_rx, remote_send_err_rx, closed_rx, MAX_ITEM_SIZE)
-                    .await;
+                super::recv_impl(
+                    ErasedDeserializer::new::<Result<T, RecvError>, Codec>(),
+                    &tx,
+                    raw_tx,
+                    raw_rx,
+                    remote_send_err_rx,
+                    closed_rx,
+                    MAX_ITEM_SIZE,
+                )
+                .await;
             }
             .boxed()
         })?;

@@ -1,6 +1,7 @@
 use futures::{FutureExt, Sink};
 use serde::{Deserialize, Serialize};
 use std::{
+    any::Any,
     convert::TryFrom,
     error::Error,
     fmt,
@@ -20,7 +21,12 @@ use super::{
     receiver::RecvError,
     send_req,
 };
-use crate::{RemoteSend, chmux, codec, exec, rch::SendingError};
+use crate::{
+    RemoteSend, chmux,
+    codec::{self, ErasedDeserializer, ErasedSerializer},
+    exec,
+    rch::SendingError,
+};
 
 /// An error occurred during sending over an mpsc channel.
 #[derive(Clone, custom_debug::Debug, Serialize, Deserialize)]
@@ -277,13 +283,15 @@ impl<T, Codec, const BUFFER: usize> Clone for Sender<T, Codec, BUFFER> {
 
 /// Mpsc sender in transport.
 #[derive(Serialize, Deserialize)]
-pub(crate) struct TransportedSender<T, Codec> {
+pub(crate) struct TransportedSender {
     /// chmux port number. `None` if closed.
     port: Option<u32>,
     /// Data type.
-    data: PhantomData<T>,
+    #[serde(default)]
+    data: PhantomData<()>,
     /// Data codec.
-    codec: PhantomData<Codec>,
+    #[serde(default)]
+    codec: PhantomData<()>,
     /// Maximum item size in bytes.
     #[serde(default = "default_max_item_size")]
     max_item_size: u64,
@@ -293,18 +301,40 @@ const fn default_max_item_size() -> u64 {
     u64::MAX
 }
 
+/// Drops the strong reference to `target` when channel is closed or dropped.
+fn drop_when_closed(
+    target: Arc<dyn Any + Send + Sync>, mut dropped_rx: tokio::sync::mpsc::Receiver<()>,
+    mut closed_rx: tokio::sync::watch::Receiver<Option<ClosedReason>>,
+) {
+    exec::spawn(async move {
+        loop {
+            tokio::select! {
+                res = closed_rx.changed() => {
+                    match res {
+                        Ok(()) if closed_rx.borrow().is_some() => break,
+                        Ok(()) => (),
+                        Err(_) => break,
+                    }
+                },
+                _ = dropped_rx.recv() => break,
+            }
+        }
+
+        drop(target);
+    });
+}
+
 impl<T, Codec, const BUFFER: usize> Sender<T, Codec, BUFFER>
 where
     T: Send + 'static,
 {
     /// Creates a new sender.
     pub(crate) fn new(
-        tx: tokio::sync::mpsc::Sender<SendReq<T>>,
-        mut closed_rx: tokio::sync::watch::Receiver<Option<ClosedReason>>,
+        tx: tokio::sync::mpsc::Sender<SendReq<T>>, closed_rx: tokio::sync::watch::Receiver<Option<ClosedReason>>,
         remote_send_err_rx: tokio::sync::watch::Receiver<Option<RemoteSendError>>,
     ) -> Self {
         let tx = Arc::new(tx);
-        let (dropped_tx, mut dropped_rx) = tokio::sync::mpsc::channel(1);
+        let (dropped_tx, dropped_rx) = tokio::sync::mpsc::channel(1);
 
         let this = Self {
             tx: Arc::downgrade(&tx),
@@ -316,22 +346,7 @@ where
         };
 
         // Drop strong reference to sender when channel is closed.
-        exec::spawn(async move {
-            loop {
-                tokio::select! {
-                    res = closed_rx.changed() => {
-                        match res {
-                            Ok(()) if closed_rx.borrow().is_some() => break,
-                            Ok(()) => (),
-                            Err(_) => break,
-                        }
-                    },
-                    _ = dropped_rx.recv() => break,
-                }
-            }
-
-            drop(tx);
-        });
+        drop_when_closed(tx, dropped_rx, closed_rx);
 
         this
     }
@@ -588,8 +603,9 @@ where
                             }
                         };
 
-                        super::recv_impl::<T, Codec>(
-                            &tx,
+                        super::recv_impl(
+                            ErasedDeserializer::new::<Result<T, RecvError>, Codec>(),
+                            &*tx,
                             raw_tx,
                             raw_rx,
                             remote_send_err_rx,
@@ -608,7 +624,7 @@ where
         };
 
         // Encode chmux port number in transport type and serialize it.
-        let transported = TransportedSender::<T, Codec> {
+        let transported = TransportedSender {
             port,
             data: PhantomData,
             codec: PhantomData,
@@ -631,8 +647,7 @@ where
         assert!(BUFFER > 0, "BUFFER must not be zero");
 
         // Get chmux port number from deserialized transport type.
-        let TransportedSender { port, max_item_size, .. } =
-            TransportedSender::<T, Codec>::deserialize(deserializer)?;
+        let TransportedSender { port, max_item_size, .. } = TransportedSender::deserialize(deserializer)?;
         let max_item_size = usize::try_from(max_item_size).unwrap_or(usize::MAX);
 
         match port {
@@ -655,8 +670,9 @@ where
                             }
                         };
 
-                        super::send_impl::<T, Codec>(
-                            rx,
+                        super::send_impl(
+                            ErasedSerializer::new::<Result<T, RecvError>, Codec>(),
+                            Box::new(rx),
                             raw_tx,
                             raw_rx,
                             remote_send_err_tx,

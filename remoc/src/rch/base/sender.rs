@@ -5,11 +5,12 @@ use futures::{
 };
 use serde::{Deserialize, Serialize, ser};
 use std::{
+    any::Any,
     cell::RefCell,
     error::Error,
     fmt,
     io::BufWriter,
-    marker::PhantomData,
+    ops::{Deref, DerefMut},
     panic,
     rc::{Rc, Weak},
     sync::{Arc, Mutex},
@@ -23,9 +24,8 @@ use super::{
 };
 use crate::{
     chmux::{self, AllReceived, AnyStorage, PortReq},
-    codec::{self, SerializationError, StreamingUnavailable},
+    codec::{self, AnySend, ErasedSerializer, SerializationError, StreamingUnavailable},
     exec::{self, task},
-    rch::base::io::IoWriter,
 };
 
 pub use crate::chmux::Closed;
@@ -38,6 +38,14 @@ pub struct SendError<T> {
     /// Item that could not be sent.
     #[debug(skip)]
     pub item: T,
+}
+
+impl<T: 'static> SendError<T> {
+    pub(crate) fn from_any(err: SendError<Box<dyn Any + Send>>) -> Self {
+        let SendError { kind, item } = err;
+        let Ok(item) = item.downcast::<T>() else { panic!("mismatched type for SendError") };
+        Self { kind, item: *item }
+    }
 }
 
 /// Error kind that occurred during remote sending.
@@ -231,16 +239,35 @@ impl PortSerializer {
 ///
 /// Values may be or contain any channel from this crate.
 pub struct Sender<T, Codec = codec::Default> {
-    sender: chmux::Sender,
-    big_data: i8,
-    max_item_size: usize,
-    _data: PhantomData<T>,
-    _codec: PhantomData<Codec>,
+    erased: ErasedSender,
+    _phantom: fn(T, Codec),
 }
 
 impl<T, Codec> fmt::Debug for Sender<T, Codec> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("Sender").finish()
+        f.debug_tuple("Sender").field(&self.erased).finish()
+    }
+}
+
+impl<T, Codec> Deref for Sender<T, Codec>
+where
+    T: Serialize + Send + 'static,
+    Codec: codec::Codec,
+{
+    type Target = ErasedSender;
+
+    fn deref(&self) -> &Self::Target {
+        &self.erased
+    }
+}
+
+impl<T, Codec> DerefMut for Sender<T, Codec>
+where
+    T: Serialize + Send + 'static,
+    Codec: codec::Codec,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.erased
     }
 }
 
@@ -251,27 +278,71 @@ where
 {
     /// Creates a base remote sender from a [chmux] sender.
     pub fn new(sender: chmux::Sender) -> Self {
-        Self {
-            sender,
-            big_data: 0,
-            max_item_size: DEFAULT_MAX_ITEM_SIZE,
-            _data: PhantomData,
-            _codec: PhantomData,
-        }
+        Self { erased: ErasedSender::typed::<T, Codec>(sender), _phantom: |_, _| () }
     }
 
     /// Consumes this base remote sender and returns the underlying [chmux] sender.
+    pub fn into_inner(self) -> chmux::Sender {
+        self.erased.into_inner()
+    }
+
+    /// Sends an item over the channel.
+    ///
+    /// The item may contain ports that will be serialized and connected as well.
+    pub async fn send(&mut self, item: T) -> Result<(), SendError<T>> {
+        self.erased.send_erased(Box::new(item)).await.map_err(SendError::<T>::from_any)
+    }
+}
+
+/// Typed-erased version of [`Sender`].
+///
+/// Values may be or contain any channel from this crate.
+pub struct ErasedSender {
+    serializer: ErasedSerializer,
+    sender: chmux::Sender,
+    big_data: i8,
+    max_item_size: usize,
+}
+
+impl fmt::Debug for ErasedSender {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("ErasedSender")
+            .field("serializer", &self.serializer)
+            .field("sender", &self.sender)
+            .finish()
+    }
+}
+
+impl ErasedSender {
+    /// Creates a base remote sender from an erased serializer a [chmux] sender.
+    pub fn new(serializer: ErasedSerializer, sender: chmux::Sender) -> Self {
+        Self { serializer, sender, big_data: 0, max_item_size: DEFAULT_MAX_ITEM_SIZE }
+    }
+
+    /// Creates a type-erased base remote sender for the specified type `T` and codec from a [chmux] sender.
+    #[inline(never)]
+    pub fn typed<T, Codec>(sender: chmux::Sender) -> Self
+    where
+        T: Serialize + Send + 'static,
+        Codec: codec::Codec,
+    {
+        Self::new(ErasedSerializer::new::<T, Codec>(), sender)
+    }
+
+    /// Consumes this base remote sender and returns the underlying [chmux] sender.
+    #[inline(never)]
     pub fn into_inner(self) -> chmux::Sender {
         self.sender
     }
 
     fn serialize_buffered(
-        allocator: chmux::PortAllocator, storage: AnyStorage, item: &T, limit: usize,
+        serializer: &ErasedSerializer, allocator: chmux::PortAllocator, storage: AnyStorage, item: &dyn Any,
+        limit: usize,
     ) -> Result<Option<(BytesMut, PortSerializer)>, SerializationError> {
         let mut lw = LimitedBytesWriter::new(limit);
         let ps_ref = PortSerializer::start(allocator, storage);
 
-        match <Codec as codec::Codec>::serialize(IoWriter::Limited(&mut lw), &item) {
+        match serializer.serialize(&mut lw, item) {
             _ if lw.overflow() => return Ok(None),
             Ok(()) => (),
             Err(err) => return Err(err),
@@ -282,9 +353,9 @@ where
     }
 
     async fn serialize_streaming(
-        allocator: chmux::PortAllocator, storage: AnyStorage, item: T, tx: tokio::sync::mpsc::Sender<BytesMut>,
-        chunk_size: usize,
-    ) -> Result<(T, PortSerializer, usize), (SerializationError, T)> {
+        serializer: ErasedSerializer, allocator: chmux::PortAllocator, storage: AnyStorage, item: AnySend,
+        tx: tokio::sync::mpsc::Sender<BytesMut>, chunk_size: usize,
+    ) -> Result<(AnySend, PortSerializer, usize), (SerializationError, AnySend)> {
         if !exec::are_threads_available().await {
             return Err((SerializationError::new(StreamingUnavailable), item));
         }
@@ -299,7 +370,7 @@ where
             let ps_ref = PortSerializer::start(allocator, storage);
 
             let item = item_arc_task.lock().unwrap();
-            <Codec as codec::Codec>::serialize(IoWriter::Channel(&mut cbw), &*item)?;
+            serializer.serialize(&mut cbw, &**item)?;
 
             let cbw = cbw.into_inner().map_err(|_| {
                 SerializationError::new(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "flush failed"))
@@ -328,17 +399,26 @@ where
         }
     }
 
-    /// Sends an item over the channel.
+    /// Sends a type-erased item over the channel.
     ///
     /// The item may contain ports that will be serialized and connected as well.
-    pub async fn send(&mut self, item: T) -> Result<(), SendError<T>> {
+    ///
+    /// The underlying type of `item` must be `T` as used for calling `AnySender::new::<T, Codec>`.
+    ///
+    /// # Panics
+    /// Panics if the underlying type of `item` does not match `T`.
+    #[inline(never)]
+    pub async fn send_erased(&mut self, item: AnySend) -> Result<(), SendError<AnySend>> {
+        self.serializer.check_type(&*item);
+
         // Determine if it is worthy to try buffered serialization.
         let data_ps = if self.big_data <= 0 {
             // Try buffered serialization.
             match Self::serialize_buffered(
+                &self.serializer,
                 self.sender.port_allocator(),
                 self.sender.storage(),
-                &item,
+                &*item,
                 self.sender.max_data_size(),
             ) {
                 Ok(Some(v)) => {
@@ -373,6 +453,7 @@ where
                 // Stream data while serializing.
                 let (tx, mut rx) = tokio::sync::mpsc::channel(BIG_DATA_CHUNK_QUEUE);
                 let ser_task = Self::serialize_streaming(
+                    self.serializer.clone(),
                     self.sender.port_allocator(),
                     self.sender.storage(),
                     item,
@@ -470,11 +551,13 @@ where
     }
 
     /// True, once the remote endpoint has closed its receiver.
+    #[inline(never)]
     pub fn is_closed(&self) -> bool {
         self.sender.is_closed()
     }
 
     /// Returns a future that will resolve when the remote endpoint closes its receiver.
+    #[inline(never)]
     pub fn closed(&self) -> Closed {
         self.sender.closed()
     }
@@ -482,6 +565,7 @@ where
     /// The maximum allowed size in bytes of an item to be sent.
     ///
     /// The default value is [DEFAULT_MAX_ITEM_SIZE].
+    #[inline(never)]
     pub fn max_item_size(&self) -> usize {
         self.max_item_size
     }
@@ -493,6 +577,7 @@ where
     /// [receiver](super::Receiver), sending of oversized items will succeed but the receiver
     /// will fail with a [MaxItemSizeExceeded error](super::RecvError::MaxItemSizeExceeded) when
     /// trying to receive the item.
+    #[inline(never)]
     pub fn set_max_item_size(&mut self, max_item_size: usize) {
         self.max_item_size = max_item_size;
     }
@@ -500,6 +585,7 @@ where
     /// Returns whehter the remote endpoint supports calling [all_received](Self::all_received).
     ///
     /// See [chmux::Sender::is_all_received_supported](crate::chmux::Sender::is_all_received_supported) for details.
+    #[inline(never)]
     pub fn is_all_received_supported(&self) -> bool {
         self.sender.is_all_received_supported()
     }
@@ -508,6 +594,7 @@ where
     /// items sent on this channel up to now.    
     ///
     /// See [chmux::Sender::all_received](crate::chmux::Sender::all_received) for details.
+    #[inline(never)]
     pub fn all_received(&self) -> AllReceived {
         self.sender.all_received()
     }
@@ -515,6 +602,7 @@ where
     /// Returns whether this channel may use global credits for sending items.
     ///
     /// See [chmux::Sender::are_global_credits_used](crate::chmux::Sender::are_global_credits_used) for details.
+    #[inline(never)]
     pub fn are_global_credits_used(&self) -> bool {
         self.sender.are_global_credits_used()
     }
@@ -522,6 +610,7 @@ where
     /// Sets whether this channel may use global credits for sending items.
     ///
     /// See [chmux::Sender::set_global_credits_use](crate::chmux::Sender::set_global_credits_use) for details.
+    #[inline(never)]
     pub fn set_global_credits_use(&mut self, use_global_credits: bool) {
         self.sender.set_global_credits_use(use_global_credits);
     }

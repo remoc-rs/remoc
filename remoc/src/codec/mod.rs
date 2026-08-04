@@ -45,6 +45,7 @@
 
 use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
 use std::{
+    any::{Any, TypeId, type_name},
     error::Error,
     fmt,
     io::{Read, Write},
@@ -216,6 +217,163 @@ impl Codec for Dummy {
 
 #[cfg(feature = "codec-json")]
 pub mod map;
+
+// ============================================================================
+// Erased serializer and deserializer
+// ============================================================================
+
+/// Item that is Any and Send.
+pub type AnySend = Box<dyn Any + Send>;
+
+/// Type-erased serializer.
+pub struct ErasedSerializer {
+    type_id: TypeId,
+    type_name: &'static str,
+    codec_name: &'static str,
+    inner: Box<dyn ErasedSerializerMethods>,
+}
+
+impl Clone for ErasedSerializer {
+    fn clone(&self) -> Self {
+        Self {
+            type_id: self.type_id.clone(),
+            type_name: self.type_name,
+            codec_name: self.codec_name,
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl fmt::Debug for ErasedSerializer {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("ErasedSerializer")
+            .field("type", &self.type_name)
+            .field("codec", &self.codec_name)
+            .finish()
+    }
+}
+
+impl ErasedSerializer {
+    /// Creates a new type-erased serializer for the given type and codec.
+    pub fn new<T, C>() -> Self
+    where
+        T: Serialize + Any,
+        C: Codec,
+    {
+        Self {
+            type_id: TypeId::of::<T>(),
+            type_name: type_name::<T>(),
+            codec_name: type_name::<C>(),
+            inner: Box::new(ErasedSerializerInner::<T, C>(|_, _| ())),
+        }
+    }
+
+    /// Checks that the passed type matches the underlying type.
+    #[track_caller]
+    pub fn check_type(&self, item: &dyn Any) {
+        if item.type_id() != self.type_id {
+            panic!("expected type {} for serialization", self.type_name);
+        }
+    }
+
+    /// Serialize the type-erased item into the given writer.
+    ///
+    /// # Panics
+    /// Panics if the type of the item does not match the type `T` used for calling [`ErasedSerializer::new`].
+    pub fn serialize(&self, writer: &mut dyn Write, item: &dyn Any) -> Result<(), SerializationError> {
+        self.inner.serialize(writer, item)
+    }
+}
+
+trait ErasedSerializerMethods: Send + Sync {
+    fn clone(&self) -> Box<dyn ErasedSerializerMethods>;
+    fn serialize(&self, writer: &mut dyn Write, item: &dyn Any) -> Result<(), SerializationError>;
+}
+
+#[expect(dead_code)]
+struct ErasedSerializerInner<T, C>(fn(T, C));
+
+impl<T, C> ErasedSerializerMethods for ErasedSerializerInner<T, C>
+where
+    T: Serialize + Any,
+    C: Codec,
+{
+    fn clone(&self) -> Box<dyn ErasedSerializerMethods> {
+        Box::new(ErasedSerializerInner::<T, C>(|_, _| ()))
+    }
+
+    fn serialize(&self, writer: &mut dyn Write, item: &dyn Any) -> Result<(), SerializationError> {
+        let Some(item) = item.downcast_ref::<T>() else { panic!("ErasedSerializer called with mismatched type") };
+        <C as Codec>::serialize(writer, item)
+    }
+}
+
+/// Type-erased deserializer.
+pub struct ErasedDeserializer {
+    type_name: &'static str,
+    codec_name: &'static str,
+    inner: Box<dyn ErasedDeserializerMethods>,
+}
+
+impl Clone for ErasedDeserializer {
+    fn clone(&self) -> Self {
+        Self { type_name: self.type_name, codec_name: self.codec_name, inner: self.inner.clone() }
+    }
+}
+
+impl fmt::Debug for ErasedDeserializer {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("ErasedDeserializer")
+            .field("type", &self.type_name)
+            .field("codec", &self.codec_name)
+            .finish()
+    }
+}
+
+impl ErasedDeserializer {
+    /// Creates a new type-erased deserializer for the given type and codec.
+    pub fn new<T, C>() -> Self
+    where
+        T: DeserializeOwned + Any + Send,
+        C: Codec,
+    {
+        Self {
+            type_name: type_name::<T>(),
+            codec_name: type_name::<C>(),
+            inner: Box::new(ErasedDeserializerInner::<T, C>(|_, _| ())),
+        }
+    }
+
+    /// Deserialize the item of type `T` used for calling [`ErasedDeserializer::new`] from the given reader.
+    ///  
+    /// The deserialized item is returned type erased.
+    pub fn deserialize(&self, reader: &mut dyn Read) -> Result<AnySend, DeserializationError> {
+        self.inner.deserialize(reader)
+    }
+}
+
+trait ErasedDeserializerMethods: Send + Sync {
+    fn clone(&self) -> Box<dyn ErasedDeserializerMethods>;
+    fn deserialize(&self, reader: &mut dyn Read) -> Result<AnySend, DeserializationError>;
+}
+
+#[expect(dead_code)]
+struct ErasedDeserializerInner<T, C>(fn(T, C));
+
+impl<T, C> ErasedDeserializerMethods for ErasedDeserializerInner<T, C>
+where
+    T: DeserializeOwned + Any + Send,
+    C: Codec,
+{
+    fn clone(&self) -> Box<dyn ErasedDeserializerMethods> {
+        Box::new(ErasedDeserializerInner::<T, C>(|_, _| ()))
+    }
+
+    fn deserialize(&self, reader: &mut dyn Read) -> Result<AnySend, DeserializationError> {
+        let item: T = <C as Codec>::deserialize(reader)?;
+        Ok(Box::new(item))
+    }
+}
 
 // ============================================================================
 // Codecs

@@ -21,6 +21,8 @@ use crate::{
 
 pub mod ext;
 mod io_transport;
+#[cfg(doc)]
+pub mod transports;
 
 /// Error occurred during establishing a connection over a physical transport.
 #[cfg_attr(docsrs, doc(cfg(feature = "rch")))]

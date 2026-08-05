@@ -75,6 +75,7 @@ jobs:
         run: |
           cargo check --manifest-path examples/rtc/counter-client/Cargo.toml
           cargo check --manifest-path examples/rtc/counter-server/Cargo.toml
+          cargo check --manifest-path examples/transports/Cargo.toml
 
   clippy:
     name: Clippy

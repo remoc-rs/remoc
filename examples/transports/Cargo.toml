@@ -1,0 +1,24 @@
+[package]
+name = "remoc-transports-example"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# This crate exists solely to compile-check the transport snippets that are
+# embedded into the documentation of `remoc::connect::transports`.
+# It is excluded from the Remoc workspace so that its dependencies never
+# affect the Remoc crate itself.
+
+[dependencies]
+remoc = { path = "../../remoc" }
+
+bytes = "1"
+futures = "0.3"
+tokio = { version = "1", features = ["io-std", "io-util", "net", "process", "rt"] }
+
+aggligator-transport-tcp = { version = "0.3", default-features = false }
+axum = { version = "0.8", features = ["ws"] }
+rustls-pemfile = "2"
+tokio-rustls = "0.26"
+tokio-tungstenite = "0.30"
+webpki-roots = "1"

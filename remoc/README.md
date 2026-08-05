@@ -41,8 +41,8 @@ channels that work seamlessly over remote connections.
 
 For that it uses Serde to serialize and deserialize data as it gets transmitted
 over an underlying transport,
-which might be a TCP network connection, a WebSocket, UNIX pipe, or even a
-serial link.
+which might be a [TCP network connection], a [WebSocket], [UNIX pipe], or even a
+[serial link].
 
 Opening a new channel is straightforward, just send the sender or receiver half
 of the new channel over an existing channel, like you would do between local
@@ -56,6 +56,29 @@ closures.
 Furthermore, a trait can be made remotely callable with automatically generated
 client and server implementations, resembling a classical remote procedure
 calling (RPC) model.
+
+[TCP network connection]: https://docs.rs/remoc/latest/remoc/transports/tcp/index.html
+[WebSocket]: https://docs.rs/remoc/latest/remoc/transports/websocket/index.html
+[UNIX pipe]: https://docs.rs/remoc/latest/remoc/transports/process/index.html
+[serial link]: https://docs.rs/tokio-serial
+
+
+## Connecting
+
+Remoc implements no transport itself and thus depends on no networking crate;
+it runs over any byte stream you already have.
+Pass an `AsyncRead` and `AsyncWrite` pair, such as a TCP or TLS connection, to
+[`Connect::io`], or a `Sink` and `Stream` of binary packets, such as a WebSocket,
+to [`Connect::framed`].
+Both hand you a base channel, over which all further channels and remote objects
+are exchanged.
+
+The [transports] module contains worked examples for TCP, TLS, WebSocket, pipes
+to a child process and aggregated, failure-resilient links.
+
+[`Connect::io`]: https://docs.rs/remoc/latest/remoc/struct.Connect.html#method.io
+[`Connect::framed`]: https://docs.rs/remoc/latest/remoc/struct.Connect.html#method.framed
+[transports]: https://docs.rs/remoc/latest/remoc/transports/index.html
 
 
 ## Forward and backward compatibility

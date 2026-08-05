@@ -27,10 +27,13 @@ pub enum PortsExhausted {
 /// to increase the [receive buffer size](Self::shared_receive_buffer).
 #[derive(Debug, Clone)]
 pub struct Cfg {
-    /// Time after which connection is closed when no data is.
+    /// Time after which the connection is closed when no data is received.
     ///
     /// Pings are send automatically when this is enabled and no data is transmitted.
-    /// By default this is 60 seconds.
+    /// It also limits the duration of the initial handshake.
+    ///
+    /// By default this is 150 seconds, which is above the failure detection time of
+    /// most transports; lower it to detect an unresponsive remote endpoint sooner.
     pub connection_timeout: Option<Duration>,
     /// Interval for flushing transport sink when more data is available to send.
     ///
@@ -142,7 +145,7 @@ impl Default for Cfg {
     /// memory usage and latency.
     fn default() -> Self {
         Self {
-            connection_timeout: Some(Duration::from_secs(60)),
+            connection_timeout: Some(Duration::from_secs(150)),
             flush_interval: None,
             io_buffer_size: 65_536,
             max_ports: 4096,

@@ -46,7 +46,7 @@
 //!
 //! For that it uses Serde to serialize and deserialize data as it gets transmitted
 //! over an underlying transport,
-//! which might be a [TCP network connection], a WebSocket, [UNIX pipe],
+//! which might be a [TCP network connection], a [WebSocket], [UNIX pipe],
 //! or even a [serial link].
 //!
 //! Opening a new [channel] is straightforward, just send the sender or receiver half
@@ -62,12 +62,30 @@
 //! client and server implementations, resembling a classical remote procedure
 //! calling (RPC) model.
 //!
-//! [TCP network connection]: https://docs.rs/tokio/1.12.0/tokio/net/struct.TcpStream.html
-//! [UNIX domain sockets]: https://docs.rs/tokio/1.12.0/tokio/net/struct.UnixStream.html
-//! [UNIX pipe]: https://docs.rs/tokio/1.12.0/tokio/process/struct.Child.html
-//! [serial link]: https://docs.rs/tokio-serial/5.4.1/tokio_serial/
+//! [TCP network connection]: transports::tcp
+//! [WebSocket]: transports::websocket
+//! [UNIX pipe]: transports::process
+//! [serial link]: https://docs.rs/tokio-serial
 //! [channel]: rch
 //! [remotely callable]: rtc
+//!
+//! # Connecting
+//!
+//! Remoc implements no transport itself and thus depends on no networking crate;
+//! it runs over any byte stream you already have.
+//! Pass an [AsyncRead] and [AsyncWrite] pair, such as a TCP or TLS connection, to
+//! [Connect::io], or a [Sink] and [Stream] of binary packets, such as a WebSocket,
+//! to [Connect::framed].
+//! Both hand you a [base channel](rch::base), over which all further channels and
+//! remote objects are exchanged.
+//!
+//! The [transports] module contains worked examples for TCP, TLS, WebSocket,
+//! pipes to a child process and aggregated, failure-resilient links.
+//!
+//! [AsyncRead]: tokio::io::AsyncRead
+//! [AsyncWrite]: tokio::io::AsyncWrite
+//! [Sink]: futures::Sink
+//! [Stream]: futures::Stream
 //!
 //! # Forward and backward compatibility
 //!
@@ -246,6 +264,9 @@ pub use remote_send::RemoteSend;
 
 #[cfg(feature = "rch")]
 mod connect;
+#[cfg(all(doc, feature = "rch"))]
+#[cfg_attr(docsrs, doc(cfg(feature = "rch")))]
+pub use connect::transports;
 #[cfg(feature = "rch")]
 #[cfg_attr(docsrs, doc(cfg(feature = "rch")))]
 pub use connect::{

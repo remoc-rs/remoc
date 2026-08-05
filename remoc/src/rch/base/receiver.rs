@@ -264,6 +264,7 @@ enum DataSource {
     Buffered(Option<chmux::DataBuf>),
     Streamed {
         tx: Option<tokio::sync::mpsc::Sender<Result<Bytes, ()>>>,
+        #[allow(clippy::type_complexity)]
         task: JoinHandle<Result<(Box<dyn Any + Send>, PortDeserializer), DeserializationError>>,
         total: usize,
     },

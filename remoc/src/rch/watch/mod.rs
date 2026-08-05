@@ -469,6 +469,7 @@ where
 }
 
 /// Receive implementation for serializer of Sender and deserializer of Receiver.
+#[allow(clippy::too_many_arguments)]
 async fn recv_impl(
     erased_deserializer: ErasedDeserializer, tx: Box<dyn ErasedWatchTx + Send>, mut raw_tx: chmux::Sender,
     raw_rx: chmux::Receiver, mut remote_send_err_rx: tokio::sync::mpsc::UnboundedReceiver<RemoteSendError>,

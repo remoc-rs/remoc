@@ -236,7 +236,7 @@ pub struct ErasedSerializer {
 impl Clone for ErasedSerializer {
     fn clone(&self) -> Self {
         Self {
-            type_id: self.type_id.clone(),
+            type_id: self.type_id,
             type_name: self.type_name,
             codec_name: self.codec_name,
             inner: self.inner.clone(),

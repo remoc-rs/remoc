@@ -101,7 +101,7 @@ pub struct Cfg {
     /// lower than you would expect from your underlying transport connection.
     ///
     /// By default this is [dynamically adjusted](DynamicBuffer) with a minimum size
-    /// of 64 kB and a maximum size of 8 MB.
+    /// of 64 kB and a maximum size of 128 MB.
     pub shared_receive_buffer: Box<dyn BufferSizer>,
     /// Length of global send queue.
     /// Each element holds a chunk.

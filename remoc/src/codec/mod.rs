@@ -42,6 +42,12 @@
 //! Thus to change the default codec, you must specify `default-features = false` when
 //! referencing Remoc in your `Cargo.toml`.
 //!
+//! # Transferring binary data efficiently
+//!
+//! Serializing binary data as `Vec<u8>` is slow, since [serde] encodes it element by
+//! element. See the [rch module](crate::rch#transferring-binary-data-efficiently)
+//! documentation for how to avoid this.
+//!
 
 use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
 use std::{

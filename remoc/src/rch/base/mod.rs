@@ -108,9 +108,16 @@ where
     Rx: RemoteSend,
     Codec: codec::Codec,
 {
-    let (client_sr, listener_sr) = tokio::join!(client.connect(), listener.accept());
-    let (raw_sender, _) = client_sr?;
-    let (_, raw_receiver) = listener_sr?.ok_or(ConnectError::NoConnectRequest)?;
+    async fn connect_raw(
+        client: &chmux::Client, listener: &mut chmux::Listener,
+    ) -> Result<(chmux::Sender, chmux::Receiver), ConnectError> {
+        let (client_sr, listener_sr) = tokio::join!(client.connect(), listener.accept());
+        let (raw_sender, _) = client_sr?;
+        let (_, raw_receiver) = listener_sr?.ok_or(ConnectError::NoConnectRequest)?;
+        Ok((raw_sender, raw_receiver))
+    }
+
+    let (raw_sender, raw_receiver) = connect_raw(client, listener).await?;
     Ok((Sender::new(raw_sender), Receiver::new(raw_receiver)))
 }
 

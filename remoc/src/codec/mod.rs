@@ -54,7 +54,7 @@ use std::{
     any::{Any, TypeId, type_name},
     error::Error,
     fmt,
-    io::{Read, Write},
+    io::{BufWriter, Read, Write},
     sync::Arc,
 };
 
@@ -282,18 +282,23 @@ impl ErasedSerializer {
         }
     }
 
-    /// Serialize the type-erased item into the given writer.
+    /// Serialize the type-erased item into the given writer, passing it the encoded data
+    /// in blocks of `buffer_size` bytes.
     ///
     /// # Panics
     /// Panics if the type of the item does not match the type `T` used for calling [`ErasedSerializer::new`].
-    pub fn serialize(&self, writer: &mut dyn Write, item: &dyn Any) -> Result<(), SerializationError> {
-        self.inner.serialize(writer, item)
+    pub fn serialize(
+        &self, writer: &mut dyn Write, item: &dyn Any, buffer_size: usize,
+    ) -> Result<(), SerializationError> {
+        self.inner.serialize(writer, item, buffer_size)
     }
 }
 
 trait ErasedSerializerMethods: Send + Sync {
     fn clone(&self) -> Box<dyn ErasedSerializerMethods>;
-    fn serialize(&self, writer: &mut dyn Write, item: &dyn Any) -> Result<(), SerializationError>;
+    fn serialize(
+        &self, writer: &mut dyn Write, item: &dyn Any, buffer_size: usize,
+    ) -> Result<(), SerializationError>;
 }
 
 #[expect(dead_code)]
@@ -308,9 +313,14 @@ where
         Box::new(ErasedSerializerInner::<T, C>(|_, _| ()))
     }
 
-    fn serialize(&self, writer: &mut dyn Write, item: &dyn Any) -> Result<(), SerializationError> {
+    fn serialize(
+        &self, writer: &mut dyn Write, item: &dyn Any, buffer_size: usize,
+    ) -> Result<(), SerializationError> {
         let Some(item) = item.downcast_ref::<T>() else { panic!("ErasedSerializer called with mismatched type") };
-        <C as Codec>::serialize(writer, item)
+
+        let mut writer = BufWriter::with_capacity(buffer_size, writer);
+        <C as Codec>::serialize(&mut writer, item)?;
+        writer.flush().map_err(SerializationError::new)
     }
 }
 

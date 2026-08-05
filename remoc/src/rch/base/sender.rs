@@ -9,7 +9,6 @@ use std::{
     cell::RefCell,
     error::Error,
     fmt,
-    io::BufWriter,
     ops::{Deref, DerefMut},
     panic,
     rc::{Rc, Weak},
@@ -301,6 +300,8 @@ pub struct ErasedSender {
     serializer: ErasedSerializer,
     sender: chmux::Sender,
     big_data: i8,
+    /// Encoded size of the last buffered item, used to size the next buffer.
+    last_size: usize,
     max_item_size: usize,
 }
 
@@ -316,7 +317,7 @@ impl fmt::Debug for ErasedSender {
 impl ErasedSender {
     /// Creates a base remote sender from an erased serializer a [chmux] sender.
     pub fn new(serializer: ErasedSerializer, sender: chmux::Sender) -> Self {
-        Self { serializer, sender, big_data: 0, max_item_size: DEFAULT_MAX_ITEM_SIZE }
+        Self { serializer, sender, big_data: 0, last_size: 0, max_item_size: DEFAULT_MAX_ITEM_SIZE }
     }
 
     /// Creates a type-erased base remote sender for the specified type `T` and codec from a [chmux] sender.
@@ -335,12 +336,12 @@ impl ErasedSender {
 
     fn serialize_buffered(
         serializer: &ErasedSerializer, allocator: chmux::PortAllocator, storage: AnyStorage, item: &dyn Any,
-        limit: usize,
+        limit: usize, capacity: usize,
     ) -> Result<Option<(BytesMut, PortSerializer)>, SerializationError> {
-        let mut lw = LimitedBytesWriter::new(limit);
+        let mut lw = LimitedBytesWriter::new(limit, capacity);
         let ps_ref = PortSerializer::start(allocator, storage);
 
-        match serializer.serialize(&mut lw, item) {
+        match serializer.serialize(&mut lw, item, capacity.clamp(512, 8_192)) {
             _ if lw.overflow() => return Ok(None),
             Ok(()) => (),
             Err(err) => return Err(err),
@@ -358,8 +359,7 @@ impl ErasedSender {
             return Err((SerializationError::new(StreamingUnavailable), item));
         }
 
-        let cbw = ChannelBytesWriter::new(tx);
-        let mut cbw = BufWriter::with_capacity(chunk_size, cbw);
+        let mut cbw = ChannelBytesWriter::new(tx);
 
         let item_arc = Arc::new(Mutex::new(item));
         let item_arc_task = item_arc.clone();
@@ -368,11 +368,7 @@ impl ErasedSender {
             let ps_ref = PortSerializer::start(allocator, storage);
 
             let item = item_arc_task.lock().unwrap();
-            serializer.serialize(&mut cbw, &**item)?;
-
-            let cbw = cbw.into_inner().map_err(|_| {
-                SerializationError::new(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "flush failed"))
-            })?;
+            serializer.serialize(&mut cbw, &**item, chunk_size)?;
 
             let ps = PortSerializer::finish(ps_ref);
             Ok((ps, cbw.written()))
@@ -417,9 +413,11 @@ impl ErasedSender {
                 self.sender.storage(),
                 &*item,
                 self.sender.max_data_size(),
+                self.last_size * 110 / 100,
             ) {
                 Ok(Some(v)) => {
                     self.big_data = (self.big_data - 1).max(-BIG_DATA_LIMIT);
+                    self.last_size = v.0.len();
                     Some(v)
                 }
                 Ok(None) => {

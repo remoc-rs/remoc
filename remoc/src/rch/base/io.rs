@@ -9,9 +9,9 @@ pub struct LimitedBytesWriter {
 }
 
 impl LimitedBytesWriter {
-    /// Creates a new limited writer.
-    pub fn new(limit: usize) -> Self {
-        Self { limit, buf: BytesMut::new(), overflown: false }
+    /// Creates a new limited writer that starts with the specified buffer capacity.
+    pub fn new(limit: usize, capacity: usize) -> Self {
+        Self { limit, buf: BytesMut::with_capacity(capacity.min(limit)), overflown: false }
     }
 
     /// Returns the write buffer, if no overflow has occurred.

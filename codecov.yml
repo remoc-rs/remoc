@@ -22,5 +22,6 @@ comment:
 ignore:
   - "remoc/tests/**/*"
   - "remoc_macro/**/*"
+  - "bench/**/*"
   - "*.sh"
   - "*.md"

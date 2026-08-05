@@ -4,6 +4,25 @@ All notable changes to Remoc will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.19.1 - 2026-08-05
+This release considerably reduces the compile time and code size of crates using
+Remoc and makes the type-erased base channel available for use by custom channel
+implementations.
+
+Remoc 0.19.1 remains wire-compatible with Remoc 0.19 and 0.18.
+
+### Added
+- rch: type-erased base channel via `base::ErasedSender` and `base::ErasedReceiver`,
+  which send and receive `Box<dyn Any + Send>` values using an item type and codec
+  that are fixed at construction time
+- codec: `ErasedSerializer` and `ErasedDeserializer` for type-erased serialization
+  and deserialization, together with the `AnySend` type alias
+
+### Changed
+- rch: the `Debug` implementations of the send error types no longer require the item
+  type to implement `Debug` and no longer include the item in their output
+- considerably reduced monomorphization; thus reducing compile time and binary size
+
 ## 0.19.0 - 2026-08-03
 This is a large release that significantly improves throughput and latency of the
 underlying channel multiplexer, adds monitoring and rate limiting facilities and

@@ -23,10 +23,10 @@ use super::{
 use crate::{RemoteSend, chmux, codec, exec, rch::SendingError};
 
 /// An error occurred during sending over an mpsc channel.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, custom_debug::Debug, Serialize, Deserialize)]
 pub enum SendError<T> {
     /// The remote end closed the channel.
-    Closed(T),
+    Closed(#[debug(skip)] T),
     /// Sending to a remote endpoint failed.
     RemoteSend(base::SendErrorKind),
     /// Connecting a sent channel failed.
@@ -132,13 +132,13 @@ impl<T> SendError<T> {
 }
 
 /// An error occurred during trying to send over an mpsc channel.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, custom_debug::Debug, Serialize, Deserialize)]
 pub enum TrySendError<T> {
     /// The remote end closed the channel.
-    Closed(T),
+    Closed(#[debug(skip)] T),
     /// The data could not be sent on the channel because the channel
     /// is currently full and sending would require blocking.
-    Full(T),
+    Full(#[debug(skip)] T),
     /// Sending to a remote endpoint failed.
     RemoteSend(base::SendErrorKind),
     /// Connecting a sent channel failed.

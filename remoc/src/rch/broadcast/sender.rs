@@ -18,10 +18,10 @@ use super::{
 use crate::{RemoteSend, chmux, codec, exec};
 
 /// An error occurred during sending over a broadcast channel.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, custom_debug::Debug, Serialize, Deserialize)]
 pub enum SendError<T> {
     /// All receivers have been dropped.
-    Closed(T),
+    Closed(#[debug(skip)] T),
     /// Sending to a remote endpoint failed.
     RemoteSend(base::SendErrorKind),
     /// Connecting a sent channel failed.

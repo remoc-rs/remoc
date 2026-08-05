@@ -377,7 +377,7 @@ impl fmt::Display for SendingErrorKind {
 }
 
 /// A value queued for sending failed to send.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(custom_debug::Debug, Clone, Serialize, Deserialize)]
 pub enum SendingError<T> {
     /// Sending failed.
     Send(base::SendError<T>),

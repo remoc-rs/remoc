@@ -22,11 +22,12 @@ use crate::{
 pub use super::super::base::Closed;
 
 /// An error that occurred during remote sending.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, custom_debug::Debug, Serialize, Deserialize)]
 pub struct SendError<T> {
     /// Error kind.
     pub kind: SendErrorKind,
     /// Item that could not be sent.
+    #[debug(skip)]
     pub item: T,
 }
 

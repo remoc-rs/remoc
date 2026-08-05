@@ -5,6 +5,63 @@
 //! where it can be either processed event-wise or a mirrored collection can
 //! be built from it.
 //!
+//! # Basic use
+//!
+//! Create an observable collection, for example an
+//! [observable hash map](hash_map::ObservableHashMap), and obtain a subscription to it
+//! by calling `subscribe` on it.
+//! The subscription can be sent to a remote endpoint over any [remote channel](crate::rch).
+//! There, call `mirror` on it to obtain a live mirror of the collection, or call `recv`
+//! repeatedly to process each [change event](hash_map::HashMapEvent) individually.
+//!
+//! Call `done` on the observed collection when no further changes will be made.
+//! Subscribers are notified of this and can distinguish it from a lost connection.
+//!
+//! # Example
+//!
+//! In the following example the client observes a hash map held by the server.
+//!
+//! ```
+//! use remoc::prelude::*;
+//! use remoc::robs::hash_map::{HashMapSubscription, ObservableHashMap};
+//!
+//! // This would be run on the server.
+//! async fn server(mut tx: rch::base::Sender<HashMapSubscription<u32, String>>) {
+//!     let mut map: ObservableHashMap<u32, String> = ObservableHashMap::new();
+//!     map.insert(1, "one".to_string());
+//!
+//!     // The subscription conveys the current contents of the map,
+//!     // followed by every subsequent change to it.
+//!     tx.send(map.subscribe(1024)).await.unwrap();
+//!
+//!     map.insert(2, "two".to_string());
+//!
+//!     // Tells subscribers that no further changes will follow.
+//!     map.done();
+//! }
+//!
+//! // This would be run on the client.
+//! async fn client(mut rx: rch::base::Receiver<HashMapSubscription<u32, String>>) {
+//!     let sub = rx.recv().await.unwrap().unwrap();
+//!
+//!     // The mirror is kept up-to-date with the observed hash map.
+//!     let mut mirror = sub.mirror(1000);
+//!
+//!     loop {
+//!         // Wait for the mirror to change, then inspect it.
+//!         mirror.changed().await;
+//!         let map = mirror.borrow_and_update().await.unwrap();
+//!
+//!         if map.is_done() {
+//!             assert_eq!(map.get(&1), Some(&"one".to_string()));
+//!             assert_eq!(map.get(&2), Some(&"two".to_string()));
+//!             break;
+//!         }
+//!     }
+//! }
+//! # tokio_test::block_on(remoc::doctest::client_server(server, client));
+//! ```
+//!
 
 pub mod hash_map;
 pub mod hash_set;

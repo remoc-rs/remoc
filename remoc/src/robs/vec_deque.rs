@@ -26,6 +26,52 @@
 //! [VecDequeSubscription::mirror] on the remote endpoint to obtain a live mirror of the observed
 //! VecDeque or process each change event individually using [VecDequeSubscription::recv].
 //!
+//! # Example
+//!
+//! In the following example the client mirrors a VecDeque held by the server.
+//!
+//! ```
+//! use std::collections::VecDeque;
+//!
+//! use remoc::prelude::*;
+//! use remoc::robs::vec_deque::{ObservableVecDeque, VecDequeSubscription};
+//!
+//! // This would be run on the server.
+//! async fn server(mut tx: rch::base::Sender<VecDequeSubscription<String>>) {
+//!     let mut queue: ObservableVecDeque<String> = ObservableVecDeque::new();
+//!     queue.push_back("middle".to_string());
+//!
+//!     // The subscription conveys the current contents of the queue,
+//!     // followed by every subsequent change to it.
+//!     tx.send(queue.subscribe(1024)).await.unwrap();
+//!
+//!     queue.push_front("front".to_string());
+//!     queue.push_back("back".to_string());
+//!
+//!     // Tells subscribers that no further changes will follow.
+//!     queue.done();
+//! }
+//!
+//! // This would be run on the client.
+//! async fn client(mut rx: rch::base::Receiver<VecDequeSubscription<String>>) {
+//!     let sub = rx.recv().await.unwrap().unwrap();
+//!     let mut mirror = sub.mirror(1000);
+//!
+//!     loop {
+//!         mirror.changed().await;
+//!         let queue = mirror.borrow_and_update().await.unwrap();
+//!
+//!         if queue.is_done() {
+//!             let expected: VecDeque<String> =
+//!                 ["front", "middle", "back"].into_iter().map(String::from).collect();
+//!             assert_eq!(*queue, expected);
+//!             break;
+//!         }
+//!     }
+//! }
+//! # tokio_test::block_on(remoc::doctest::client_server(server, client));
+//! ```
+//!
 
 use serde::{Deserialize, Serialize};
 use std::{

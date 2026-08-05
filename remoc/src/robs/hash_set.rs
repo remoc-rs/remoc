@@ -17,6 +17,48 @@
 //! [HashSetSubscription::mirror] on the remote endpoint to obtain a live mirror of the observed
 //! hash set or process each change event individually using [HashSetSubscription::recv].
 //!
+//! # Example
+//!
+//! In the following example the client mirrors a hash set held by the server.
+//!
+//! ```
+//! use remoc::prelude::*;
+//! use remoc::robs::hash_set::{HashSetSubscription, ObservableHashSet};
+//!
+//! // This would be run on the server.
+//! async fn server(mut tx: rch::base::Sender<HashSetSubscription<String>>) {
+//!     let mut set: ObservableHashSet<String> = ObservableHashSet::new();
+//!     set.insert("first".to_string());
+//!
+//!     // The subscription conveys the current contents of the set,
+//!     // followed by every subsequent change to it.
+//!     tx.send(set.subscribe(1024)).await.unwrap();
+//!
+//!     set.insert("second".to_string());
+//!
+//!     // Tells subscribers that no further changes will follow.
+//!     set.done();
+//! }
+//!
+//! // This would be run on the client.
+//! async fn client(mut rx: rch::base::Receiver<HashSetSubscription<String>>) {
+//!     let sub = rx.recv().await.unwrap().unwrap();
+//!     let mut mirror = sub.mirror(1000);
+//!
+//!     loop {
+//!         mirror.changed().await;
+//!         let set = mirror.borrow_and_update().await.unwrap();
+//!
+//!         if set.is_done() {
+//!             assert!(set.contains("first"));
+//!             assert!(set.contains("second"));
+//!             break;
+//!         }
+//!     }
+//! }
+//! # tokio_test::block_on(remoc::doctest::client_server(server, client));
+//! ```
+//!
 
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fmt, hash::Hash, mem::take, ops::Deref, sync::Arc};

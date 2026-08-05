@@ -17,6 +17,49 @@
 //! [HashMapSubscription::mirror] on the remote endpoint to obtain a live mirror of the observed
 //! hash map or process each change event individually using [HashMapSubscription::recv].
 //!
+//! # Example
+//!
+//! In the following example the client mirrors a hash map held by the server.
+//!
+//! ```
+//! use remoc::prelude::*;
+//! use remoc::robs::hash_map::{HashMapSubscription, ObservableHashMap};
+//!
+//! // This would be run on the server.
+//! async fn server(mut tx: rch::base::Sender<HashMapSubscription<u32, String>>) {
+//!     let mut map: ObservableHashMap<u32, String> = ObservableHashMap::new();
+//!     map.insert(1, "one".to_string());
+//!
+//!     // The subscription conveys the current contents of the map,
+//!     // followed by every subsequent change to it.
+//!     tx.send(map.subscribe(1024)).await.unwrap();
+//!
+//!     map.insert(2, "two".to_string());
+//!     map.remove(&1);
+//!
+//!     // Tells subscribers that no further changes will follow.
+//!     map.done();
+//! }
+//!
+//! // This would be run on the client.
+//! async fn client(mut rx: rch::base::Receiver<HashMapSubscription<u32, String>>) {
+//!     let sub = rx.recv().await.unwrap().unwrap();
+//!     let mut mirror = sub.mirror(1000);
+//!
+//!     loop {
+//!         mirror.changed().await;
+//!         let map = mirror.borrow_and_update().await.unwrap();
+//!
+//!         if map.is_done() {
+//!             assert_eq!(map.get(&1), None);
+//!             assert_eq!(map.get(&2), Some(&"two".to_string()));
+//!             break;
+//!         }
+//!     }
+//! }
+//! # tokio_test::block_on(remoc::doctest::client_server(server, client));
+//! ```
+//!
 
 use serde::{Deserialize, Serialize};
 use std::{

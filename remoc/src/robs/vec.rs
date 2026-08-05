@@ -23,6 +23,47 @@
 //! [VecSubscription::mirror] on the remote endpoint to obtain a live mirror of the observed
 //! vector or process each change event individually using [VecSubscription::recv].
 //!
+//! # Example
+//!
+//! In the following example the client mirrors a vector held by the server.
+//!
+//! ```
+//! use remoc::prelude::*;
+//! use remoc::robs::vec::{ObservableVec, VecSubscription};
+//!
+//! // This would be run on the server.
+//! async fn server(mut tx: rch::base::Sender<VecSubscription<String>>) {
+//!     let mut vec: ObservableVec<String> = ObservableVec::new();
+//!     vec.push("first".to_string());
+//!
+//!     // The subscription conveys the current contents of the vector,
+//!     // followed by every subsequent change to it.
+//!     tx.send(vec.subscribe(1024)).await.unwrap();
+//!
+//!     vec.push("second".to_string());
+//!
+//!     // Tells subscribers that no further changes will follow.
+//!     vec.done();
+//! }
+//!
+//! // This would be run on the client.
+//! async fn client(mut rx: rch::base::Receiver<VecSubscription<String>>) {
+//!     let sub = rx.recv().await.unwrap().unwrap();
+//!     let mut mirror = sub.mirror(1000);
+//!
+//!     loop {
+//!         mirror.changed().await;
+//!         let vec = mirror.borrow_and_update().await.unwrap();
+//!
+//!         if vec.is_done() {
+//!             assert_eq!(*vec, vec!["first".to_string(), "second".to_string()]);
+//!             break;
+//!         }
+//!     }
+//! }
+//! # tokio_test::block_on(remoc::doctest::client_server(server, client));
+//! ```
+//!
 
 use serde::{Deserialize, Serialize};
 use std::{

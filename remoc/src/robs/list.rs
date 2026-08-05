@@ -18,6 +18,43 @@
 //! [ListSubscription::mirror] on the remote endpoint to obtain a live mirror of the observed
 //! vector or process each change event individually using [ListSubscription::recv].
 //!
+//! # Example
+//!
+//! In the following example the client mirrors an append-only list held by the server.
+//!
+//! ```
+//! use remoc::prelude::*;
+//! use remoc::robs::list::{ListSubscription, ObservableList};
+//!
+//! // This would be run on the server.
+//! async fn server(mut tx: rch::base::Sender<ListSubscription<String>>) {
+//!     let mut list: ObservableList<String> = ObservableList::new();
+//!     list.push("first".to_string());
+//!
+//!     // The subscription conveys the current contents of the list,
+//!     // followed by every subsequently appended item.
+//!     tx.send(list.subscribe()).await.unwrap();
+//!
+//!     list.push("second".to_string());
+//!
+//!     // Tells subscribers that no further items will follow.
+//!     list.done();
+//! }
+//!
+//! // This would be run on the client.
+//! async fn client(mut rx: rch::base::Receiver<ListSubscription<String>>) {
+//!     let sub = rx.recv().await.unwrap().unwrap();
+//!     let mut mirror = sub.mirror(1000);
+//!
+//!     // Wait until the server has appended all items.
+//!     mirror.done().await.unwrap();
+//!
+//!     let list = mirror.borrow().await.unwrap();
+//!     assert_eq!(*list, vec!["first".to_string(), "second".to_string()]);
+//! }
+//! # tokio_test::block_on(remoc::doctest::client_server(server, client));
+//! ```
+//!
 
 use futures::{Future, FutureExt, future};
 use serde::{Deserialize, Serialize};

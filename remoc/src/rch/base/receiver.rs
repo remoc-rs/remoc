@@ -285,7 +285,6 @@ impl ErasedReceiver {
     }
 
     /// Creates a type-erased base remote receiver for the specfied type `T` and codec from a [chmux] receiver.
-    #[inline(never)]
     pub fn typed<T, Codec>(receiver: chmux::Receiver) -> Self
     where
         T: DeserializeOwned + Send + 'static,
@@ -295,7 +294,6 @@ impl ErasedReceiver {
     }
 
     /// Consumes this base remote receiver and returns the underlying [chmux] receiver.
-    #[inline(never)]
     pub fn into_inner(self) -> chmux::Receiver {
         self.receiver
     }
@@ -303,7 +301,6 @@ impl ErasedReceiver {
     /// Receive an item of type `T` used for calling [`ErasedReceiver::typed`] from the remote endpoint.
     ///
     /// The received item is returned type erased.
-    #[inline(never)]
     pub async fn recv_erased(&mut self) -> Result<Option<AnySend>, RecvError> {
         if self.default_max_ports.is_none() {
             self.default_max_ports = Some(self.receiver.max_ports());
@@ -497,7 +494,6 @@ impl ErasedReceiver {
     ///
     /// This stops the remote endpoint from sending more data, but allows already sent data
     /// to be received.
-    #[inline(never)]
     pub async fn close(&mut self) {
         self.receiver.close().await
     }
@@ -505,13 +501,11 @@ impl ErasedReceiver {
     /// The maximum allowed size in bytes of an item to be received.
     ///
     /// The default value is [DEFAULT_MAX_ITEM_SIZE].
-    #[inline(never)]
     pub fn max_item_size(&self) -> usize {
         self.max_item_size
     }
 
     /// Sets the maximum allowed size in bytes of an item to be received.
-    #[inline(never)]
     pub fn set_max_item_size(&mut self, max_item_size: usize) {
         self.max_item_size = max_item_size;
     }

@@ -283,7 +283,6 @@ where
 }
 
 /// Send implementation for deserializer of Sender and serializer of Receiver.
-#[inline(never)]
 async fn send_impl(
     erased_serializer: ErasedSerializer, mut rx: Box<dyn ErasedMpscRx + Send>, raw_tx: chmux::Sender,
     mut raw_rx: chmux::Receiver, remote_send_err_tx: tokio::sync::watch::Sender<Option<RemoteSendError>>,
@@ -372,7 +371,6 @@ where
 }
 
 /// Receive implementation for serializer of Sender and deserializer of Receiver.
-#[inline(never)]
 async fn recv_impl(
     erased_deserializer: ErasedDeserializer, tx: &(dyn ErasedMpscTx + Send + Sync), mut raw_tx: chmux::Sender,
     raw_rx: chmux::Receiver, mut remote_send_err_rx: tokio::sync::watch::Receiver<Option<RemoteSendError>>,

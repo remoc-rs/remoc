@@ -320,7 +320,6 @@ impl ErasedSender {
     }
 
     /// Creates a type-erased base remote sender for the specified type `T` and codec from a [chmux] sender.
-    #[inline(never)]
     pub fn typed<T, Codec>(sender: chmux::Sender) -> Self
     where
         T: Serialize + Send + 'static,
@@ -330,7 +329,6 @@ impl ErasedSender {
     }
 
     /// Consumes this base remote sender and returns the underlying [chmux] sender.
-    #[inline(never)]
     pub fn into_inner(self) -> chmux::Sender {
         self.sender
     }
@@ -407,7 +405,6 @@ impl ErasedSender {
     ///
     /// # Panics
     /// Panics if the underlying type of `item` does not match `T`.
-    #[inline(never)]
     pub async fn send_erased(&mut self, item: AnySend) -> Result<(), SendError<AnySend>> {
         self.serializer.check_type(&*item);
 
@@ -551,13 +548,11 @@ impl ErasedSender {
     }
 
     /// True, once the remote endpoint has closed its receiver.
-    #[inline(never)]
     pub fn is_closed(&self) -> bool {
         self.sender.is_closed()
     }
 
     /// Returns a future that will resolve when the remote endpoint closes its receiver.
-    #[inline(never)]
     pub fn closed(&self) -> Closed {
         self.sender.closed()
     }
@@ -565,7 +560,6 @@ impl ErasedSender {
     /// The maximum allowed size in bytes of an item to be sent.
     ///
     /// The default value is [DEFAULT_MAX_ITEM_SIZE].
-    #[inline(never)]
     pub fn max_item_size(&self) -> usize {
         self.max_item_size
     }
@@ -577,7 +571,6 @@ impl ErasedSender {
     /// [receiver](super::Receiver), sending of oversized items will succeed but the receiver
     /// will fail with a [MaxItemSizeExceeded error](super::RecvError::MaxItemSizeExceeded) when
     /// trying to receive the item.
-    #[inline(never)]
     pub fn set_max_item_size(&mut self, max_item_size: usize) {
         self.max_item_size = max_item_size;
     }
@@ -585,7 +578,6 @@ impl ErasedSender {
     /// Returns whehter the remote endpoint supports calling [all_received](Self::all_received).
     ///
     /// See [chmux::Sender::is_all_received_supported](crate::chmux::Sender::is_all_received_supported) for details.
-    #[inline(never)]
     pub fn is_all_received_supported(&self) -> bool {
         self.sender.is_all_received_supported()
     }
@@ -594,7 +586,6 @@ impl ErasedSender {
     /// items sent on this channel up to now.    
     ///
     /// See [chmux::Sender::all_received](crate::chmux::Sender::all_received) for details.
-    #[inline(never)]
     pub fn all_received(&self) -> AllReceived {
         self.sender.all_received()
     }
@@ -602,7 +593,6 @@ impl ErasedSender {
     /// Returns whether this channel may use global credits for sending items.
     ///
     /// See [chmux::Sender::are_global_credits_used](crate::chmux::Sender::are_global_credits_used) for details.
-    #[inline(never)]
     pub fn are_global_credits_used(&self) -> bool {
         self.sender.are_global_credits_used()
     }
@@ -610,7 +600,6 @@ impl ErasedSender {
     /// Sets whether this channel may use global credits for sending items.
     ///
     /// See [chmux::Sender::set_global_credits_use](crate::chmux::Sender::set_global_credits_use) for details.
-    #[inline(never)]
     pub fn set_global_credits_use(&mut self, use_global_credits: bool) {
         self.sender.set_global_credits_use(use_global_credits);
     }

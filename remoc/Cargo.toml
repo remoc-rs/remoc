@@ -63,7 +63,7 @@ futures = { version = "0.3.31", default-features = false, features = ["std"] }
 tokio = { version = "1.43", features = ["macros", "rt", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 tracing = "0.1.29"
-bytes = "1"
+bytes = { version = "1", features = ["serde"] }
 byteorder = "1.4"
 uuid = { version = "1.15", features = ["serde", "v4"] }
 serde = { version = "1.0", features = ["derive"], optional = true }

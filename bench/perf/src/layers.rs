@@ -10,7 +10,6 @@ use bytes::{Buf, Bytes};
 use remoc::{Cfg, Connect, RemoteSend, chmux, codec, prelude::*};
 use serde::{Deserialize, Serialize};
 use std::{
-    borrow::Cow,
     error::Error,
     io,
     time::{Duration, Instant},
@@ -140,10 +139,18 @@ pub enum Layer {
     /// Carries the buffer the receiving side allocates, which decides how far the sender
     /// may run ahead of the receiver.
     MpscStruct(CodecKind, RemoteBuffer),
+    /// A [`rch::mpsc`] channel spreading its items over additional transfer channels.
+    ///
+    /// Carries the number of *additional* channels, so zero is a single channel and thus
+    /// the behaviour before the feature existed, which is also the library default. Above
+    /// that, consecutive items are serialized and deserialized on separate tasks that can
+    /// run on separate cores; order is preserved because both endpoints round-robin in
+    /// lockstep. Everything else matches [`Layer::MpscStruct`], so the two are comparable.
+    MpscStructParallel(CodecKind, usize),
 }
 
 impl Layer {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 28] = [
         Self::RawTcp,
         Self::Chmux,
         Self::Base,
@@ -151,12 +158,27 @@ impl Layer {
         Self::TcpStruct(CodecKind::Postbag),
         Self::MpscStruct(CodecKind::Postbag, RemoteBuffer::Default),
         Self::MpscStruct(CodecKind::Postbag, RemoteBuffer::Large),
+        Self::MpscStructParallel(CodecKind::Postbag, 0),
+        Self::MpscStructParallel(CodecKind::Postbag, 1),
+        Self::MpscStructParallel(CodecKind::Postbag, 2),
+        Self::MpscStructParallel(CodecKind::Postbag, 3),
+        Self::MpscStructParallel(CodecKind::Postbag, 4),
         Self::TcpStruct(CodecKind::PostbagSlim),
         Self::MpscStruct(CodecKind::PostbagSlim, RemoteBuffer::Default),
         Self::MpscStruct(CodecKind::PostbagSlim, RemoteBuffer::Large),
+        Self::MpscStructParallel(CodecKind::PostbagSlim, 0),
+        Self::MpscStructParallel(CodecKind::PostbagSlim, 1),
+        Self::MpscStructParallel(CodecKind::PostbagSlim, 2),
+        Self::MpscStructParallel(CodecKind::PostbagSlim, 3),
+        Self::MpscStructParallel(CodecKind::PostbagSlim, 4),
         Self::TcpStruct(CodecKind::Bincode),
         Self::MpscStruct(CodecKind::Bincode, RemoteBuffer::Default),
         Self::MpscStruct(CodecKind::Bincode, RemoteBuffer::Large),
+        Self::MpscStructParallel(CodecKind::Bincode, 0),
+        Self::MpscStructParallel(CodecKind::Bincode, 1),
+        Self::MpscStructParallel(CodecKind::Bincode, 2),
+        Self::MpscStructParallel(CodecKind::Bincode, 3),
+        Self::MpscStructParallel(CodecKind::Bincode, 4),
     ];
 
     pub fn name(&self) -> String {
@@ -167,6 +189,9 @@ impl Layer {
             Self::Mpsc => "mpsc".into(),
             Self::TcpStruct(codec) => format!("tcp_struct_{}", codec.name()),
             Self::MpscStruct(codec, buffer) => format!("mpsc_struct{}_{}", buffer.suffix(), codec.name()),
+            Self::MpscStructParallel(codec, parallel) => {
+                format!("mpsc_struct_par{parallel}_{}", codec.name())
+            }
         }
     }
 
@@ -183,13 +208,26 @@ impl Layer {
             Self::MpscStruct(codec, buffer) => {
                 format!("rch::mpsc, structs ({}, buffer {})", codec.description(), buffer.items())
             }
+            Self::MpscStructParallel(codec, parallel) => {
+                format!("rch::mpsc, structs ({}, parallel {parallel})", codec.description())
+            }
         }
     }
 
     /// The codec the layer is run with, if it carries structs.
     pub fn codec(&self) -> Option<CodecKind> {
         match self {
-            Self::TcpStruct(codec) | Self::MpscStruct(codec, _) => Some(*codec),
+            Self::TcpStruct(codec) | Self::MpscStruct(codec, _) | Self::MpscStructParallel(codec, _) => {
+                Some(*codec)
+            }
+            _ => None,
+        }
+    }
+
+    /// The number of additional transfer channels, if the layer sets it.
+    pub fn parallel(&self) -> Option<usize> {
+        match self {
+            Self::MpscStructParallel(_, parallel) => Some(*parallel),
             _ => None,
         }
     }
@@ -288,16 +326,14 @@ macro_rules! receive_for {
 pub struct Sample {
     pub id: u64,
     pub timestamp: u64,
-    /// Borrowed so that cloning a batch does not allocate, which only the sender that
-    /// has to hand over ownership would pay.
-    pub source: Cow<'static, str>,
+    pub source: String,
     pub valid: bool,
     pub value: f64,
 }
 
 impl Sample {
     fn new() -> Self {
-        Self { id: 90_000, timestamp: 1_700_000_000, source: Cow::Borrowed("sensor01"), valid: true, value: 1.0 }
+        Self { id: 90_000, timestamp: 1_700_000_000, source: "sensor01".to_string(), valid: true, value: 1.0 }
     }
 
     /// Encoded size of one sample under codec `C`.
@@ -343,10 +379,16 @@ pub async fn run(layer: Layer, link: Link, msg_size: usize, limit: Duration) -> 
         // The buffer is a const generic, so every value needs its own instantiation and
         // the match cannot be replaced by passing a number along.
         Layer::MpscStruct(codec, RemoteBuffer::Default) => {
-            with_codec!(codec, mpsc_struct::<{ rch::DEFAULT_BUFFER }>(link, msg_size, limit))
+            with_codec!(codec, mpsc_struct::<{ rch::DEFAULT_BUFFER }>(link, msg_size, limit, None))
         }
         Layer::MpscStruct(codec, RemoteBuffer::Large) => {
-            with_codec!(codec, mpsc_struct::<{ RemoteBuffer::LARGE }>(link, msg_size, limit))
+            with_codec!(codec, mpsc_struct::<{ RemoteBuffer::LARGE }>(link, msg_size, limit, None))
+        }
+
+        // Everything but the transfer channel count matches the layer above, so the two
+        // differ by that alone.
+        Layer::MpscStructParallel(codec, parallel) => {
+            with_codec!(codec, mpsc_struct::<{ rch::DEFAULT_BUFFER }>(link, msg_size, limit, Some(parallel)))
         }
     }
 }
@@ -501,8 +543,13 @@ async fn tcp_struct<C: codec::Codec>(link: Link, msg_size: usize, limit: Duratio
         let mut client_writer = BufWriter::with_capacity(TCP_BUFFER, client_writer);
         let mut buf = Vec::new();
         loop {
+            // Cloned although serializing `payload` directly would do, because the
+            // channel layer has to hand over ownership and clones for that. Both sides
+            // of the comparison thus pay for producing the batch.
+            let batch = payload.clone();
+
             buf.clear();
-            <C as codec::Codec>::serialize(&mut buf, &payload).map_err(io::Error::other)?;
+            <C as codec::Codec>::serialize(&mut buf, &batch).map_err(io::Error::other)?;
             client_writer.write_u32(buf.len() as u32).await?;
             client_writer.write_all(&buf).await?;
         }
@@ -533,9 +580,10 @@ async fn tcp_struct<C: codec::Codec>(link: Link, msg_size: usize, limit: Duratio
 /// Batches of records over an [`rch::mpsc`] channel, encoded with codec `C`.
 ///
 /// `BUFFER` is the item buffer the receiving side allocates when the channel half arrives
-/// there; see [`RemoteBuffer`].
+/// there; see [`RemoteBuffer`]. `parallel` is the number of additional transfer channels,
+/// or [`None`] to leave it at the library default.
 async fn mpsc_struct<C: codec::Codec, const BUFFER: usize>(
-    link: Link, msg_size: usize, limit: Duration,
+    link: Link, msg_size: usize, limit: Duration, parallel: Option<usize>,
 ) -> Result<Outcome> {
     let cfg = Cfg::default();
     let (client, server) = connect(link).await?;
@@ -546,7 +594,12 @@ async fn mpsc_struct<C: codec::Codec, const BUFFER: usize>(
         endpoints::<(), Transferred<C, BUFFER>, C>(cfg, server),
     )?;
 
-    let (tx, data_rx) = rch::mpsc::channel::<Vec<Sample>, C>(MPSC_BUFFER).with_buffer::<BUFFER>();
+    let channel = rch::mpsc::channel::<Vec<Sample>, C>(MPSC_BUFFER).with_buffer::<BUFFER>();
+    let (tx, data_rx) = match parallel {
+        Some(parallel) => channel.with_parallel(parallel),
+        None => channel,
+    };
+
     base_tx.send(data_rx).await?;
     let mut rx = base_rx.recv().await?.ok_or("connection closed")?;
 

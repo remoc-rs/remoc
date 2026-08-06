@@ -8,6 +8,7 @@ Usage:
 
 import argparse
 import json
+import re
 import sys
 from collections import OrderedDict
 from pathlib import Path
@@ -37,6 +38,9 @@ LAYER_LABELS = {
     "tcp_struct": "Plain TCP connection, records serialized with {codec} codec (reference)",
     "mpsc_struct": "Remoc MPSC channel using {codec} codec",
     "mpsc_struct_buf32": "Remoc MPSC channel using {codec} codec, receive buffer of 32 items",
+    # The parallel variants carry their channel count, so their labels are built rather
+    # than listed; see `label`.
+    "mpsc_struct_par": "Remoc MPSC channel using {codec} codec, {parallel} extra transfer channel(s)",
 }
 
 # The plain TCP layers are references rather than measurements of Remoc, and are drawn
@@ -46,6 +50,9 @@ REMOC_STYLES = [
     dict(color="tab:blue", linestyle="-", marker="o"),
     dict(color="tab:red", linestyle="-", marker="^"),
     dict(color="tab:green", linestyle="-", marker="v"),
+    dict(color="tab:purple", linestyle="-", marker="D"),
+    dict(color="tab:orange", linestyle="-", marker="P"),
+    dict(color="tab:brown", linestyle="-", marker="X"),
 ]
 
 
@@ -110,6 +117,15 @@ def label(runs, layer):
 
     if key in LAYER_LABELS:
         return LAYER_LABELS[key].format(codec=codec_name(codec))
+
+    parallel = re.fullmatch(r"mpsc_struct_par(\d+)", key)
+    if parallel:
+        count = int(parallel.group(1))
+        if count == 0:
+            return f"Remoc MPSC channel using {codec_name(codec)} codec, single transfer channel"
+        plural = "" if count == 1 else "s"
+        return (f"Remoc MPSC channel using {codec_name(codec)} codec, "
+                f"{count} extra transfer channel{plural}")
 
     return next(r["layer_description"] for r in runs if r["layer"] == layer)
 

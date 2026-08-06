@@ -53,9 +53,12 @@ struct Args {
     #[arg(long)]
     list: bool,
 
-    /// Skip the check that the link emulator reproduces its configuration.
+    /// Check that the link emulator reproduces its configuration, then exit.
+    ///
+    /// The emulator is deterministic, so this only needs rechecking when the machine or
+    /// the emulator itself changes, rather than before every measurement.
     #[arg(long)]
-    skip_validation: bool,
+    validate: bool,
 
     /// Write the results as JSON to this path.
     #[arg(long, value_name = "PATH")]
@@ -119,9 +122,10 @@ const LINKS: &[Link] =
 /// Payload sizes to sweep.
 ///
 /// Throughput saturates the link somewhere around a kilobyte, so the sweep is dense
-/// below that. The last size is the only one above [`Cfg::chunk_size`](remoc::Cfg) and
-/// covers bulk transfer.
-const MSG_SIZES: &[usize] = &[64, 256, 512, 1_024, 4_096, 65_536];
+/// below that; with a 64 byte record those small sizes are the interesting ones, being
+/// one, two and four records to a message. The last size is the only one above
+/// [`Cfg::chunk_size`](remoc::Cfg) and covers bulk transfer.
+const MSG_SIZES: &[usize] = &[64, 128, 256, 512, 1_024, 4_096, 65_536];
 
 /// How long each measured transfer runs.
 ///
@@ -149,6 +153,12 @@ fn main() -> Result<()> {
     let links = args.selected_links()?;
     let sizes = args.selected_sizes()?;
 
+    if args.validate {
+        isolated(link::calibrate());
+        validate(&links)?;
+        return Ok(());
+    }
+
     let mut report = json!({
         "quick": args.quick,
         "run_limit_secs": if args.quick { QUICK_RUN_LIMIT } else { RUN_LIMIT }.as_secs_f64(),
@@ -161,9 +171,6 @@ fn main() -> Result<()> {
     report["sample_bytes"] =
         json!(CodecKind::ALL.iter().map(|c| (c.name(), c.sample_bytes())).collect::<HashMap<_, _>>());
 
-    if !args.skip_validation {
-        report["validation"] = validate(&links)?;
-    }
     report["runs"] = measure(&layers, &links, &sizes, args.quick)?;
 
     if let Some(out) = args.out {
@@ -403,6 +410,7 @@ fn measure(layers: &[Layer], links: &[Link], sizes: &[usize], quick: bool) -> Re
                     "layer_description": layer.description(),
                     "codec": layer.codec().map(|c| c.name()),
                     "remote_buffer": layer.remote_buffer().map(|b| b.items()),
+                    "parallel": layer.parallel(),
                     "msg_size": msg_size,
                     "msgs": outcome.msgs,
                     "bytes": outcome.bytes,

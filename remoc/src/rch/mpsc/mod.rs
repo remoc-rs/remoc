@@ -48,6 +48,7 @@
 use bytes::Buf;
 use futures::{FutureExt, future::BoxFuture};
 use std::{
+    collections::VecDeque,
     fmt,
     future::Future,
     mem,
@@ -60,7 +61,10 @@ use crate::{
     RemoteSend, chmux,
     codec::{self, AnySend, ErasedDeserializer, ErasedSerializer},
     exec,
-    rch::{BACKCHANNEL_MSG_CLOSE, BACKCHANNEL_MSG_ERROR},
+    rch::{
+        BACKCHANNEL_MSG_CLOSE, BACKCHANNEL_MSG_ERROR,
+        base::{ErasedReceiver, ErasedSender},
+    },
 };
 
 mod distributor;
@@ -84,8 +88,8 @@ where
     let (closed_tx, closed_rx) = tokio::sync::watch::channel(None);
     let (remote_send_err_tx, remote_send_err_rx) = tokio::sync::watch::channel(None);
 
-    let sender = Sender::new(tx, closed_rx, remote_send_err_rx);
-    let receiver = Receiver::new(rx, closed_tx, false, remote_send_err_tx, None);
+    let sender = Sender::new(tx, closed_rx, remote_send_err_rx, None);
+    let receiver = Receiver::new(rx, closed_tx, false, remote_send_err_tx, None, None);
     (sender, receiver)
 }
 
@@ -155,7 +159,7 @@ impl Forwarding {
     }
 }
 
-/// Extensions for MPSC channels.
+/// Extensions for mpsc channels.
 pub trait MpscExt<T, Codec, const BUFFER: usize, const MAX_ITEM_SIZE: usize> {
     /// Sets the buffer size that will be used when sending the channel's sender and receiver
     /// to a remote endpoint.
@@ -167,6 +171,14 @@ pub trait MpscExt<T, Codec, const BUFFER: usize, const MAX_ITEM_SIZE: usize> {
     fn with_max_item_size<const NEW_MAX_ITEM_SIZE: usize>(
         self,
     ) -> (Sender<T, Codec, BUFFER>, Receiver<T, Codec, BUFFER, NEW_MAX_ITEM_SIZE>);
+
+    /// Sets the number of additional parallel transfer channels.
+    ///
+    /// A value of 1 is not recommended; see [`Cfg::mpsc_parallel`](crate::Cfg::mpsc_parallel)
+    /// for what to choose.
+    fn with_parallel(
+        self, parallel: usize,
+    ) -> (Sender<T, Codec, BUFFER>, Receiver<T, Codec, BUFFER, MAX_ITEM_SIZE>);
 }
 
 impl<T, Codec, const BUFFER: usize, const MAX_ITEM_SIZE: usize> MpscExt<T, Codec, BUFFER, MAX_ITEM_SIZE>
@@ -189,6 +201,15 @@ where
         let (mut tx, rx) = self;
         tx.set_max_item_size(NEW_MAX_ITEM_SIZE);
         let rx = rx.set_max_item_size();
+        (tx, rx)
+    }
+
+    fn with_parallel(
+        self, parallel: usize,
+    ) -> (Sender<T, Codec, BUFFER>, Receiver<T, Codec, BUFFER, MAX_ITEM_SIZE>) {
+        let (mut tx, mut rx) = self;
+        tx.set_parallel(Some(parallel));
+        rx.set_parallel(Some(parallel));
         (tx, rx)
     }
 }
@@ -284,13 +305,63 @@ where
 
 /// Send implementation for deserializer of Sender and serializer of Receiver.
 async fn send_impl(
-    erased_serializer: ErasedSerializer, mut rx: Box<dyn ErasedMpscRx + Send>, raw_tx: chmux::Sender,
+    erased_serializer: ErasedSerializer, mut rx: Box<dyn ErasedMpscRx + Send>, raw_txs: Vec<chmux::Sender>,
     mut raw_rx: chmux::Receiver, remote_send_err_tx: tokio::sync::watch::Sender<Option<RemoteSendError>>,
     closed_tx: tokio::sync::watch::Sender<Option<ClosedReason>>, max_item_size: usize,
 ) {
-    // Encode data using remote sender.
-    let mut remote_tx = base::ErasedSender::new(erased_serializer, raw_tx);
-    remote_tx.set_max_item_size(max_item_size);
+    // Send request handler.
+    let handle_send_req = {
+        let remote_send_err_tx = remote_send_err_tx.clone();
+        let closed_tx = closed_tx.clone();
+
+        async move |remote_tx: &mut ErasedSender, mut send_req: Box<dyn ErasedSendReq + Send>| match remote_tx
+            .send_erased(send_req.take_value())
+            .await
+        {
+            Ok(()) => send_req.result_ok(),
+            Err(err) => {
+                let _ = remote_send_err_tx.send(Some(RemoteSendError::Send(err.kind.clone())));
+                let _ = closed_tx.send(Some(ClosedReason::Failed));
+                if let Err(err) = send_req.result_err(err)
+                    && err.is_item_specific()
+                {
+                    tracing::warn!(%err, "sending over remote channel failed");
+                }
+            }
+        }
+    };
+
+    // Create erased base channel senders.
+    let mut remote_txs = raw_txs.into_iter().map(|raw_tx| {
+        let mut remote_tx = base::ErasedSender::new(erased_serializer.clone(), raw_tx);
+        remote_tx.set_max_item_size(max_item_size);
+        remote_tx
+    });
+
+    // Setup single or multi base channel operation.
+    enum BaseTxs {
+        Single(ErasedSender),
+        Multi(VecDeque<tokio::sync::mpsc::Sender<Box<dyn ErasedSendReq + Send>>>),
+    }
+    let mut base_txs = match remote_txs.len() {
+        0 => panic!("need at least one raw channel"),
+        1 => BaseTxs::Single(remote_txs.next().unwrap()),
+        _ => BaseTxs::Multi(
+            remote_txs
+                .map(|mut remote_tx| {
+                    let handle_send_req = handle_send_req.clone();
+                    let (send_req_tx, mut send_req_rx) =
+                        tokio::sync::mpsc::channel::<Box<dyn ErasedSendReq + Send>>(1);
+                    exec::spawn(async move {
+                        while let Some(send_req) = send_req_rx.recv().await {
+                            handle_send_req(&mut remote_tx, send_req).await;
+                        }
+                    });
+                    send_req_tx
+                })
+                .collect(),
+        ),
+    };
 
     // Process events.
     loop {
@@ -335,15 +406,14 @@ async fn send_impl(
 
             // Data to send to remote endpoint.
             send_req_opt = rx.recv_erased() => {
-                let Some(mut send_req) = send_req_opt else { break };
-                match remote_tx.send_erased(send_req.take_value()).await {
-                    Ok(()) => send_req.result_ok(),
-                    Err(err) => {
-                        let _ = remote_send_err_tx.send(Some(RemoteSendError::Send(err.kind.clone())));
-                        let _ = closed_tx.send(Some(ClosedReason::Failed));
-                        if let Err(err) = send_req.result_err(err) && err.is_item_specific() {
-                            tracing::warn!(%err, "sending over remote channel failed");
+                let Some(send_req) = send_req_opt else { break };
+                match &mut base_txs {
+                    BaseTxs::Single(remote_tx) => handle_send_req(remote_tx, send_req).await,
+                    BaseTxs::Multi (txs) => {
+                        if txs.front().unwrap().send(send_req).await.is_err() {
+                            break
                         }
+                        txs.rotate_left(1);
                     }
                 }
             }
@@ -373,15 +443,63 @@ where
 /// Receive implementation for serializer of Sender and deserializer of Receiver.
 async fn recv_impl(
     erased_deserializer: ErasedDeserializer, tx: &(dyn ErasedMpscTx + Send + Sync), mut raw_tx: chmux::Sender,
-    raw_rx: chmux::Receiver, mut remote_send_err_rx: tokio::sync::watch::Receiver<Option<RemoteSendError>>,
+    raw_rxs: Vec<chmux::Receiver>, mut remote_send_err_rx: tokio::sync::watch::Receiver<Option<RemoteSendError>>,
     mut closed_rx: tokio::sync::watch::Receiver<Option<ClosedReason>>, max_item_size: usize,
 ) {
-    // Decode raw received data using remote receiver.
-    let mut remote_rx = base::ErasedReceiver::new(erased_deserializer, raw_rx);
-    remote_rx.set_max_item_size(max_item_size);
+    // Create erased base channel receivers.
+    let mut remote_rxs = raw_rxs.into_iter().map(|raw_rx| {
+        let mut remote_rx = base::ErasedReceiver::new(erased_deserializer.clone(), raw_rx);
+        remote_rx.set_max_item_size(max_item_size);
+        remote_rx
+    });
+
+    // Setup single or multi base channel operation.
+    enum BaseRxs {
+        Single(Box<ErasedReceiver>),
+        Multi(VecDeque<tokio::sync::mpsc::Receiver<Result<Option<AnySend>, base::RecvError>>>),
+    }
+    let mut base_rxs = match remote_rxs.len() {
+        0 => panic!("need at least one raw channel"),
+        1 => BaseRxs::Single(Box::new(remote_rxs.next().unwrap())),
+        _ => BaseRxs::Multi(
+            remote_rxs
+                .map(|mut remote_rx| {
+                    let (recved_tx, recved_rx) = tokio::sync::mpsc::channel(1);
+                    exec::spawn(async move {
+                        loop {
+                            tokio::select! {
+                                biased;
+                                () = recved_tx.closed() => break,
+                                res = remote_rx.recv_erased() => {
+                                    let _ = recved_tx.send(res).await;
+                                }
+                            }
+                        }
+                    });
+                    recved_rx
+                })
+                .collect(),
+        ),
+    };
 
     // Process events.
     loop {
+        let recv_task = async {
+            match &mut base_rxs {
+                BaseRxs::Single(remote_rx) => remote_rx.recv_erased().await,
+                BaseRxs::Multi(rxs) => {
+                    let res = rxs
+                        .front_mut()
+                        .unwrap()
+                        .recv()
+                        .await
+                        .unwrap_or(Err(base::RecvError::Receive(chmux::RecvError::ChMux)));
+                    rxs.rotate_left(1);
+                    res
+                }
+            }
+        };
+
         tokio::select! {
             biased;
 
@@ -413,7 +531,7 @@ async fn recv_impl(
             }
 
             // Data received from remote endpoint.
-            res = remote_rx.recv_erased() => {
+            res = recv_task => {
                 match res {
                     Ok(Some(value)) => {
                         if tx.send(value).await.is_err() {

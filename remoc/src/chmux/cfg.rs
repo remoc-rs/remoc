@@ -48,7 +48,7 @@ pub struct Cfg {
     /// Maximum number of open ports.
     ///
     /// This must not exceed 2^30 = 1_073_741_824.
-    /// By default this is 4096.
+    /// By default this is 8192.
     pub max_ports: u32,
     /// Default behavior when ports are exhausted and a connect is requested.
     ///
@@ -136,6 +136,24 @@ pub struct Cfg {
     /// By default this is 128.
     /// This must not be zero.
     pub connect_queue: u16,
+    /// Number of additional parallel transfer channels for the [mpsc channel](crate::rch::mpsc).
+    ///
+    /// Items are distributed over the channels in round-robin fashion, so that they can be
+    /// serialized and deserialized concurrently. This pays off when serialization, rather
+    /// than the link, limits throughput; otherwise it only spends additional CPU time.
+    ///
+    /// A value of 1 is not recommended, since it performs worse than using no additional
+    /// channel at all. Use 2 or more; in our benchmarks 4 were enough to saturate a
+    /// 100 MB/s link, but the value worth using depends on the payload, the codec and the
+    /// machine.
+    ///
+    /// This can be overridden individually per channel using
+    /// [`Sender::set_parallel`](crate::rch::mpsc::Sender::set_parallel)
+    /// and
+    /// [`Receiver::set_parallel`](crate::rch::mpsc::Receiver::set_parallel).
+    ///
+    /// By default this is 0, i.e. a channel transfers its items over a single channel.
+    pub mpsc_parallel: usize,
     #[doc(hidden)]
     pub _non_exhaustive: (),
 }
@@ -148,7 +166,7 @@ impl Default for Cfg {
             connection_timeout: Some(Duration::from_secs(150)),
             flush_interval: None,
             io_buffer_size: 65_536,
-            max_ports: 4096,
+            max_ports: 8192,
             ports_exhausted: PortsExhausted::Wait(Some(Duration::from_secs(60))),
             max_data_size: 524_288,
             max_received_ports: 128,
@@ -160,6 +178,7 @@ impl Default for Cfg {
             transport_send_queue: 32,
             transport_receive_queue: 64,
             connect_queue: 128,
+            mpsc_parallel: 0,
             _non_exhaustive: (),
         }
     }

@@ -236,7 +236,7 @@ enum SendReq {
 #[must_use = "You must call run() on the ChMux object for the connection to work."]
 pub struct ChMux<TransportSink, TransportStream> {
     /// Our configuration.
-    local_cfg: Cfg,
+    local_cfg: Arc<Cfg>,
     /// Remote configuration.
     remote_cfg: ExchangedCfg,
     /// Remote protocol version.
@@ -296,7 +296,7 @@ pub struct ChMux<TransportSink, TransportStream> {
 impl<TransportSink, TransportStream> fmt::Debug for ChMux<TransportSink, TransportStream> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("ChMux")
-            .field("local_cfg", &self.local_cfg)
+            .field("local_cfg", &*self.local_cfg)
             .field("remote_cfg", &self.remote_cfg)
             .field("local_protocol_version", &PROTOCOL_VERSION)
             .field("remote_protocol_version", &self.remote_protocol_version)
@@ -352,11 +352,12 @@ where
         let (terminate_tx, terminate_rx) = mpsc::unbounded_channel();
 
         // Create user objects.
+        let cfg = Arc::new(cfg);
         let port_allocator = PortAllocator::new(cfg.max_ports);
         let remote_listener_dropped = Arc::new(AtomicBool::new(false));
         let multiplexer = ChMux {
             remote_protocol_version,
-            local_cfg: cfg,
+            local_cfg: cfg.clone(),
             remote_cfg: remote_cfg.clone(),
             connect_rx: Some(connect_rx),
             listen_tx: Some((listen_wait_tx, listen_no_wait_tx)),
@@ -375,7 +376,7 @@ where
             goodbye_received: false,
             transport_sink: Some(transport_sink),
             transport_stream: Some(transport_stream),
-            storage: AnyStorage::new(),
+            storage: AnyStorage::new(cfg),
             send_credit_provider,
             send_credit_user: Arc::new(send_credit_user),
             send_credit_report: None,

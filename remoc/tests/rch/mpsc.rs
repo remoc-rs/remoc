@@ -12,7 +12,7 @@ use remoc::{
     rch::{
         ClosedReason, SendResultExt, SendingError,
         base::{self, SendErrorKind},
-        mpsc::{self, SendError, TrySendError},
+        mpsc::{self, MpscExt, SendError, TrySendError},
     },
 };
 
@@ -853,4 +853,44 @@ async fn forwarded_local() {
 
     println!("Closing local sender and expecting channel to end");
     assert!(rx.recv().await.unwrap().is_none());
+}
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn parallel_32() {
+    crate::init();
+    let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<mpsc::Receiver<i16>>().await;
+
+    println!("Sending remote mpsc channel receiver");
+    let (tx, rx) = mpsc::channel(16).with_parallel(32);
+    a_tx.send(rx).await.unwrap();
+    println!("Receiving remote mpsc channel receiver");
+    let mut rx = b_rx.recv().await.unwrap().unwrap();
+
+    for i in 1..8192 {
+        println!("Sending {i}");
+        let tx = tx.clone();
+        tx.send(i).await.unwrap();
+        let r = rx.recv().await.unwrap().unwrap();
+        println!("Received {r}");
+        assert_eq!(i, r, "send/receive mismatch");
+    }
+
+    println!("Verifying that channel is open");
+    assert!(!tx.is_closed());
+    assert_eq!(tx.closed_reason(), None);
+    rx.close();
+
+    println!("Closing channel");
+    tx.closed().await;
+    assert!(tx.is_closed());
+    assert_eq!(tx.closed_reason(), Some(ClosedReason::Closed));
+
+    println!("Trying send after close");
+    match tx.send(0).await {
+        Ok(_) => panic!("send succeeded after close"),
+        Err(err)
+            if err.is_closed() && err.is_disconnected() && err.closed_reason() == Some(ClosedReason::Closed) => {}
+        Err(_) => panic!("wrong error after close"),
+    }
 }

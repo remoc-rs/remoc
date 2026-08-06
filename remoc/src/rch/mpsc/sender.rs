@@ -1,4 +1,4 @@
-use futures::{FutureExt, Sink};
+use futures::{FutureExt, Sink, future};
 use serde::{Deserialize, Serialize};
 use std::{
     any::Any,
@@ -15,6 +15,7 @@ use tokio_util::sync::ReusableBoxFuture;
 use super::{
     super::{
         ClosedReason, DEFAULT_BUFFER, DEFAULT_MAX_ITEM_SIZE, RemoteSendError, SendErrorExt, Sending,
+        SendingError,
         base::{self, PortDeserializer, PortSerializer},
     },
     SendReq,
@@ -25,7 +26,6 @@ use crate::{
     RemoteSend, chmux,
     codec::{self, ErasedDeserializer, ErasedSerializer},
     exec,
-    rch::SendingError,
 };
 
 /// An error occurred during sending over an mpsc channel.
@@ -259,6 +259,7 @@ pub struct Sender<T, Codec = codec::Default, const BUFFER: usize = DEFAULT_BUFFE
     remote_send_err_rx: tokio::sync::watch::Receiver<Option<RemoteSendError>>,
     dropped_tx: tokio::sync::mpsc::Sender<()>,
     max_item_size: usize,
+    parallel: Option<usize>,
     _codec: PhantomData<Codec>,
 }
 
@@ -276,6 +277,7 @@ impl<T, Codec, const BUFFER: usize> Clone for Sender<T, Codec, BUFFER> {
             remote_send_err_rx: self.remote_send_err_rx.clone(),
             dropped_tx: self.dropped_tx.clone(),
             max_item_size: self.max_item_size,
+            parallel: self.parallel,
             _codec: PhantomData,
         }
     }
@@ -295,6 +297,9 @@ pub(crate) struct TransportedSender {
     /// Maximum item size in bytes.
     #[serde(default = "default_max_item_size")]
     max_item_size: u64,
+    /// Additional chmux port numbers for multi base channel operation.
+    #[serde(default)]
+    parallel: Vec<u32>,
 }
 
 const fn default_max_item_size() -> u64 {
@@ -331,7 +336,7 @@ where
     /// Creates a new sender.
     pub(crate) fn new(
         tx: tokio::sync::mpsc::Sender<SendReq<T>>, closed_rx: tokio::sync::watch::Receiver<Option<ClosedReason>>,
-        remote_send_err_rx: tokio::sync::watch::Receiver<Option<RemoteSendError>>,
+        remote_send_err_rx: tokio::sync::watch::Receiver<Option<RemoteSendError>>, parallel: Option<usize>,
     ) -> Self {
         let tx = Arc::new(tx);
         let (dropped_tx, dropped_rx) = tokio::sync::mpsc::channel(1);
@@ -342,6 +347,7 @@ where
             remote_send_err_rx,
             dropped_tx,
             max_item_size: DEFAULT_MAX_ITEM_SIZE,
+            parallel,
             _codec: PhantomData,
         };
 
@@ -359,6 +365,7 @@ where
             remote_send_err_rx: tokio::sync::watch::channel(None).1,
             dropped_tx: tokio::sync::mpsc::channel(1).0,
             max_item_size: DEFAULT_MAX_ITEM_SIZE,
+            parallel: None,
             _codec: PhantomData,
         }
     }
@@ -525,6 +532,7 @@ where
             remote_send_err_rx: self.remote_send_err_rx.clone(),
             dropped_tx: self.dropped_tx.clone(),
             max_item_size: self.max_item_size,
+            parallel: self.parallel,
             _codec: PhantomData,
         }
     }
@@ -538,6 +546,7 @@ where
             remote_send_err_rx: self.remote_send_err_rx.clone(),
             dropped_tx: self.dropped_tx.clone(),
             max_item_size: self.max_item_size,
+            parallel: self.parallel,
             _codec: PhantomData,
         }
     }
@@ -550,6 +559,25 @@ where
     /// Sets the maximum allowed item size in bytes.
     pub fn set_max_item_size(&mut self, max_item_size: usize) {
         self.max_item_size = max_item_size;
+    }
+
+    /// Number of additional parallel transfer channels.
+    ///
+    /// If `None` the default value from [`Cfg::mpsc_parallel`](crate::Cfg::mpsc_parallel) is used.
+    pub fn parallel(&self) -> Option<usize> {
+        self.parallel
+    }
+
+    /// Sets the number of additional parallel transfer channels.
+    ///
+    /// This must be set before sending the sender to a remote endpoint.
+    ///
+    /// A value of 1 is not recommended; see [`Cfg::mpsc_parallel`](crate::Cfg::mpsc_parallel)
+    /// for what to choose.
+    ///
+    /// If `None` the default value from [`Cfg::mpsc_parallel`](crate::Cfg::mpsc_parallel) is used.
+    pub fn set_parallel(&mut self, parallel: Option<usize>) {
+        self.parallel = parallel;
     }
 }
 
@@ -584,6 +612,10 @@ where
     where
         S: serde::Serializer,
     {
+        let storage = PortSerializer::storage()?;
+
+        let mut parallel = Vec::new();
+
         let port = match self.tx.upgrade() {
             // Channel is open.
             Some(tx) => {
@@ -592,9 +624,27 @@ where
                 let remote_send_err_rx = self.remote_send_err_rx.clone();
                 let max_item_size = self.max_item_size;
 
+                // Request additional paralllel chmux channels.
+                let mut parallel_rxs = Vec::new();
+                for _ in 0..self.parallel.unwrap_or(storage.cfg().mpsc_parallel) {
+                    let (parallel_tx, parallel_rx) = tokio::sync::oneshot::channel();
+                    let Ok(parallel_port) = PortSerializer::connect::<S::Error>(move |connect| {
+                        async move {
+                            if let Ok((_raw_tx, raw_rx)) = connect.await {
+                                let _ = parallel_tx.send(raw_rx);
+                            }
+                        }
+                        .boxed()
+                    }) else {
+                        continue;
+                    };
+                    parallel.push(parallel_port);
+                    parallel_rxs.push(parallel_rx);
+                }
+
                 Some(PortSerializer::connect(move |connect| {
                     async move {
-                        // Establish chmux channel.
+                        // Establish base chmux channel.
                         let (raw_tx, raw_rx) = match connect.await {
                             Ok(tx_rx) => tx_rx,
                             Err(err) => {
@@ -603,11 +653,16 @@ where
                             }
                         };
 
+                        // Establish additional parallel chmux channels.
+                        let mut raw_rxs = vec![raw_rx];
+                        raw_rxs
+                            .extend(future::join_all(parallel_rxs).await.into_iter().filter_map(|res| res.ok()));
+
                         super::recv_impl(
                             ErasedDeserializer::new::<Result<T, RecvError>, Codec>(),
                             &*tx,
                             raw_tx,
-                            raw_rx,
+                            raw_rxs,
                             remote_send_err_rx,
                             closed_rx,
                             max_item_size,
@@ -629,6 +684,7 @@ where
             data: PhantomData,
             codec: PhantomData,
             max_item_size: self.max_item_size.try_into().unwrap_or(u64::MAX),
+            parallel,
         };
         transported.serialize(serializer)
     }
@@ -647,49 +703,72 @@ where
         assert!(BUFFER > 0, "BUFFER must not be zero");
 
         // Get chmux port number from deserialized transport type.
-        let TransportedSender { port, max_item_size, .. } = TransportedSender::deserialize(deserializer)?;
+        let TransportedSender { port, max_item_size, parallel, .. } =
+            TransportedSender::deserialize(deserializer)?;
         let max_item_size = usize::try_from(max_item_size).unwrap_or(usize::MAX);
 
-        match port {
-            // Received channel is open.
-            Some(port) => {
-                // Create internal communication channels.
-                let (tx, rx) = tokio::sync::mpsc::channel(BUFFER);
-                let (closed_tx, closed_rx) = tokio::sync::watch::channel(None);
-                let (remote_send_err_tx, remote_send_err_rx) = tokio::sync::watch::channel(None);
+        let Some(port) = port else {
+            // Received closed channel.
+            return Ok(Self::new_closed());
+        };
 
-                // Accept chmux port request.
-                PortDeserializer::accept(port, move |local_port, request| {
-                    async move {
-                        // Accept chmux connection request.
-                        let (raw_tx, raw_rx) = match request.accept_from(local_port).await {
-                            Ok(tx_rx) => tx_rx,
-                            Err(err) => {
-                                let _ = remote_send_err_tx.send(Some(RemoteSendError::Listen(err)));
-                                return;
+        // Create internal communication channels.
+        let (tx, rx) = tokio::sync::mpsc::channel(BUFFER);
+        let (closed_tx, closed_rx) = tokio::sync::watch::channel(None);
+        let (remote_send_err_tx, remote_send_err_rx) = tokio::sync::watch::channel(None);
+
+        // Accept additional paralllel chmux channels.
+        let parallel_txs: Vec<_> = parallel
+            .into_iter()
+            .filter_map(|parallel_port| {
+                let (parallel_tx, parallel_rx) = tokio::sync::oneshot::channel();
+                PortDeserializer::accept::<D::Error>(parallel_port, |local_port, request| {
+                    {
+                        async move {
+                            if let Ok((raw_tx, _raw_rx)) = request.accept_from(local_port).await {
+                                let _ = parallel_tx.send(raw_tx);
                             }
-                        };
-
-                        super::send_impl(
-                            ErasedSerializer::new::<Result<T, RecvError>, Codec>(),
-                            Box::new(rx),
-                            raw_tx,
-                            raw_rx,
-                            remote_send_err_tx,
-                            closed_tx,
-                            max_item_size,
-                        )
-                        .await;
+                        }
                     }
                     .boxed()
-                })?;
+                })
+                .ok()?;
+                Some(parallel_rx)
+            })
+            .collect();
+        let parallel = parallel_txs.len();
 
-                Ok(Self::new(tx, closed_rx, remote_send_err_rx))
+        // Accept chmux port request.
+        PortDeserializer::accept(port, move |local_port, request| {
+            async move {
+                // Accept chmux connection request.
+                let (raw_tx, raw_rx) = match request.accept_from(local_port).await {
+                    Ok(tx_rx) => tx_rx,
+                    Err(err) => {
+                        let _ = remote_send_err_tx.send(Some(RemoteSendError::Listen(err)));
+                        return;
+                    }
+                };
+
+                // Establish additional parallel chmux channels.
+                let mut raw_txs = vec![raw_tx];
+                raw_txs.extend(future::join_all(parallel_txs).await.into_iter().filter_map(|res| res.ok()));
+
+                super::send_impl(
+                    ErasedSerializer::new::<Result<T, RecvError>, Codec>(),
+                    Box::new(rx),
+                    raw_txs,
+                    raw_rx,
+                    remote_send_err_tx,
+                    closed_tx,
+                    max_item_size,
+                )
+                .await;
             }
+            .boxed()
+        })?;
 
-            // Received closed channel.
-            None => Ok(Self::new_closed()),
-        }
+        Ok(Self::new(tx, closed_rx, remote_send_err_rx, Some(parallel)))
     }
 }
 

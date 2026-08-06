@@ -92,13 +92,13 @@ async fn simple() {
     });
 
     let mut rx3_go_tx = Some(rx3_go_tx);
-    for i in 0..128 {
+    for i in 0..310 {
         println!("Sending {i}");
         let (reply_tx, mut reply_rx) = mpsc::channel(1);
         let tx = tx.clone();
         tx.send((i, reply_tx)).unwrap();
 
-        if i == 64 {
+        if i == 300 {
             rx3_go_tx.take().unwrap().send(()).unwrap();
         }
 
@@ -193,13 +193,13 @@ async fn simple_stream() {
     });
 
     let mut rx3_go_tx = Some(rx3_go_tx);
-    for i in 0..128 {
+    for i in 0..310 {
         println!("Sending {i}");
         let (reply_tx, mut reply_rx) = mpsc::channel(1);
         let tx = tx.clone();
         tx.send((i, reply_tx)).unwrap();
 
-        if i == 64 {
+        if i == 300 {
             rx3_go_tx.take().unwrap().send(()).unwrap();
         }
 

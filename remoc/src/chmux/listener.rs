@@ -156,6 +156,7 @@ impl Request {
         mut self, local_port: impl Into<AllocatedSidePort>,
     ) -> Result<(Sender, Receiver), ListenerError> {
         let local_port = local_port.into();
+
         if let AllocatedSidePort::Remote(remote_port) = &local_port
             && **remote_port != self.remote_port
         {

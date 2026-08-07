@@ -235,7 +235,7 @@ where
         let (receiver_tx, receiver_rx) = tokio::sync::mpsc::unbounded_channel();
         PortDeserializer::accept(port, move |local_port, request| {
             async move {
-                match request.accept_from(local_port).await {
+                match request.accept_reserved(local_port).await {
                     Ok((_, raw_rx)) => {
                         let mut rx = base::Receiver::new(raw_rx);
                         rx.set_max_item_size(max_item_size);

@@ -518,7 +518,7 @@ where
     /// Create port in port registry and return associated sender and receiver.
     #[tracing::instrument(level = "trace", skip(self))]
     fn create_port(&mut self, local_port: AllocatedSidePort, remote_port: SidePort) -> (Sender, Receiver) {
-        let local_port_num = local_port.num();
+        let local_port_num = local_port.side_port();
 
         let sender_tx = self.channel_tx.clone();
         let (sender_credit_provider, sender_credit_user) =
@@ -927,7 +927,7 @@ where
                 }
                 send_msg(
                     permit,
-                    MultiplexMsg::PortOpened { client_port: remote_port, server_port: local_port.num() },
+                    MultiplexMsg::PortOpened { client_port: remote_port, server_port: local_port.side_port() },
                 );
                 let (sender, receiver) = self.create_port(local_port, SidePort::Remote(remote_port));
                 let _ = port_tx.send((sender, receiver));

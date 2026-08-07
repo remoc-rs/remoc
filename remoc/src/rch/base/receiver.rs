@@ -86,8 +86,8 @@ pub struct PortDeserializer {
     expected: HashMap<
         u32,
         (
-            chmux::AllocatedLocalPort,
-            Box<dyn FnOnce(chmux::AllocatedLocalPort, chmux::Request) -> BoxFuture<'static, ()> + Send + 'static>,
+            chmux::ReservedPort,
+            Box<dyn FnOnce(chmux::ReservedPort, chmux::Request) -> BoxFuture<'static, ()> + Send + 'static>,
         ),
     >,
     storage: AnyStorage,
@@ -129,23 +129,22 @@ impl PortDeserializer {
 
     /// Accept the chmux port with the specified remote port number sent from the remote endpoint.
     ///
-    /// Returns the local port number and calls the specified function with the received connect request.
+    /// Calls the specified function with the received connect request.
     pub fn accept<E>(
         remote_port: u32,
-        callback: impl FnOnce(chmux::AllocatedLocalPort, chmux::Request) -> BoxFuture<'static, ()> + Send + 'static,
-    ) -> Result<u32, E>
+        callback: impl FnOnce(chmux::ReservedPort, chmux::Request) -> BoxFuture<'static, ()> + Send + 'static,
+    ) -> Result<(), E>
     where
         E: serde::de::Error,
     {
         let this = Self::instance()?;
         let mut this =
             this.try_borrow_mut().expect("PortDeserializer is referenced multiple times during deserialization");
-        let local_port =
-            this.allocator.try_allocate_local().ok_or_else(|| serde::de::Error::custom("ports exhausted"))?;
-        let local_port_num = *local_port;
-        this.expected.insert(remote_port, (local_port, Box::new(callback)));
+        let reserved_port =
+            this.allocator.try_reserve().ok_or_else(|| serde::de::Error::custom("ports exhausted"))?;
+        this.expected.insert(remote_port, (reserved_port, Box::new(callback)));
 
-        Ok(local_port_num)
+        Ok(())
     }
 
     /// Returns the data storage of the channel multiplexer.

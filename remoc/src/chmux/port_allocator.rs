@@ -441,8 +441,18 @@ impl From<AllocatedRemotePort> for AllocatedSidePort {
 }
 
 impl AllocatedSidePort {
+    /// Whether this is an allocated local port number.
+    pub fn is_local(&self) -> bool {
+        matches!(self, Self::Local(_))
+    }
+
+    /// Whether this is an allocated remote port number.
+    pub fn is_remote(&self) -> bool {
+        matches!(self, Self::Remote(_))
+    }
+
     /// Local or remote port number.
-    pub fn num(&self) -> SidePort {
+    pub fn side_port(&self) -> SidePort {
         SidePort::from(self)
     }
 }
@@ -469,6 +479,16 @@ pub enum SidePort {
 }
 
 impl SidePort {
+    /// Whether this is a local port number.
+    pub fn is_local(&self) -> bool {
+        matches!(self, Self::Local(_))
+    }
+
+    /// Whether this is a remote port number.
+    pub fn is_remote(&self) -> bool {
+        matches!(self, Self::Remote(_))
+    }
+
     /// Flips the port side in-place.
     pub fn flip(&mut self) {
         *self = self.flipped();

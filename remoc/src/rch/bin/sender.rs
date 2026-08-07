@@ -162,7 +162,7 @@ impl<'de> Deserialize<'de> for Sender {
         let (sender_tx, sender_rx) = tokio::sync::mpsc::unbounded_channel();
         PortDeserializer::accept(port, |local_port, request| {
             async move {
-                match request.accept_from(local_port).await {
+                match request.accept_reserved(local_port).await {
                     Ok((raw_tx, _)) => {
                         let _ = sender_tx.send(Ok(raw_tx));
                     }

@@ -646,7 +646,7 @@ where
                 PortDeserializer::accept::<D::Error>(parallel_port, |local_port, request| {
                     {
                         async move {
-                            if let Ok((_raw_tx, raw_rx)) = request.accept_from(local_port).await {
+                            if let Ok((_raw_tx, raw_rx)) = request.accept_reserved(local_port).await {
                                 let _ = parallel_tx.send(raw_rx);
                             }
                         }
@@ -662,7 +662,7 @@ where
         PortDeserializer::accept(port, |local_port, request| {
             async move {
                 // Accept chmux connection request.
-                let (raw_tx, raw_rx) = match request.accept_from(local_port).await {
+                let (raw_tx, raw_rx) = match request.accept_reserved(local_port).await {
                     Ok(tx_rx) => tx_rx,
                     Err(err) => {
                         let _ = tx.send(SendReq::new(Err(RecvError::RemoteListen(err)))).await;

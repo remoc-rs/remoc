@@ -34,7 +34,7 @@ use super::{
     },
     listener::{Listener, RemoteConnectMsg, Request},
     msg::{DataCredits, ExchangedCfg, GlobalCredits, MultiplexMsg},
-    port_allocator::{PortAllocator, PortNumber},
+    port_allocator::{PortAllocator, PortNumber, SidePort, SidePortNumber},
     receiver::{PortReceiveMsg, ReceivedData, ReceivedPortRequests, Receiver},
     sender::Sender,
     sizer::{BufferSizer, DummySizer, GlobalCreditsReport},
@@ -52,13 +52,17 @@ enum PortState {
     /// OpenPort request has been initiated locally and is waiting for reply
     /// from remote endpoint.
     Connecting {
+        /// Allocated local port number.
+        port: PortNumber,
         /// Channel for providing the response to the local requester.
         response_tx: oneshot::Sender<ConnectResponse>,
     },
     /// Port is connected.
     Connected {
+        /// Allocated local or remote port number.
+        _port: SidePortNumber,
         /// Remote port.
-        remote_port: u32,
+        remote_port: SidePort,
         /// Credit provider for sending.
         /// Initially present, None when Hangup message has been received.
         sender_credit_provider: CreditProvider,
@@ -92,7 +96,7 @@ pub(crate) enum PortEvt {
     /// Connection has been accepted.
     Accepted {
         /// Allocated local port.
-        local_port: PortNumber,
+        local_port: SidePortNumber,
         /// Remote port.
         remote_port: u32,
         /// Reply with port sender and receiver.
@@ -108,7 +112,7 @@ pub(crate) enum PortEvt {
     /// Send message with content.
     SendData {
         /// Remote port that will receive data.
-        remote_port: u32,
+        remote_port: SidePort,
         /// Data to send.
         #[debug(with = crate::util::dbg_bytes)]
         data: Bytes,
@@ -122,7 +126,7 @@ pub(crate) enum PortEvt {
     /// Send ports.
     SendPorts {
         /// Remote port that will receive ports.
-        remote_port: u32,
+        remote_port: SidePort,
         /// First chunk of ports.
         first: bool,
         /// Last chunk of ports.
@@ -140,43 +144,43 @@ pub(crate) enum PortEvt {
     /// Request report when data has been processed up to this message.
     RequestReceivedReport {
         /// Local port that requests the report.
-        local_port: u32,
+        local_port: SidePort,
         /// Reply when report has been received.
         processed_tx: oneshot::Sender<()>,
     },
     /// Report that data was processed up to this message.
     ReceivedReport {
         /// Remote port that will receive the report.
-        remote_port: u32,
+        remote_port: SidePort,
     },
     /// Change whehter global credit usage is allowed.
     ChangeGlobalCreditUsage {
         /// Remote port.
-        remote_port: u32,
+        remote_port: SidePort,
         /// Whether global credit usage is allowed.
         allow: bool,
     },
     /// Return port-specific flow control credits.
     ReturnCredits {
         /// Remote port that will receive credits.
-        remote_port: u32,
+        remote_port: SidePort,
         /// Number of credits in bytes.
         credits: u32,
     },
     /// Sender has been dropped.
     SenderDropped {
         /// Local port.
-        local_port: u32,
+        local_port: SidePort,
     },
     /// Receiver has been closed, i.e. remote endpoint should stop sending messages on this channel.
     ReceiverClosed {
         /// Local port.
-        local_port: u32,
+        local_port: SidePort,
     },
     /// Receiver has been dropped.
     ReceiverDropped {
         /// Local port.
-        local_port: u32,
+        local_port: SidePort,
     },
 }
 
@@ -247,8 +251,8 @@ pub struct ChMux<TransportSink, TransportStream> {
     listen_tx: Option<(mpsc::Sender<RemoteConnectMsg>, mpsc::Sender<RemoteConnectMsg>)>,
     /// Port allocator.
     port_allocator: PortAllocator,
-    /// Open local ports.
-    ports: HashMap<PortNumber, PortState>,
+    /// Open ports, either opened locally or by remote endpoint.
+    ports: HashMap<SidePort, PortState>,
     /// Outstanding requests by the remote endpoint for connecting ports.
     outstanding_remote_port_requests: HashSet<u32>,
     /// Sender from channels to event loop.
@@ -290,7 +294,7 @@ pub struct ChMux<TransportSink, TransportStream> {
     /// Last received global send credit report from remote endpoint.
     remote_credits_report: GlobalCreditsReport,
     /// Ports that currently request inhibitation of global credit usage.
-    outstanding_inhibit_global_credit_usage_ports: BTreeSet<u32>,
+    outstanding_inhibit_global_credit_usage_ports: BTreeSet<SidePort>,
 }
 
 impl<TransportSink, TransportStream> fmt::Debug for ChMux<TransportSink, TransportStream> {
@@ -513,8 +517,8 @@ where
 
     /// Create port in port registry and return associated sender and receiver.
     #[tracing::instrument(level = "trace", skip(self))]
-    fn create_port(&mut self, local_port: PortNumber, remote_port: u32) -> (Sender, Receiver) {
-        let local_port_num = *local_port;
+    fn create_port(&mut self, local_port: SidePortNumber, remote_port: SidePort) -> (Sender, Receiver) {
+        let local_port_num = local_port.num();
 
         let sender_tx = self.channel_tx.clone();
         let (sender_credit_provider, sender_credit_user) =
@@ -530,8 +534,9 @@ where
         let hangup_recved = Arc::new(AtomicBool::new(false));
 
         if let Some(PortState::Connected { remote_port, .. }) = self.ports.insert(
-            local_port,
+            local_port_num,
             PortState::Connected {
+                _port: local_port,
                 remote_port,
                 sender_credit_provider,
                 receiver_tx_data: Some(receiver_tx_data),
@@ -582,7 +587,7 @@ where
 
     /// Releases a port if no more local requests to it are possible
     /// and no more messages from the remote endpoint can reference it.
-    fn maybe_free_port(&mut self, local_port: u32) {
+    fn maybe_free_port(&mut self, local_port: SidePort) {
         let mut free = true;
 
         if let Some(PortState::Connected {
@@ -610,7 +615,7 @@ where
         }
 
         if free {
-            tracing::trace!(local_port, "freed port");
+            tracing::trace!(%local_port, "freed port");
             self.ports.remove(&local_port);
         }
     }
@@ -891,23 +896,28 @@ where
         &mut self, permit: Permit<'_, SendReq>, event: GlobalEvt,
     ) -> Result<(), ChMuxError<TransportSinkError, TransportStreamError>> {
         let send_msg = |permit: Permit<'_, SendReq>, msg: MultiplexMsg| {
-            tracing::trace!(op="send", msg=?msg);
+            tracing::trace!(op = "send", msg =? msg);
             permit.send(SendReq::Feed(TransportMsg::new(msg)))
         };
 
         match event {
             // Process local connect request.
-            GlobalEvt::ConnectReq(ConnectRequest { local_port, id, sent_tx: _sent_tx, response_tx, wait }) => {
+            GlobalEvt::ConnectReq(ConnectRequest { local_port: port, id, sent_tx, response_tx, wait }) => {
                 if !self.remote_listener_dropped.load(Ordering::Relaxed) {
-                    let local_port_num = *local_port;
-                    if self.ports.insert(local_port, PortState::Connecting { response_tx }).is_some() {
-                        panic!("ConnectRequest for already used local port {local_port_num}");
+                    let port_num = *port;
+                    if self
+                        .ports
+                        .insert(SidePort::Local(port_num), PortState::Connecting { port, response_tx })
+                        .is_some()
+                    {
+                        panic!("ConnectRequest for already used local port {port_num}");
                     }
                     let id = (self.remote_protocol_version >= PROTOCOL_VERSION_PORT_ID).then_some(id);
-                    send_msg(permit, MultiplexMsg::OpenPort { client_port: local_port_num, wait, id });
+                    send_msg(permit, MultiplexMsg::OpenPort { client_port: port_num, wait, id });
                 } else {
                     let _ = response_tx.send(ConnectResponse::Rejected { no_ports: false });
                 }
+                let _ = sent_tx.send(());
             }
 
             // Remote connect request was accepted by local listener.
@@ -915,12 +925,11 @@ where
                 if !self.outstanding_remote_port_requests.remove(&remote_port) {
                     panic!("Accepted non-outstanding remote port {remote_port} request");
                 }
-                let local_port_num = *local_port;
                 send_msg(
                     permit,
-                    MultiplexMsg::PortOpened { client_port: remote_port, server_port: local_port_num },
+                    MultiplexMsg::PortOpened { client_port: remote_port, server_port: local_port.num() },
                 );
-                let (sender, receiver) = self.create_port(local_port, remote_port);
+                let (sender, receiver) = self.create_port(local_port, SidePort::Remote(remote_port));
                 let _ = port_tx.send((sender, receiver));
             }
 
@@ -945,7 +954,11 @@ where
                 let mut ids = (self.remote_protocol_version >= PROTOCOL_VERSION_PORT_ID).then_some(Vec::new());
                 for (PortReq { port, id }, response_tx) in ports {
                     let port_num = *port;
-                    if self.ports.insert(port, PortState::Connecting { response_tx }).is_some() {
+                    if self
+                        .ports
+                        .insert(SidePort::Local(port_num), PortState::Connecting { port, response_tx })
+                        .is_some()
+                    {
                         panic!("SendPorts with already used local port {port_num}");
                     }
                     port_nums.push(port_num);
@@ -970,7 +983,7 @@ where
                 let Some(PortState::Connected { remote_port, report_processed, .. }) =
                     self.ports.get_mut(&local_port)
                 else {
-                    panic!("RequestReportProcessed for {local_port} in invalid state")
+                    panic!("RequestReceivedReport for {local_port} in invalid state")
                 };
                 report_processed.push_back(processed_tx);
                 send_msg(permit, MultiplexMsg::RequestReceivedReport { port: *remote_port });
@@ -1118,21 +1131,24 @@ where
             }
 
             // Port opened response from remote endpoint.
-            MultiplexMsg::PortOpened { client_port, server_port } => {
-                let Some((local_port, PortState::Connecting { response_tx })) =
-                    self.ports.remove_entry(&client_port)
+            MultiplexMsg::PortOpened { client_port, mut server_port } => {
+                server_port.flip();
+                let Some(PortState::Connecting { port, response_tx }) =
+                    self.ports.remove(&SidePort::Local(client_port))
                 else {
                     return Err(protocol_err(format!(
                         "received PortOpened message for port {client_port} not in connecting state"
                     )));
                 };
-                let (sender, receiver) = self.create_port(local_port, server_port);
+                let (sender, receiver) = self.create_port(SidePortNumber::Local(port), server_port);
                 let _ = response_tx.send(ConnectResponse::Accepted(sender, receiver));
             }
 
             // Port open rejected response from remote endpoint.
             MultiplexMsg::Rejected { client_port, no_ports } => {
-                let Some(PortState::Connecting { response_tx }) = self.ports.remove(&client_port) else {
+                let Some(PortState::Connecting { response_tx, .. }) =
+                    self.ports.remove(&SidePort::Local(client_port))
+                else {
                     return Err(protocol_err(format!(
                         "received Rejected message for port {client_port} not in connecting state"
                     )));
@@ -1141,7 +1157,8 @@ where
             }
 
             // Data from remote endpoint.
-            MultiplexMsg::Data { port, first, last, credits } => {
+            MultiplexMsg::Data { mut port, first, last, credits } => {
+                port.flip();
                 let Some(PortState::Connected {
                     receiver_tx_data: Some(receiver_tx_data),
                     receiver_credit_monitor,
@@ -1202,7 +1219,8 @@ where
             }
 
             // Ports from remote endpoint.
-            MultiplexMsg::PortData { port, first, last, wait, ports, ids } => {
+            MultiplexMsg::PortData { mut port, first, last, wait, ports, ids } => {
+                port.flip();
                 let Some(PortState::Connected {
                     receiver_tx_data: Some(receiver_tx_data),
                     receiver_credit_monitor,
@@ -1253,7 +1271,8 @@ where
             }
 
             // Request to report when data up to this point has been processed.
-            MultiplexMsg::RequestReceivedReport { port } => {
+            MultiplexMsg::RequestReceivedReport { mut port } => {
+                port.flip();
                 let Some(PortState::Connected { receiver_tx_data: Some(receiver_tx_data), .. }) =
                     self.ports.get(&port)
                 else {
@@ -1265,7 +1284,8 @@ where
             }
 
             // Remote reports that data has been processed.
-            MultiplexMsg::ReceivedReport { port } => {
+            MultiplexMsg::ReceivedReport { mut port } => {
+                port.flip();
                 if let Some(PortState::Connected { report_processed, .. }) = self.ports.get_mut(&port)
                     && let Some(processed_tx) = report_processed.pop_front()
                 {
@@ -1274,14 +1294,16 @@ where
             }
 
             // Give flow credits to a port.
-            MultiplexMsg::PortCredits { port, credits } => {
+            MultiplexMsg::PortCredits { mut port, credits } => {
+                port.flip();
                 if let Some(PortState::Connected { sender_credit_provider, .. }) = self.ports.get_mut(&port) {
                     sender_credit_provider.provide(credits)?;
                 }
             }
 
             // Inhibit usage of global credits by a port.
-            MultiplexMsg::InhibitGlobalCreditUsageByPort { port } => {
+            MultiplexMsg::InhibitGlobalCreditUsageByPort { mut port } => {
+                port.flip();
                 if let Some(PortState::Connected { sender_credit_provider, .. }) = self.ports.get_mut(&port) {
                     tracing::trace!(%port, "global credit usage inhibited");
                     sender_credit_provider.set_use_global_credits(false);
@@ -1289,7 +1311,8 @@ where
             }
 
             // Allow usage of global credits by a port.
-            MultiplexMsg::AllowGlobalCreditUsageByPort { port } => {
+            MultiplexMsg::AllowGlobalCreditUsageByPort { mut port } => {
+                port.flip();
                 if let Some(PortState::Connected { sender_credit_provider, .. }) = self.ports.get_mut(&port) {
                     tracing::trace!(%port, "global credit usage allowed");
                     sender_credit_provider.set_use_global_credits(true);
@@ -1297,7 +1320,8 @@ where
             }
 
             // Remote endpoint indicates that it will send no more data for port.
-            MultiplexMsg::SendFinish { port } => {
+            MultiplexMsg::SendFinish { mut port } => {
+                port.flip();
                 let Some(PortState::Connected { receiver_tx_data, .. }) = self.ports.get_mut(&port) else {
                     return Err(protocol_err(format!(
                         "received SendFinish message for local port {port} not in connected state",
@@ -1314,7 +1338,8 @@ where
 
             // Remote indicates that the receiver for a port has been closed and it wishes
             // to receive no more data on that port.
-            MultiplexMsg::ReceiveClose { port } => {
+            MultiplexMsg::ReceiveClose { mut port } => {
+                port.flip();
                 let Some(PortState::Connected {
                     sender_credit_provider,
                     remote_receiver_closed_notify,
@@ -1347,7 +1372,8 @@ where
             }
 
             // Remote hang up indicates that it will not process any more data on a port.
-            MultiplexMsg::ReceiveFinish { port } => {
+            MultiplexMsg::ReceiveFinish { mut port } => {
+                port.flip();
                 let Some(PortState::Connected {
                     sender_credit_provider,
                     remote_receiver_closed_notify,

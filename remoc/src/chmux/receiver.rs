@@ -13,6 +13,7 @@ use super::{
     credit::{PortCreditReturner, UsedGlobalCredit, UsedPortCredit},
     forward,
     mux::PortEvt,
+    port_allocator::SidePort,
 };
 use crate::exec;
 
@@ -288,8 +289,8 @@ enum Receiving {
 
 /// Receives byte data over a channel.
 pub struct Receiver {
-    local_port: u32,
-    remote_port: u32,
+    local_port: SidePort,
+    remote_port: SidePort,
     max_data_size: usize,
     max_ports: usize,
     tx: mpsc::Sender<PortEvt>,
@@ -320,7 +321,7 @@ impl fmt::Debug for Receiver {
 impl Receiver {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        local_port: u32, remote_port: u32, max_data_size: usize, max_port_count: usize,
+        local_port: SidePort, remote_port: SidePort, max_data_size: usize, max_port_count: usize,
         tx: mpsc::Sender<PortEvt>, high_priority_tx: mpsc::Sender<PortEvt>,
         rx: mpsc::UnboundedReceiver<PortReceiveMsg>, channel_credits: PortCreditReturner,
         port_allocator: PortAllocator, storage: AnyStorage,
@@ -351,12 +352,12 @@ impl Receiver {
     }
 
     /// The local port number.
-    pub fn local_port(&self) -> u32 {
+    pub fn local_port(&self) -> SidePort {
         self.local_port
     }
 
     /// The remote port number.
-    pub fn remote_port(&self) -> u32 {
+    pub fn remote_port(&self) -> SidePort {
         self.remote_port
     }
 

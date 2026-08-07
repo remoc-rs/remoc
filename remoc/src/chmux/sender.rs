@@ -24,6 +24,7 @@ use super::{
     client::ConnectResponse,
     credit::{AssignedCredits, CreditPool, MixedAssignedCredits, MixedCreditUser},
     mux::PortEvt,
+    port_allocator::SidePort,
 };
 use crate::exec;
 
@@ -235,8 +236,8 @@ impl Future for Flushed {
 
 /// Sends byte data over a channel.
 pub struct Sender {
-    local_port: u32,
-    remote_port: u32,
+    local_port: SidePort,
+    remote_port: SidePort,
     chunk_size: usize,
     max_data_size: usize,
     tx: mpsc::Sender<PortEvt>,
@@ -265,8 +266,8 @@ impl Sender {
     /// Create a new sender.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        local_port: u32, remote_port: u32, chunk_size: usize, max_data_size: usize, tx: mpsc::Sender<PortEvt>,
-        credits: MixedCreditUser, hangup_recved: Weak<AtomicBool>,
+        local_port: SidePort, remote_port: SidePort, chunk_size: usize, max_data_size: usize,
+        tx: mpsc::Sender<PortEvt>, credits: MixedCreditUser, hangup_recved: Weak<AtomicBool>,
         hangup_notify: Weak<std::sync::Mutex<Option<Vec<oneshot::Sender<()>>>>>, port_allocator: PortAllocator,
         storage: AnyStorage, all_received_supported: bool,
     ) -> Self {
@@ -294,12 +295,12 @@ impl Sender {
     }
 
     /// The local port number.
-    pub fn local_port(&self) -> u32 {
+    pub fn local_port(&self) -> SidePort {
         self.local_port
     }
 
     /// The remote port number.
-    pub fn remote_port(&self) -> u32 {
+    pub fn remote_port(&self) -> SidePort {
         self.remote_port
     }
 
@@ -467,10 +468,10 @@ impl Sender {
                 }
             });
 
-            let (sent_tx, sent_rx) = mpsc::channel(1);
+            let (sent_tx, sent_rx) = oneshot::channel();
             sent_txs.push(sent_tx);
 
-            connects.push(Connect { sent_rx, response });
+            connects.push(Connect { sent_rx: Some(sent_rx), response });
         }
 
         let mut first = true;

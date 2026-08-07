@@ -104,9 +104,16 @@ pub struct PortNumber {
     allocator: Arc<Mutex<PortAllocatorInner>>,
 }
 
+impl PortNumber {
+    /// Local port number.
+    pub fn num(&self) -> u32 {
+        self.number
+    }
+}
+
 impl fmt::Debug for PortNumber {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self.number)
+        write!(f, "{}", self.number)
     }
 }
 
@@ -170,6 +177,94 @@ impl Drop for PortNumber {
         }
 
         inner.notify.notify_waiters();
+    }
+}
+
+/// Allocated local or remote port number.
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SidePortNumber {
+    /// Allocated local port number.
+    Local(PortNumber),
+    /// Remote port number.
+    Remote(u32),
+}
+
+impl SidePortNumber {
+    /// Local or remote port number.
+    pub fn num(&self) -> SidePort {
+        SidePort::from(self)
+    }
+}
+
+impl fmt::Debug for SidePortNumber {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", SidePort::from(self))
+    }
+}
+
+impl fmt::Display for SidePortNumber {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", SidePort::from(self))
+    }
+}
+
+/// Local or remote port number.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SidePort {
+    /// Local port number.
+    Local(u32),
+    /// Remote port number.
+    Remote(u32),
+}
+
+impl SidePort {
+    /// Flips the port side in-place.
+    pub fn flip(&mut self) {
+        *self = self.flipped();
+    }
+
+    /// Returns the flipped port side.
+    #[must_use]
+    pub fn flipped(&self) -> Self {
+        match self {
+            Self::Local(port) => Self::Remote(*port),
+            Self::Remote(port) => Self::Local(*port),
+        }
+    }
+}
+
+impl fmt::Debug for SidePort {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{self}")
+    }
+}
+
+impl fmt::Display for SidePort {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Local(port) => write!(f, "L{port}"),
+            Self::Remote(port) => write!(f, "R{port}"),
+        }
+    }
+}
+
+impl Deref for SidePort {
+    type Target = u32;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Local(num) => num,
+            Self::Remote(num) => num,
+        }
+    }
+}
+
+impl From<&SidePortNumber> for SidePort {
+    fn from(port: &SidePortNumber) -> Self {
+        match port {
+            SidePortNumber::Local(port) => Self::Local(**port),
+            SidePortNumber::Remote(port) => Self::Remote(*port),
+        }
     }
 }
 

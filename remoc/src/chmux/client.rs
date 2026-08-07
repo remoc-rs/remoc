@@ -105,7 +105,7 @@ pub(crate) struct ConnectRequest {
     /// Port id.
     pub id: u32,
     /// Notification that request has been queued for sending.
-    pub sent_tx: mpsc::Sender<()>,
+    pub sent_tx: oneshot::Sender<()>,
     /// Response channel sender.
     pub response_tx: oneshot::Sender<ConnectResponse>,
     /// Wait for port to become available.
@@ -129,7 +129,7 @@ pub(crate) enum ConnectResponse {
 ///
 /// Await it to obtain the result of the connection request.
 pub struct Connect {
-    pub(crate) sent_rx: mpsc::Receiver<()>,
+    pub(crate) sent_rx: Option<oneshot::Receiver<()>>,
     pub(crate) response: JoinHandle<Result<(Sender, Receiver), ConnectError>>,
 }
 
@@ -142,7 +142,10 @@ impl Connect {
     ///
     /// This will also return when the multiplexer has been terminated.
     pub async fn sent(&mut self) {
-        let _ = self.sent_rx.recv().await;
+        if let Some(sent_rx) = &mut self.sent_rx {
+            let _ = sent_rx.await;
+            self.sent_rx = None;
+        }
     }
 }
 
@@ -235,7 +238,7 @@ impl Client {
         };
 
         // Build and send request.
-        let (sent_tx, sent_rx) = mpsc::channel(1);
+        let (sent_tx, sent_rx) = oneshot::channel();
         let (response_tx, response_rx) = oneshot::channel();
         let PortReq { port: local_port, id } = local_port;
         let req = ConnectRequest { local_port, id, sent_tx, response_tx, wait };
@@ -266,7 +269,7 @@ impl Client {
             }
         });
 
-        Ok(Connect { sent_rx, response })
+        Ok(Connect { sent_rx: Some(sent_rx), response })
     }
 
     /// Terminates the multiplexer, forcibly closing all open ports.

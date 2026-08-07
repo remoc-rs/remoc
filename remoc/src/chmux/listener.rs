@@ -9,7 +9,7 @@ use tokio_util::sync::ReusableBoxFuture;
 
 use super::{
     mux::PortEvt,
-    port_allocator::{PortAllocator, PortNumber},
+    port_allocator::{PortAllocator, PortNumber, SidePortNumber},
     receiver::Receiver,
     sender::Sender,
 };
@@ -121,7 +121,14 @@ impl Request {
     /// Accepts the request using the specified local port.
     pub async fn accept_from(mut self, local_port: PortNumber) -> Result<(Sender, Receiver), ListenerError> {
         let (port_tx, port_rx) = oneshot::channel();
-        let _ = self.tx.send(PortEvt::Accepted { local_port, remote_port: self.remote_port, port_tx }).await;
+        let _ = self
+            .tx
+            .send(PortEvt::Accepted {
+                local_port: SidePortNumber::Local(local_port),
+                remote_port: self.remote_port,
+                port_tx,
+            })
+            .await;
         let _ = self.done_tx.take().unwrap().send(());
 
         port_rx.await.map_err(|_| ListenerError::MultiplexerError)

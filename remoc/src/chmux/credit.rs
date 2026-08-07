@@ -18,6 +18,7 @@ use super::{
     ChMuxError, SendError,
     msg::{DataCredits, GlobalCredits},
     mux::PortEvt,
+    port_allocator::SidePort,
     sizer::{BufferSize, BufferSizeQuery, BufferSizer, GlobalCreditsReport},
 };
 
@@ -519,7 +520,7 @@ impl PortCreditReturner {
     /// Starts returning port-specific credit.
     ///
     /// [Self::ready] must have been called before this function is called.
-    pub fn start_return(&mut self, credit: UsedPortCredit, remote_port: u32, tx: &mpsc::Sender<PortEvt>) {
+    pub fn start_return(&mut self, credit: UsedPortCredit, remote_port: SidePort, tx: &mpsc::Sender<PortEvt>) {
         assert!(self.tasks.is_empty(), "start_return called without ready");
 
         let Some(monitor) = self.monitor.upgrade() else { return };
@@ -559,7 +560,7 @@ impl PortCreditReturner {
     /// Starts reporting that messages have been processed.
     ///
     /// [Self::ready] must have been called before this function is called.
-    pub fn start_report_processed(&mut self, remote_port: u32, tx: &mpsc::Sender<PortEvt>) {
+    pub fn start_report_processed(&mut self, remote_port: SidePort, tx: &mpsc::Sender<PortEvt>) {
         assert!(self.tasks.is_empty(), "report_received called without ready");
         self.queue_port_evt(tx, PortEvt::ReceivedReport { remote_port });
     }

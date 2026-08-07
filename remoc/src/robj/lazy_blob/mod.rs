@@ -233,8 +233,9 @@ where
                 };
 
                 tokio::select! {
-                    () = do_send => (),
+                    biased;
                     Err(_) = keep_rx => (),
+                    () = do_send => (),
                 }
             }
             .in_current_span(),

@@ -643,10 +643,10 @@ where
             .into_iter()
             .filter_map(|parallel_port| {
                 let (parallel_tx, parallel_rx) = tokio::sync::oneshot::channel();
-                PortDeserializer::accept::<D::Error>(parallel_port, |local_port, request| {
+                PortDeserializer::accept::<D::Error>(parallel_port, |request| {
                     {
                         async move {
-                            if let Ok((_raw_tx, raw_rx)) = request.accept_from(local_port).await {
+                            if let Ok((_raw_tx, raw_rx)) = request.accept().await {
                                 let _ = parallel_tx.send(raw_rx);
                             }
                         }
@@ -659,10 +659,10 @@ where
             .collect();
         let parallel = parallel_txs.len();
 
-        PortDeserializer::accept(port, |local_port, request| {
+        PortDeserializer::accept(port, |request| {
             async move {
                 // Accept chmux connection request.
-                let (raw_tx, raw_rx) = match request.accept_from(local_port).await {
+                let (raw_tx, raw_rx) = match request.accept().await {
                     Ok(tx_rx) => tx_rx,
                     Err(err) => {
                         let _ = tx.send(SendReq::new(Err(RecvError::RemoteListen(err)))).await;

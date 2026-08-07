@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use super::{Cfg, ChMuxError, sizer::GlobalCreditsReport};
+use super::{Cfg, ChMuxError, port_allocator::SidePort, sizer::GlobalCreditsReport};
 
 fn invalid_data(msg: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, format!("invalid value for {msg} received"))
@@ -37,13 +37,16 @@ pub enum MultiplexMsg {
         wait: bool,
         /// Port id
         id: Option<u32>,
+        /// Pre-connect port.
+        pre_connect: bool,
     },
     /// Connection accepted and server port assigned.
     PortOpened {
         /// Requesting client port.
         client_port: u32,
         /// Assigned server port.
-        server_port: u32,
+        server_port: SidePort,
+        // Flags u8.
     },
     /// Connection refused because server has no ports available.
     Rejected {
@@ -58,7 +61,7 @@ pub enum MultiplexMsg {
     /// This is followed by one data packet.
     Data {
         /// Port of side that receives this message.
-        port: u32,
+        port: SidePort,
         // Flags u8.
         /// First chunk of data.
         ///
@@ -73,7 +76,7 @@ pub enum MultiplexMsg {
     /// Ports sent over a port.
     PortData {
         /// Port of side that receives this message.
-        port: u32,
+        port: SidePort,
         // Flags u8.
         /// First chunk of ports.
         ///
@@ -84,53 +87,56 @@ pub enum MultiplexMsg {
         last: bool,
         /// Wait for server port to become available.
         wait: bool,
-        /// Ports
-        ports: Vec<u32>,
-        /// Port ids
-        ids: Option<Vec<u32>>,
+        /// Sent ports.
+        ports: Vec<PortDataItem>,
     },
     /// Request report when data has been processed up to this message.
     RequestReceivedReport {
         /// Port of side that receives this message.
-        port: u32,
+        port: SidePort,
+        // Flags u8.
     },
     /// Reports that data has been processed up to this message.
     ReceivedReport {
         /// Port of side that receives this message.
-        port: u32,
+        port: SidePort,
+        // Flags u8.
     },
     /// Give flow credits to a port.
     PortCredits {
         /// Port of side that receives this message.
-        port: u32,
+        port: SidePort,
         /// Number of credits in bytes.
         credits: u32,
     },
     /// Port should stop using global credits.
     InhibitGlobalCreditUsageByPort {
         /// Port that should stop using global credits.
-        port: u32,
+        port: SidePort,
     },
     /// Port should start using global credits again.
     AllowGlobalCreditUsageByPort {
         /// Port that should start using global credits.
-        port: u32,
+        port: SidePort,
     },
     /// No more data will be sent to specified remote port.
     SendFinish {
         /// Port of side that receives this message.
-        port: u32,
+        port: SidePort,
+        // Flags u8.
     },
     /// Not interested on receiving any more data from specified remote port,
     /// but already sent message will still be processed.
     ReceiveClose {
         /// Port of side that receives this message.
-        port: u32,
+        port: SidePort,
+        // Flags u8.
     },
     /// No more messages for this port will be accepted.
     ReceiveFinish {
         /// Port of side that receives this message.
-        port: u32,
+        port: SidePort,
+        // Flags u8.
     },
     /// Give global credits, usable on any port.
     GlobalCredits(GlobalCredits),
@@ -142,6 +148,17 @@ pub enum MultiplexMsg {
     ListenerFinish,
     /// Terminate connection.
     Goodbye,
+}
+
+/// Port data item.
+#[derive(Debug)]
+pub struct PortDataItem {
+    /// Port number.
+    pub port: u32,
+    /// Port id.
+    pub id: u32,
+    /// Pre connect port?
+    pub pre_connect: bool,
 }
 
 pub const MSG_RESET: u8 = 1;
@@ -165,9 +182,15 @@ pub const MSG_INHIBIT_GLOBAL_CREDIT_USAGE_BY_PORT: u8 = 18;
 pub const MSG_ALLOW_GLOBAL_CREDIT_USAGE_BY_PORT: u8 = 19;
 pub const MSG_REQUEST_RECEIVED_REPORT: u8 = 20;
 pub const MSG_RECEIVED_REPORT: u8 = 21;
+pub const MSG_LOCAL_PORT_CREDITS: u8 = 22;
+pub const MSG_INHIBIT_GLOBAL_CREDIT_USAGE_BY_LOCAL_PORT: u8 = 23;
+pub const MSG_ALLOW_GLOBAL_CREDIT_USAGE_BY_LOCAL_PORT: u8 = 24;
 
 pub const MSG_OPEN_PORT_FLAG_WAIT: u8 = 0b0000_0001;
 pub const MSG_OPEN_PORT_FLAG_ID: u8 = 0b0000_0010;
+pub const MSG_OPEN_PORT_FLAG_PRE_CONNECT: u8 = 0b0000_0100;
+
+pub const MSG_PORT_OPENED_FLAG_SERVER_PORT_REMOTE: u8 = 0b0000_0001;
 
 pub const MSG_REJECTED_FLAG_NO_PORTS: u8 = 0b0000_0001;
 
@@ -175,11 +198,27 @@ pub const MSG_DATA_FLAG_FIRST: u8 = 0b0000_0001;
 pub const MSG_DATA_FLAG_LAST: u8 = 0b0000_0010;
 pub const MSG_DATA_FLAG_CREDITS_GLOBAL: u8 = 0b0000_0100;
 pub const MSG_DATA_FLAG_CREDITS_SPLIT: u8 = 0b0000_1000;
+pub const MSG_DATA_FLAG_PORT_LOCAL: u8 = 0b0001_0000;
 
 pub const MSG_PORT_DATA_FLAG_FIRST: u8 = 0b0000_0001;
 pub const MSG_PORT_DATA_FLAG_LAST: u8 = 0b0000_0010;
 pub const MSG_PORT_DATA_FLAG_WAIT: u8 = 0b0000_0100;
 pub const MSG_PORT_DATA_FLAG_IDS: u8 = 0b0000_1000;
+pub const MSG_PORT_DATA_FLAG_PORT_LOCAL: u8 = 0b0001_0000;
+pub const MSG_PORT_DATA_FLAG_PORTS_FLAGS: u8 = 0b0010_0000;
+pub const MSG_PORT_DATA_FLAG_PRE_CONNECT_ALL: u8 = 0b0100_0000;
+
+pub const MSG_PORT_DATA_FLAG_PORT_FLAG_PRE_CONNECT: u8 = 0b0000_0001;
+
+pub const MSG_REQUEST_RECEIVED_REPORT_FLAG_PORT_LOCAL: u8 = 0b0000_0001;
+
+pub const MSG_RECEIVED_REPORT_FLAG_PORT_LOCAL: u8 = 0b0000_0001;
+
+pub const MSG_SEND_FINISH_FLAG_PORT_LOCAL: u8 = 0b0000_0001;
+
+pub const MSG_RECEIVE_CLOSE_FLAG_PORT_LOCAL: u8 = 0b0000_0001;
+
+pub const MSG_RECEIVE_FINISH_FLAG_PORT_LOCAL: u8 = 0b0000_0001;
 
 /// Maximum message length.
 ///
@@ -202,7 +241,7 @@ impl MultiplexMsg {
             MultiplexMsg::Ping => {
                 writer.write_u8(MSG_PING)?;
             }
-            MultiplexMsg::OpenPort { client_port, wait, id } => {
+            MultiplexMsg::OpenPort { client_port, wait, id, pre_connect } => {
                 writer.write_u8(MSG_OPEN_PORT)?;
                 writer.write_u32::<LE>(*client_port)?;
                 let mut flags = 0;
@@ -212,6 +251,9 @@ impl MultiplexMsg {
                 if id.is_some() {
                     flags |= MSG_OPEN_PORT_FLAG_ID;
                 }
+                if *pre_connect {
+                    flags |= MSG_OPEN_PORT_FLAG_PRE_CONNECT;
+                }
                 writer.write_u8(flags)?;
                 if let Some(id) = id {
                     writer.write_u32::<LE>(*id)?;
@@ -220,7 +262,12 @@ impl MultiplexMsg {
             MultiplexMsg::PortOpened { client_port, server_port } => {
                 writer.write_u8(MSG_PORT_OPENED)?;
                 writer.write_u32::<LE>(*client_port)?;
-                writer.write_u32::<LE>(*server_port)?;
+                writer.write_u32::<LE>(**server_port)?;
+                let mut flags = 0;
+                if let SidePort::Remote(_) = server_port {
+                    flags |= MSG_PORT_OPENED_FLAG_SERVER_PORT_REMOTE;
+                }
+                writer.write_u8(flags)?;
             }
             MultiplexMsg::Rejected { client_port, no_ports } => {
                 writer.write_u8(MSG_REJECTED)?;
@@ -229,7 +276,7 @@ impl MultiplexMsg {
             }
             MultiplexMsg::Data { port, first, last, credits } => {
                 writer.write_u8(MSG_DATA)?;
-                writer.write_u32::<LE>(*port)?;
+                writer.write_u32::<LE>(**port)?;
                 let mut flags = 0;
                 if *first {
                     flags |= MSG_DATA_FLAG_FIRST;
@@ -242,14 +289,17 @@ impl MultiplexMsg {
                     DataCredits::GlobalOnly => flags |= MSG_DATA_FLAG_CREDITS_GLOBAL,
                     DataCredits::GlobalAndPort(_) => flags |= MSG_DATA_FLAG_CREDITS_SPLIT,
                 }
+                if let SidePort::Local(_) = port {
+                    flags |= MSG_DATA_FLAG_PORT_LOCAL;
+                }
                 writer.write_u8(flags)?;
                 if let DataCredits::GlobalAndPort(global_credits) = credits {
                     writer.write_u32::<LE>(*global_credits)?;
                 }
             }
-            MultiplexMsg::PortData { port, first, last, wait, ports, ids } => {
+            MultiplexMsg::PortData { port, first, last, wait, ports } => {
                 writer.write_u8(MSG_PORT_DATA)?;
-                writer.write_u32::<LE>(*port)?;
+                writer.write_u32::<LE>(**port)?;
                 let mut flags = 0;
                 if *first {
                     flags |= MSG_PORT_DATA_FLAG_FIRST;
@@ -260,57 +310,104 @@ impl MultiplexMsg {
                 if *wait {
                     flags |= MSG_PORT_DATA_FLAG_WAIT;
                 }
-                if ids.is_some() {
+                let need_ids = ports.iter().any(|port| port.port != port.id);
+                if need_ids {
                     flags |= MSG_PORT_DATA_FLAG_IDS;
                 }
+                let pre_connect_count = ports.iter().filter(|port| port.pre_connect).count();
+                let need_port_flags = if pre_connect_count == 0 {
+                    false
+                } else if ports.iter().any(|port| port.port != port.id) {
+                    flags |= MSG_PORT_DATA_FLAG_PRE_CONNECT_ALL;
+                    false
+                } else {
+                    flags |= MSG_PORT_DATA_FLAG_PORTS_FLAGS;
+                    true
+                };
+                if let SidePort::Local(_) = port {
+                    flags |= MSG_PORT_DATA_FLAG_PORT_LOCAL;
+                }
                 writer.write_u8(flags)?;
-                match ids {
-                    Some(ids) => {
-                        assert_eq!(ports.len(), ids.len(), "ports and port ids must have same length");
-                        for (p, id) in ports.iter().zip(ids) {
-                            writer.write_u32::<LE>(*p)?;
-                            writer.write_u32::<LE>(*id)?;
-                        }
+                for port in ports {
+                    writer.write_u32::<LE>(port.port)?;
+                    if need_ids {
+                        writer.write_u32::<LE>(port.id)?;
                     }
-                    None => {
-                        for p in ports {
-                            writer.write_u32::<LE>(*p)?;
+                    if need_port_flags {
+                        let mut port_flags = 0;
+                        if port.pre_connect {
+                            port_flags |= MSG_PORT_DATA_FLAG_PORT_FLAG_PRE_CONNECT;
                         }
+                        writer.write_u8(port_flags)?;
                     }
                 }
             }
             MultiplexMsg::RequestReceivedReport { port } => {
                 writer.write_u8(MSG_REQUEST_RECEIVED_REPORT)?;
-                writer.write_u32::<LE>(*port)?;
+                writer.write_u32::<LE>(**port)?;
+                let mut flags = 0;
+                if let SidePort::Local(_) = port {
+                    flags |= MSG_REQUEST_RECEIVED_REPORT_FLAG_PORT_LOCAL;
+                }
+                writer.write_u8(flags)?;
             }
             MultiplexMsg::ReceivedReport { port } => {
                 writer.write_u8(MSG_RECEIVED_REPORT)?;
-                writer.write_u32::<LE>(*port)?;
+                writer.write_u32::<LE>(**port)?;
+                let mut flags = 0;
+                if let SidePort::Local(_) = port {
+                    flags |= MSG_RECEIVED_REPORT_FLAG_PORT_LOCAL;
+                }
+                writer.write_u8(flags)?;
             }
             MultiplexMsg::PortCredits { port, credits } => {
-                writer.write_u8(MSG_PORT_CREDITS)?;
-                writer.write_u32::<LE>(*port)?;
+                match port {
+                    SidePort::Remote(_) => writer.write_u8(MSG_PORT_CREDITS)?,
+                    SidePort::Local(_) => writer.write_u8(MSG_LOCAL_PORT_CREDITS)?,
+                }
+                writer.write_u32::<LE>(**port)?;
                 writer.write_u32::<LE>(*credits)?;
             }
             MultiplexMsg::InhibitGlobalCreditUsageByPort { port } => {
-                writer.write_u8(MSG_INHIBIT_GLOBAL_CREDIT_USAGE_BY_PORT)?;
-                writer.write_u32::<LE>(*port)?;
+                match port {
+                    SidePort::Remote(_) => writer.write_u8(MSG_INHIBIT_GLOBAL_CREDIT_USAGE_BY_PORT)?,
+                    SidePort::Local(_) => writer.write_u8(MSG_INHIBIT_GLOBAL_CREDIT_USAGE_BY_LOCAL_PORT)?,
+                }
+                writer.write_u32::<LE>(**port)?;
             }
             MultiplexMsg::AllowGlobalCreditUsageByPort { port } => {
-                writer.write_u8(MSG_ALLOW_GLOBAL_CREDIT_USAGE_BY_PORT)?;
-                writer.write_u32::<LE>(*port)?;
+                match port {
+                    SidePort::Remote(_) => writer.write_u8(MSG_ALLOW_GLOBAL_CREDIT_USAGE_BY_PORT)?,
+                    SidePort::Local(_) => writer.write_u8(MSG_ALLOW_GLOBAL_CREDIT_USAGE_BY_LOCAL_PORT)?,
+                }
+                writer.write_u32::<LE>(**port)?;
             }
             MultiplexMsg::SendFinish { port } => {
                 writer.write_u8(MSG_SEND_FINISH)?;
-                writer.write_u32::<LE>(*port)?;
+                writer.write_u32::<LE>(**port)?;
+                let mut flags = 0;
+                if let SidePort::Local(_) = port {
+                    flags |= MSG_SEND_FINISH_FLAG_PORT_LOCAL;
+                }
+                writer.write_u8(flags)?;
             }
             MultiplexMsg::ReceiveClose { port } => {
                 writer.write_u8(MSG_RECEIVE_CLOSE)?;
-                writer.write_u32::<LE>(*port)?;
+                writer.write_u32::<LE>(**port)?;
+                let mut flags = 0;
+                if let SidePort::Local(_) = port {
+                    flags |= MSG_RECEIVE_CLOSE_FLAG_PORT_LOCAL;
+                }
+                writer.write_u8(flags)?;
             }
             MultiplexMsg::ReceiveFinish { port } => {
                 writer.write_u8(MSG_RECEIVE_FINISH)?;
-                writer.write_u32::<LE>(*port)?;
+                writer.write_u32::<LE>(**port)?;
+                let mut flags = 0;
+                if let SidePort::Local(_) = port {
+                    flags |= MSG_RECEIVE_FINISH_FLAG_PORT_LOCAL;
+                }
+                writer.write_u8(flags)?;
             }
             MultiplexMsg::GlobalCredits(GlobalCredits { credits, seq }) => {
                 writer.write_u8(MSG_GLOBAL_CREDITS)?;
@@ -353,13 +450,24 @@ impl MultiplexMsg {
                 let flags = reader.read_u8()?;
                 let wait = flags & MSG_OPEN_PORT_FLAG_WAIT != 0;
                 let mut id = (flags & MSG_OPEN_PORT_FLAG_ID != 0).then_some(0);
+                let pre_open = flags & MSG_OPEN_PORT_FLAG_PRE_CONNECT != 0;
                 if let Some(id) = &mut id {
                     *id = reader.read_u32::<LE>()?;
                 }
-                Self::OpenPort { client_port, wait, id }
+                Self::OpenPort { client_port, wait, id, pre_connect: pre_open }
             }
             MSG_PORT_OPENED => {
-                Self::PortOpened { client_port: reader.read_u32::<LE>()?, server_port: reader.read_u32::<LE>()? }
+                let client_port = reader.read_u32::<LE>()?;
+                let server_port = reader.read_u32::<LE>()?;
+                let flags = reader.read_u8().unwrap_or_default();
+                Self::PortOpened {
+                    client_port,
+                    server_port: if flags & MSG_PORT_OPENED_FLAG_SERVER_PORT_REMOTE != 0 {
+                        SidePort::Remote(server_port)
+                    } else {
+                        SidePort::Local(server_port)
+                    },
+                }
             }
             MSG_REJECTED => Self::Rejected {
                 client_port: reader.read_u32::<LE>()?,
@@ -376,7 +484,11 @@ impl MultiplexMsg {
                     DataCredits::PortOnly
                 };
                 Self::Data {
-                    port,
+                    port: if flags & MSG_DATA_FLAG_PORT_LOCAL != 0 {
+                        SidePort::Local(port)
+                    } else {
+                        SidePort::Remote(port)
+                    },
                     first: flags & MSG_DATA_FLAG_FIRST != 0,
                     last: flags & MSG_DATA_FLAG_LAST != 0,
                     credits,
@@ -388,34 +500,108 @@ impl MultiplexMsg {
                 let first = flags & MSG_PORT_DATA_FLAG_FIRST != 0;
                 let last = flags & MSG_PORT_DATA_FLAG_LAST != 0;
                 let wait = flags & MSG_PORT_DATA_FLAG_WAIT != 0;
-                let mut ids = (flags & MSG_PORT_DATA_FLAG_IDS != 0).then_some(Vec::with_capacity(16));
                 let mut ports = Vec::with_capacity(16);
                 loop {
-                    match reader.read_u32::<LE>() {
-                        Ok(p) => ports.push(p),
+                    let port = match reader.read_u32::<LE>() {
+                        Ok(port) => port,
                         Err(err) if err.kind() == ErrorKind::UnexpectedEof => break,
                         Err(err) => return Err(err),
+                    };
+                    let id = if flags & MSG_PORT_DATA_FLAG_IDS != 0 { reader.read_u32::<LE>()? } else { port };
+                    let mut pre_connect = false;
+                    if flags & MSG_PORT_DATA_FLAG_PORTS_FLAGS != 0 {
+                        let port_flags = reader.read_u8()?;
+                        pre_connect = port_flags & MSG_PORT_DATA_FLAG_PORT_FLAG_PRE_CONNECT != 0;
                     }
-                    if let Some(ids) = &mut ids {
-                        ids.push(reader.read_u32::<LE>()?);
-                    }
+                    ports.push(PortDataItem { port, id, pre_connect });
                 }
-                Self::PortData { port, first, last, wait, ports, ids }
+                Self::PortData {
+                    port: if flags & MSG_PORT_DATA_FLAG_PORT_LOCAL != 0 {
+                        SidePort::Local(port)
+                    } else {
+                        SidePort::Remote(port)
+                    },
+                    first,
+                    last,
+                    wait,
+                    ports,
+                }
             }
-            MSG_REQUEST_RECEIVED_REPORT => Self::RequestReceivedReport { port: reader.read_u32::<LE>()? },
-            MSG_RECEIVED_REPORT => Self::ReceivedReport { port: reader.read_u32::<LE>()? },
-            MSG_PORT_CREDITS => {
-                Self::PortCredits { port: reader.read_u32::<LE>()?, credits: reader.read_u32::<LE>()? }
+            MSG_REQUEST_RECEIVED_REPORT => {
+                let port = reader.read_u32::<LE>()?;
+                let flags = reader.read_u8().unwrap_or_default();
+                Self::RequestReceivedReport {
+                    port: if flags & MSG_REQUEST_RECEIVED_REPORT_FLAG_PORT_LOCAL != 0 {
+                        SidePort::Local(port)
+                    } else {
+                        SidePort::Remote(port)
+                    },
+                }
             }
+            MSG_RECEIVED_REPORT => {
+                let port = reader.read_u32::<LE>()?;
+                let flags = reader.read_u8().unwrap_or_default();
+                Self::ReceivedReport {
+                    port: if flags & MSG_RECEIVED_REPORT_FLAG_PORT_LOCAL != 0 {
+                        SidePort::Local(port)
+                    } else {
+                        SidePort::Remote(port)
+                    },
+                }
+            }
+            MSG_PORT_CREDITS => Self::PortCredits {
+                port: SidePort::Remote(reader.read_u32::<LE>()?),
+                credits: reader.read_u32::<LE>()?,
+            },
+            MSG_LOCAL_PORT_CREDITS => Self::PortCredits {
+                port: SidePort::Local(reader.read_u32::<LE>()?),
+                credits: reader.read_u32::<LE>()?,
+            },
             MSG_INHIBIT_GLOBAL_CREDIT_USAGE_BY_PORT => {
-                Self::InhibitGlobalCreditUsageByPort { port: reader.read_u32::<LE>()? }
+                Self::InhibitGlobalCreditUsageByPort { port: SidePort::Remote(reader.read_u32::<LE>()?) }
+            }
+            MSG_INHIBIT_GLOBAL_CREDIT_USAGE_BY_LOCAL_PORT => {
+                Self::InhibitGlobalCreditUsageByPort { port: SidePort::Local(reader.read_u32::<LE>()?) }
             }
             MSG_ALLOW_GLOBAL_CREDIT_USAGE_BY_PORT => {
-                Self::AllowGlobalCreditUsageByPort { port: reader.read_u32::<LE>()? }
+                Self::AllowGlobalCreditUsageByPort { port: SidePort::Remote(reader.read_u32::<LE>()?) }
             }
-            MSG_SEND_FINISH => Self::SendFinish { port: reader.read_u32::<LE>()? },
-            MSG_RECEIVE_CLOSE => Self::ReceiveClose { port: reader.read_u32::<LE>()? },
-            MSG_RECEIVE_FINISH => Self::ReceiveFinish { port: reader.read_u32::<LE>()? },
+            MSG_ALLOW_GLOBAL_CREDIT_USAGE_BY_LOCAL_PORT => {
+                Self::AllowGlobalCreditUsageByPort { port: SidePort::Local(reader.read_u32::<LE>()?) }
+            }
+            MSG_SEND_FINISH => {
+                let port = reader.read_u32::<LE>()?;
+                let flags = reader.read_u8().unwrap_or_default();
+                Self::SendFinish {
+                    port: if flags & MSG_SEND_FINISH_FLAG_PORT_LOCAL != 0 {
+                        SidePort::Local(port)
+                    } else {
+                        SidePort::Remote(port)
+                    },
+                }
+            }
+            MSG_RECEIVE_CLOSE => {
+                let port = reader.read_u32::<LE>()?;
+                let flags = reader.read_u8().unwrap_or_default();
+                Self::ReceiveClose {
+                    port: if flags & MSG_RECEIVE_CLOSE_FLAG_PORT_LOCAL != 0 {
+                        SidePort::Local(port)
+                    } else {
+                        SidePort::Remote(port)
+                    },
+                }
+            }
+            MSG_RECEIVE_FINISH => {
+                let port = reader.read_u32::<LE>()?;
+                let flags = reader.read_u8().unwrap_or_default();
+                Self::ReceiveFinish {
+                    port: if flags & MSG_RECEIVE_FINISH_FLAG_PORT_LOCAL != 0 {
+                        SidePort::Local(port)
+                    } else {
+                        SidePort::Remote(port)
+                    },
+                }
+            }
             MSG_GLOBAL_CREDITS => {
                 Self::GlobalCredits(GlobalCredits { credits: reader.read_u32::<LE>()?, seq: reader.read_u8()? })
             }
@@ -460,6 +646,10 @@ pub struct ExchangedCfg {
     pub global_credits: Option<u32>,
     /// Whether sending received reports is supported.
     pub received_report: bool,
+    /// Whether port side specification is supported.
+    pub port_side: bool,
+    /// Whether pre-connecting ports is supported.
+    pub pre_connect: bool,
 }
 
 impl ExchangedCfg {
@@ -472,6 +662,8 @@ impl ExchangedCfg {
             connect_queue: cfg.connect_queue,
             global_credits: Some(global_credits),
             received_report: true,
+            port_side: true,
+            pre_connect: true,
         }
     }
 
@@ -484,6 +676,8 @@ impl ExchangedCfg {
         writer.write_u16::<LE>(self.connect_queue)?;
         writer.write_u32::<LE>(self.global_credits.unwrap())?;
         writer.write_u8(self.received_report.into())?;
+        writer.write_u8(self.port_side.into())?;
+        writer.write_u8(self.pre_connect.into())?;
 
         Ok(())
     }
@@ -508,6 +702,8 @@ impl ExchangedCfg {
             },
             global_credits: None,
             received_report: false,
+            port_side: false,
+            pre_connect: false,
         };
 
         let Ok(global_credits) = reader.read_u32::<LE>() else { return Ok(this) };
@@ -515,6 +711,12 @@ impl ExchangedCfg {
 
         let Ok(received_report) = reader.read_u8() else { return Ok(this) };
         this.received_report = received_report != 0;
+
+        let Ok(port_side) = reader.read_u8() else { return Ok(this) };
+        this.port_side = port_side != 0;
+
+        let Ok(pre_connect) = reader.read_u8() else { return Ok(this) };
+        this.pre_connect = pre_connect != 0;
 
         Ok(this)
     }

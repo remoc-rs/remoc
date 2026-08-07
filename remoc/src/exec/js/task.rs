@@ -68,7 +68,7 @@ impl fmt::Display for JoinError {
 
 impl From<JoinError> for std::io::Error {
     fn from(err: JoinError) -> Self {
-        std::io::Error::other(err.to_string())
+        std::io::Error::other(err)
     }
 }
 

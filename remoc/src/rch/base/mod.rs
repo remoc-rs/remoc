@@ -111,7 +111,7 @@ where
     async fn connect_raw(
         client: &chmux::Client, listener: &mut chmux::Listener,
     ) -> Result<(chmux::Sender, chmux::Receiver), ConnectError> {
-        let (client_sr, listener_sr) = tokio::join!(client.connect(), listener.accept());
+        let (client_sr, listener_sr) = tokio::join!(client.connect_port(), listener.accept());
         let (raw_sender, _) = client_sr?;
         let (_, raw_receiver) = listener_sr?.ok_or(ConnectError::NoConnectRequest)?;
         Ok((raw_sender, raw_receiver))

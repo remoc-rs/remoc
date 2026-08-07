@@ -499,10 +499,10 @@ where
         let transfer_strategy2 = transfer_strategy.clone();
 
         // Accept chmux port request.
-        PortDeserializer::accept(port, move |local_port, request| {
+        PortDeserializer::accept(port, move |request| {
             async move {
                 // Accept chmux connection request.
-                let (raw_tx, raw_rx) = match request.accept_from(local_port).await {
+                let (raw_tx, raw_rx) = match request.accept().await {
                     Ok(tx_rx) => tx_rx,
                     Err(err) => {
                         let _ = remote_send_err_tx.send(RemoteSendError::Listen(err));

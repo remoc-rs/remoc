@@ -340,12 +340,12 @@ async fn send_impl(
 
     // Setup single or multi base channel operation.
     enum BaseTxs {
-        Single(ErasedSender),
+        Single(Box<ErasedSender>),
         Multi(VecDeque<tokio::sync::mpsc::Sender<Box<dyn ErasedSendReq + Send>>>),
     }
     let mut base_txs = match remote_txs.len() {
         0 => panic!("need at least one raw channel"),
-        1 => BaseTxs::Single(remote_txs.next().unwrap()),
+        1 => BaseTxs::Single(Box::new(remote_txs.next().unwrap())),
         _ => BaseTxs::Multi(
             remote_txs
                 .map(|mut remote_tx| {

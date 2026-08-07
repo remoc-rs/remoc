@@ -5,16 +5,18 @@ use futures::{
     task::{Context, Poll},
 };
 use std::{collections::VecDeque, error::Error, fmt, mem, pin::Pin};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, watch};
 use tokio_util::sync::ReusableBoxFuture;
 
 use super::{
     AnyStorage, ForwardError, PortAllocator, Request, Sender,
+    client::PreConnectState,
     credit::{PortCreditReturner, UsedGlobalCredit, UsedPortCredit},
     forward,
     mux::PortEvt,
+    port_allocator::SidePort,
 };
-use crate::exec;
+use crate::exec::runtime;
 
 /// An error occurred during receiving a data message.
 #[derive(Debug, Clone)]
@@ -26,6 +28,11 @@ pub enum RecvError {
     ExceedsMaxDataSize(usize),
     /// Received ports exceed maximum count.
     ExceedsMaxPortCount(usize),
+    /// Pre-connected port was rejected.
+    Rejected {
+        /// Remote endpoint had not ports available.
+        no_ports: bool,
+    },
 }
 
 impl RecvError {
@@ -50,6 +57,7 @@ impl fmt::Display for RecvError {
             Self::ExceedsMaxPortCount(max_count) => {
                 write!(f, "port message exceeds maximum allowed count of {max_count} ports")
             }
+            Self::Rejected { .. } => write!(f, "pre-connected port was rejected"),
         }
     }
 }
@@ -60,9 +68,10 @@ impl From<RecvError> for std::io::Error {
     fn from(err: RecvError) -> Self {
         use std::io::ErrorKind;
         match err {
-            RecvError::ChMux => Self::new(ErrorKind::ConnectionReset, err.to_string()),
-            RecvError::ExceedsMaxDataSize(_) => Self::new(ErrorKind::InvalidData, err.to_string()),
-            RecvError::ExceedsMaxPortCount(_) => Self::new(ErrorKind::InvalidData, err.to_string()),
+            RecvError::ChMux => Self::new(ErrorKind::ConnectionReset, err),
+            RecvError::ExceedsMaxDataSize(_) => Self::new(ErrorKind::InvalidData, err),
+            RecvError::ExceedsMaxPortCount(_) => Self::new(ErrorKind::InvalidData, err),
+            RecvError::Rejected { .. } => Self::new(ErrorKind::ConnectionRefused, err),
         }
     }
 }
@@ -73,6 +82,11 @@ impl From<RecvError> for std::io::Error {
 pub enum RecvAnyError {
     /// Multiplexer terminated.
     ChMux,
+    /// Pre-connected port was rejected.
+    Rejected {
+        /// Remote endpoint had not ports available.
+        no_ports: bool,
+    },
 }
 
 impl RecvAnyError {
@@ -86,6 +100,7 @@ impl fmt::Display for RecvAnyError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::ChMux => write!(f, "multiplexer terminated"),
+            Self::Rejected { .. } => write!(f, "pre-connected port was rejected"),
         }
     }
 }
@@ -288,8 +303,8 @@ enum Receiving {
 
 /// Receives byte data over a channel.
 pub struct Receiver {
-    local_port: u32,
-    remote_port: u32,
+    local_port: SidePort,
+    remote_port: SidePort,
     max_data_size: usize,
     max_ports: usize,
     tx: mpsc::Sender<PortEvt>,
@@ -301,7 +316,8 @@ pub struct Receiver {
     finished: bool,
     port_allocator: PortAllocator,
     storage: AnyStorage,
-    _drop_tx: oneshot::Sender<()>,
+    pre_connected_rx: Option<watch::Receiver<PreConnectState>>,
+    handle: runtime::Handle,
 }
 
 impl fmt::Debug for Receiver {
@@ -319,19 +335,13 @@ impl fmt::Debug for Receiver {
 
 impl Receiver {
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
-        local_port: u32, remote_port: u32, max_data_size: usize, max_port_count: usize,
+    pub(super) fn new(
+        local_port: SidePort, remote_port: SidePort, max_data_size: usize, max_port_count: usize,
         tx: mpsc::Sender<PortEvt>, high_priority_tx: mpsc::Sender<PortEvt>,
         rx: mpsc::UnboundedReceiver<PortReceiveMsg>, channel_credits: PortCreditReturner,
         port_allocator: PortAllocator, storage: AnyStorage,
+        pre_connected_rx: Option<watch::Receiver<PreConnectState>>,
     ) -> Self {
-        let (_drop_tx, drop_rx) = oneshot::channel();
-        let tx_drop = tx.clone();
-        exec::spawn(async move {
-            let _ = drop_rx.await;
-            let _ = tx_drop.send(PortEvt::ReceiverDropped { local_port }).await;
-        });
-
         Self {
             local_port,
             remote_port,
@@ -346,17 +356,18 @@ impl Receiver {
             finished: false,
             port_allocator,
             storage,
-            _drop_tx,
+            pre_connected_rx,
+            handle: runtime::Handle::current(),
         }
     }
 
     /// The local port number.
-    pub fn local_port(&self) -> u32 {
+    pub fn local_port(&self) -> SidePort {
         self.local_port
     }
 
     /// The remote port number.
-    pub fn remote_port(&self) -> u32 {
+    pub fn remote_port(&self) -> SidePort {
         self.remote_port
     }
 
@@ -388,12 +399,36 @@ impl Receiver {
         self.max_ports = max_ports;
     }
 
+    /// Waits that a pre-connected port is fully connected.
+    async fn wait_pre_connect_done(&mut self) -> Result<(), RecvError> {
+        if let Some(pre_connected_rx) = &mut self.pre_connected_rx {
+            {
+                let Ok(res) = pre_connected_rx.wait_for(|res| res.is_decided()).await else {
+                    return Err(RecvError::ChMux);
+                };
+                match &*res {
+                    PreConnectState::PreConnected => unreachable!(),
+                    PreConnectState::Accepted => (),
+                    PreConnectState::Rejected { no_ports } => {
+                        return Err(RecvError::Rejected { no_ports: *no_ports });
+                    }
+                }
+            }
+
+            self.pre_connected_rx = None;
+        }
+
+        Ok(())
+    }
+
     /// Receives data over the channel.
     ///
     /// Waits for data to become available.
     /// Received port open requests are silently rejected.
     /// The size of the received data is limited by [max_data_size](Self::max_data_size).
     pub async fn recv(&mut self) -> Result<Option<DataBuf>, RecvError> {
+        self.wait_pre_connect_done().await?;
+
         loop {
             match self.recv_any().await? {
                 Some(Received::Data(data)) => break Ok(Some(data)),
@@ -412,6 +447,11 @@ impl Receiver {
     ///
     /// This is unlimited in size.
     pub async fn recv_chunk(&mut self) -> Result<Option<Bytes>, RecvChunkError> {
+        self.wait_pre_connect_done().await.map_err(|err| match err {
+            RecvError::ChMux => RecvChunkError::ChMux,
+            _ => RecvChunkError::Cancelled,
+        })?;
+
         if self.finished {
             return Ok(None);
         }
@@ -492,6 +532,8 @@ impl Receiver {
 
     /// Receives data or ports over the channel.
     pub async fn recv_any(&mut self) -> Result<Option<Received>, RecvError> {
+        self.wait_pre_connect_done().await?;
+
         if self.finished {
             return Ok(None);
         }
@@ -611,7 +653,11 @@ impl Receiver {
 
 impl Drop for Receiver {
     fn drop(&mut self) {
-        // required for correct drop order
+        let tx = self.tx.clone();
+        let local_port = self.local_port;
+        self.handle.spawn(async move {
+            let _ = tx.send(PortEvt::ReceiverDropped { local_port }).await;
+        });
     }
 }
 

@@ -58,7 +58,7 @@ async fn tcp_client() {
         let client = client;
 
         println!("Client connecting...");
-        let (mut tx, mut rx) = client.connect().await.unwrap();
+        let (mut tx, mut rx) = client.connect_port().await.unwrap();
         println!("Client connected");
 
         tx.send("Hi from client".into()).await.unwrap();

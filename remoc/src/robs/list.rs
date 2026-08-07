@@ -665,8 +665,9 @@ where
             async move {
                 loop {
                     let event = tokio::select! {
-                        event = self.recv() => event,
+                        biased;
                         _ = dropped_rx.recv() => return,
+                        event = self.recv() => event,
                     };
 
                     let inner = match inner_task.upgrade() {

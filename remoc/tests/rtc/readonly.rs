@@ -94,8 +94,9 @@ async fn closed() {
 
     let server_task = async move {
         tokio::select! {
-            res = server.serve() => res.unwrap(),
+            biased;
             res = drop_rx => res.unwrap(),
+            res = server.serve() => res.unwrap(),
         }
         println!("Dropping server");
     };

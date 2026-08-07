@@ -22,7 +22,7 @@ use super::{
     io::{ChannelBytesWriter, LimitedBytesWriter},
 };
 use crate::{
-    chmux::{self, AllReceived, AnyStorage, PortReq},
+    chmux::{self, AllReceived, AnyStorage},
     codec::{self, AnySend, ErasedSerializer, SerializationError, StreamingUnavailable},
     exec::{self, task},
 };
@@ -152,7 +152,7 @@ pub struct PortSerializer {
     allocator: chmux::PortAllocator,
     #[allow(clippy::type_complexity)]
     requests:
-        Vec<(chmux::PortNumber, Box<dyn FnOnce(chmux::Connect) -> BoxFuture<'static, ()> + Send + 'static>)>,
+        Vec<(chmux::ConnectReq, Box<dyn FnOnce(chmux::Connect) -> BoxFuture<'static, ()> + Send + 'static>)>,
     storage: AnyStorage,
     tasks: Vec<BoxFuture<'static, ()>>,
 }
@@ -202,8 +202,8 @@ impl PortSerializer {
         let mut this =
             this.try_borrow_mut().expect("PortSerializer is referenced multiple times during serialization");
 
-        let local_port = this.allocator.try_allocate().ok_or_else(|| ser::Error::custom("ports exhausted"))?;
-        let local_port_num = *local_port;
+        let local_port = this.allocator.connect_req().map_err(ser::Error::custom)?;
+        let local_port_num = local_port.port();
         this.requests.push((local_port, Box::new(callback)));
 
         Ok(local_port_num)
@@ -511,8 +511,8 @@ impl ErasedSender {
         // Extract ports and connect callbacks.
         let mut ports = Vec::new();
         let mut callbacks = Vec::new();
-        for (port, callback) in requests {
-            ports.push(PortReq::new(port));
+        for (port_req, callback) in requests {
+            ports.push(port_req.try_pre_connect().wait());
             callbacks.push(callback);
         }
 
@@ -520,7 +520,7 @@ impl ErasedSender {
         let connects = if ports.is_empty() {
             Vec::new()
         } else {
-            match self.sender.connect(ports, true).await {
+            match self.sender.connect(ports).await {
                 Ok(connects) => connects,
                 Err(err) => return Err(SendError::new(SendErrorKind::Send(err), item)),
             }

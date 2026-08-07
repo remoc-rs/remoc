@@ -399,10 +399,10 @@ where
         let (remote_send_err_tx, remote_send_err_rx) = tokio::sync::mpsc::unbounded_channel();
         let (receiver_rate_limit_tx, receiver_rate_limit_rx) = rate_limit_channel(receiver_rate_limit);
 
-        PortDeserializer::accept(port, |local_port, request| {
+        PortDeserializer::accept(port, |request| {
             async move {
                 // Accept chmux connection request.
-                let (raw_tx, raw_rx) = match request.accept_from(local_port).await {
+                let (raw_tx, raw_rx) = match request.accept().await {
                     Ok(tx_rx) => tx_rx,
                     Err(err) => {
                         let _ = tx.send(Err(RecvError::RemoteListen(err)));

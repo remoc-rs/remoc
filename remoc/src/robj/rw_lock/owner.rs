@@ -47,8 +47,9 @@ where
         let task = exec::spawn(
             async move {
                 tokio::select! {
-                    _ = Self::owner_task(&mut value, read_req_rx, write_req_rx) => (),
+                    biased;
                     _ = term_rx => (),
+                    _ = Self::owner_task(&mut value, read_req_rx, write_req_rx) => (),
                 }
                 value
             }

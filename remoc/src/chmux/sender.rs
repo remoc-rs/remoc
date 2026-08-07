@@ -16,16 +16,17 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
 };
-use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio::sync::{Mutex, mpsc, oneshot, watch};
 use tokio_util::sync::ReusableBoxFuture;
 
 use super::{
-    AnyStorage, Connect, ConnectError, PortAllocator, PortReq,
-    client::ConnectResponse,
+    AnyStorage, Connect, ConnectError, ConnectReq, PortAllocator,
+    client::{ConnectResponse, PreConnectState},
     credit::{AssignedCredits, CreditPool, MixedAssignedCredits, MixedCreditUser},
     mux::PortEvt,
+    port_allocator::{ConnectReqsExhausted, SidePort},
 };
-use crate::exec;
+use crate::exec::{self, runtime};
 
 /// An error occurred during sending of a message.
 #[derive(Debug, Clone)]
@@ -38,6 +39,15 @@ pub enum SendError {
         /// True, if remote endpoint still processes messages that were already sent.
         gracefully: bool,
     },
+    /// Pre-connected port was rejected.
+    Rejected {
+        /// Remote endpoint had not ports available.
+        no_ports: bool,
+    },
+    /// All local ports are in use.
+    LocalPortsExhausted,
+    /// Too many pre-connection requests are pending.
+    TooManyPendingPreConnectReqs,
 }
 
 impl SendError {
@@ -68,6 +78,11 @@ impl fmt::Display for SendError {
                 "remote endpoint closed channel{}",
                 if *gracefully { " but still processes sent messages" } else { "" }
             ),
+            Self::LocalPortsExhausted => write!(f, "all local ports are in use"),
+            Self::Rejected { .. } => write!(f, "pre-connected port was rejected"),
+            Self::TooManyPendingPreConnectReqs => {
+                write!(f, "too many pre-connection requests are pending")
+            }
         }
     }
 }
@@ -84,9 +99,12 @@ impl From<SendError> for std::io::Error {
     fn from(err: SendError) -> Self {
         use std::io::ErrorKind;
         match err {
-            SendError::ChMux => Self::new(ErrorKind::ConnectionReset, err.to_string()),
-            SendError::Closed { gracefully: false } => Self::new(ErrorKind::ConnectionReset, err.to_string()),
-            SendError::Closed { gracefully: true } => Self::new(ErrorKind::ConnectionAborted, err.to_string()),
+            SendError::ChMux => Self::new(ErrorKind::ConnectionReset, err),
+            SendError::Closed { gracefully: false } => Self::new(ErrorKind::ConnectionReset, err),
+            SendError::Closed { gracefully: true } => Self::new(ErrorKind::ConnectionAborted, err),
+            SendError::Rejected { .. } => Self::new(ErrorKind::ConnectionRefused, err),
+            SendError::LocalPortsExhausted => Self::new(ErrorKind::AddrInUse, err),
+            SendError::TooManyPendingPreConnectReqs => Self::new(ErrorKind::AddrInUse, err),
         }
     }
 }
@@ -235,8 +253,8 @@ impl Future for Flushed {
 
 /// Sends byte data over a channel.
 pub struct Sender {
-    local_port: u32,
-    remote_port: u32,
+    local_port: SidePort,
+    remote_port: SidePort,
     chunk_size: usize,
     max_data_size: usize,
     tx: mpsc::Sender<PortEvt>,
@@ -246,7 +264,8 @@ pub struct Sender {
     port_allocator: PortAllocator,
     storage: AnyStorage,
     all_received_supported: bool,
-    _drop_tx: oneshot::Sender<()>,
+    pre_connected_rx: Option<watch::Receiver<PreConnectState>>,
+    handle: runtime::Handle,
 }
 
 impl fmt::Debug for Sender {
@@ -264,19 +283,13 @@ impl fmt::Debug for Sender {
 impl Sender {
     /// Create a new sender.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
-        local_port: u32, remote_port: u32, chunk_size: usize, max_data_size: usize, tx: mpsc::Sender<PortEvt>,
-        credits: MixedCreditUser, hangup_recved: Weak<AtomicBool>,
+    pub(super) fn new(
+        local_port: SidePort, remote_port: SidePort, chunk_size: usize, max_data_size: usize,
+        tx: mpsc::Sender<PortEvt>, credits: MixedCreditUser, hangup_recved: Weak<AtomicBool>,
         hangup_notify: Weak<std::sync::Mutex<Option<Vec<oneshot::Sender<()>>>>>, port_allocator: PortAllocator,
         storage: AnyStorage, all_received_supported: bool,
+        pre_connected_rx: Option<watch::Receiver<PreConnectState>>,
     ) -> Self {
-        let (_drop_tx, drop_rx) = oneshot::channel();
-        let tx_drop = tx.clone();
-        exec::spawn(async move {
-            let _ = drop_rx.await;
-            let _ = tx_drop.send(PortEvt::SenderDropped { local_port }).await;
-        });
-
         Self {
             local_port,
             remote_port,
@@ -289,17 +302,18 @@ impl Sender {
             port_allocator,
             storage,
             all_received_supported,
-            _drop_tx,
+            pre_connected_rx,
+            handle: runtime::Handle::current(),
         }
     }
 
     /// The local port number.
-    pub fn local_port(&self) -> u32 {
+    pub fn local_port(&self) -> SidePort {
         self.local_port
     }
 
     /// The remote port number.
-    pub fn remote_port(&self) -> u32 {
+    pub fn remote_port(&self) -> SidePort {
         self.remote_port
     }
 
@@ -318,6 +332,29 @@ impl Sender {
         self.max_data_size
     }
 
+    /// Checks whether a possible error is due to the rejection of a pre-connected
+    /// error and maps the returned error appropriately.
+    async fn handle_pre_connect_result<T>(&mut self, res: Result<T, SendError>) -> Result<T, SendError> {
+        match res {
+            Ok(res) => Ok(res),
+            Err(err) => match &mut self.pre_connected_rx {
+                None => Err(err),
+                Some(pre_connected_rx) => {
+                    let Ok(res) = pre_connected_rx.wait_for(|res| res.is_decided()).await else {
+                        return Err(err);
+                    };
+                    match &*res {
+                        PreConnectState::PreConnected => unreachable!(),
+                        PreConnectState::Accepted => Err(err),
+                        PreConnectState::Rejected { no_ports } => {
+                            Err(SendError::Rejected { no_ports: *no_ports })
+                        }
+                    }
+                }
+            },
+        }
+    }
+
     /// Sends data over the channel.
     ///
     /// Waits until send space becomes available.
@@ -325,7 +362,12 @@ impl Sender {
     ///
     /// # Cancel safety
     /// If this function is cancelled before completion, the remote endpoint will receive no data.
-    pub async fn send(&mut self, mut data: Bytes) -> Result<(), SendError> {
+    pub async fn send(&mut self, data: Bytes) -> Result<(), SendError> {
+        let res = self.do_send(data).await;
+        self.handle_pre_connect_result(res).await
+    }
+
+    async fn do_send(&mut self, mut data: Bytes) -> Result<(), SendError> {
         if data.is_empty() {
             let mut credits = self.credits.request(1, 1).await?;
 
@@ -376,6 +418,21 @@ impl Sender {
     /// The maximum size of data sendable by this function is limited by
     /// the total receive buffer size.
     pub fn try_send(&mut self, data: &Bytes) -> Result<(), TrySendError> {
+        match self.do_try_send(data) {
+            Ok(()) => Ok(()),
+            Err(err) => match &mut self.pre_connected_rx {
+                None => Err(err),
+                Some(pre_connected_rx) => match &*pre_connected_rx.borrow_and_update() {
+                    PreConnectState::PreConnected | PreConnectState::Accepted => Err(err),
+                    PreConnectState::Rejected { no_ports } => {
+                        Err(TrySendError::Send(SendError::Rejected { no_ports: *no_ports }))
+                    }
+                },
+            },
+        }
+    }
+
+    fn do_try_send(&mut self, data: &Bytes) -> Result<(), TrySendError> {
         let mut data = data.clone();
 
         if data.is_empty() {
@@ -440,18 +497,34 @@ impl Sender {
         Flushed(task.boxed())
     }
 
+    /// Allocates a port connection request.
+    pub fn connect_req(&self) -> Result<ConnectReq, ConnectReqsExhausted> {
+        self.port_allocator.connect_req()
+    }
+
     /// Sends port open requests over this port and returns the connect requests.
     ///
     /// The receiver limits the number of ports sendable per call, see
     /// [Receiver::max_ports](super::Receiver::max_ports).
-    pub async fn connect(&mut self, ports: Vec<PortReq>, wait: bool) -> Result<Vec<Connect>, SendError> {
+    pub async fn connect(&mut self, connects: Vec<ConnectReq>) -> Result<Vec<Connect>, SendError> {
+        let res = self.do_connect(connects).await;
+        self.handle_pre_connect_result(res).await
+    }
+
+    async fn do_connect(&mut self, connect_reqs: Vec<ConnectReq>) -> Result<Vec<Connect>, SendError> {
+        // Assemble port requests.
         let mut ports_response = Vec::new();
         let mut sent_txs = Vec::new();
         let mut connects = Vec::new();
 
-        for port in ports {
+        for connect_req in connect_reqs {
+            let port_req = connect_req.into_port_req().await.ok_or(SendError::LocalPortsExhausted)?;
+
+            let (sent_tx, sent_rx) = oneshot::channel();
+            sent_txs.push(sent_tx);
+
             let (response_tx, response_rx) = oneshot::channel();
-            ports_response.push((port, response_tx));
+            ports_response.push((port_req, response_tx));
 
             let response = exec::spawn(async move {
                 match response_rx.await {
@@ -467,12 +540,10 @@ impl Sender {
                 }
             });
 
-            let (sent_tx, sent_rx) = mpsc::channel(1);
-            sent_txs.push(sent_tx);
-
-            connects.push(Connect { sent_rx, response });
+            connects.push(Connect { sent_rx: Some(sent_rx), response });
         }
 
+        // Send port data.
         let mut first = true;
         let mut credits = AssignedCredits::empty(CreditPool::Port);
 
@@ -496,7 +567,6 @@ impl Sender {
                 remote_port: self.remote_port,
                 first,
                 last: next.is_empty(),
-                wait,
                 ports: ports_response,
             };
             self.tx.send(msg).await?;
@@ -613,7 +683,11 @@ impl Sender {
 
 impl Drop for Sender {
     fn drop(&mut self) {
-        // required for correct drop order
+        let tx = self.tx.clone();
+        let local_port = self.local_port;
+        self.handle.spawn(async move {
+            let _ = tx.send(PortEvt::SenderDropped { local_port }).await;
+        });
     }
 }
 
@@ -628,7 +702,12 @@ pub struct ChunkSender<'a> {
 }
 
 impl<'a> ChunkSender<'a> {
-    async fn send_int(&mut self, mut data: Bytes, finish: bool) -> Result<(), SendError> {
+    async fn send_int(&mut self, data: Bytes, finish: bool) -> Result<(), SendError> {
+        let res = self.do_send_int(data, finish).await;
+        self.sender.handle_pre_connect_result(res).await
+    }
+
+    async fn do_send_int(&mut self, mut data: Bytes, finish: bool) -> Result<(), SendError> {
         if data.is_empty() {
             if self.credits.is_empty() {
                 self.credits = self.sender.credits.request(1, 1).await?;

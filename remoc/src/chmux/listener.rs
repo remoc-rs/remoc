@@ -9,11 +9,11 @@ use tokio_util::sync::ReusableBoxFuture;
 
 use super::{
     mux::PortEvt,
-    port_allocator::{PortAllocator, PortNumber},
+    port_allocator::{AllocatedSidePort, PortAllocator, RemotePortAlreadyAllocated, ReservedPort},
     receiver::Receiver,
     sender::Sender,
 };
-use crate::exec;
+use crate::exec::runtime;
 
 /// An multiplexer listener error.
 #[derive(Debug, Clone)]
@@ -21,27 +21,37 @@ use crate::exec;
 pub enum ListenerError {
     /// All local ports are in use.
     LocalPortsExhausted,
+    /// The requested remote port number has alredy been allocated.
+    RemotePortAlreadyAllocated(u32),
     /// A multiplexer error has occurred or it has been terminated.
-    MultiplexerError,
+    ChMux,
 }
 
 impl fmt::Display for ListenerError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::LocalPortsExhausted => write!(f, "all local ports are in use"),
-            Self::MultiplexerError => write!(f, "multiplexer error"),
+            Self::RemotePortAlreadyAllocated(port) => write!(f, "remote port {port} is already allocated"),
+            Self::ChMux => write!(f, "multiplexer error"),
         }
     }
 }
 
 impl Error for ListenerError {}
 
+impl From<RemotePortAlreadyAllocated> for ListenerError {
+    fn from(err: RemotePortAlreadyAllocated) -> Self {
+        Self::RemotePortAlreadyAllocated(err.0)
+    }
+}
+
 impl From<ListenerError> for std::io::Error {
     fn from(err: ListenerError) -> Self {
         use std::io::ErrorKind;
         match err {
-            ListenerError::LocalPortsExhausted => Self::new(ErrorKind::AddrInUse, err.to_string()),
-            ListenerError::MultiplexerError => Self::new(ErrorKind::ConnectionReset, err.to_string()),
+            ListenerError::LocalPortsExhausted => Self::new(ErrorKind::AddrInUse, err),
+            ListenerError::RemotePortAlreadyAllocated(_) => Self::new(ErrorKind::AddrInUse, err),
+            ListenerError::ChMux => Self::new(ErrorKind::ConnectionReset, err),
         }
     }
 }
@@ -55,7 +65,9 @@ pub struct Request {
     wait: bool,
     allocator: PortAllocator,
     tx: mpsc::Sender<PortEvt>,
-    done_tx: Option<oneshot::Sender<()>>,
+    pre_connected: Option<std::sync::Mutex<(Sender, Receiver)>>,
+    done: bool,
+    handle: runtime::Handle,
 }
 
 impl fmt::Debug for Request {
@@ -64,23 +76,26 @@ impl fmt::Debug for Request {
             .field("remote_port", &self.remote_port)
             .field("id", &self.id)
             .field("wait", &self.wait)
+            .field("pre_connected", &self.is_pre_connected())
             .finish()
     }
 }
 
 impl Request {
-    pub(crate) fn new(
+    pub(super) fn new(
         remote_port: u32, id: u32, wait: bool, allocator: PortAllocator, tx: mpsc::Sender<PortEvt>,
+        pre_connected: Option<(Sender, Receiver)>,
     ) -> Self {
-        let (done_tx, done_rx) = oneshot::channel();
-        let drop_tx = tx.clone();
-        exec::spawn(async move {
-            if done_rx.await.is_err() {
-                let _ = drop_tx.send(PortEvt::Rejected { remote_port, no_ports: false }).await;
-            }
-        });
-
-        Self { remote_port, id, wait, allocator, tx, done_tx: Some(done_tx) }
+        Self {
+            remote_port,
+            id,
+            wait,
+            allocator,
+            tx,
+            pre_connected: pre_connected.map(std::sync::Mutex::new),
+            done: false,
+            handle: runtime::Handle::current(),
+        }
     }
 
     /// The remote port number.
@@ -101,13 +116,35 @@ impl Request {
         self.wait
     }
 
-    /// Accepts the request using a newly allocated local port.
-    pub async fn accept(self) -> Result<(Sender, Receiver), ListenerError> {
-        let local_port = if self.wait {
-            self.allocator.allocate().await
+    /// Whether the channel is pre-connected.
+    pub fn is_pre_connected(&self) -> bool {
+        self.pre_connected.is_some()
+    }
+
+    /// If this is a pre-connected connect request, accept it.
+    ///
+    /// Otherwise returns `None`.
+    async fn accept_pre_connected(&mut self) -> Option<(Sender, Receiver)> {
+        let reserved_port = self.allocator.reserve().await;
+        let mutex = self.pre_connected.take()?;
+        let (sender, receiver) = mutex.into_inner().unwrap();
+        let _ =
+            self.tx.send(PortEvt::AcceptedAfterPreConnect { remote_port: self.remote_port, reserved_port }).await;
+        self.done = true;
+        Some((sender, receiver))
+    }
+
+    /// Accepts the request.
+    pub async fn accept(mut self) -> Result<(Sender, Receiver), ListenerError> {
+        if let Some(tx_rx) = self.accept_pre_connected().await {
+            return Ok(tx_rx);
+        }
+
+        let reserved = if self.wait {
+            self.allocator.reserve().await
         } else {
-            match self.allocator.try_allocate() {
-                Some(local_port) => local_port,
+            match self.allocator.try_reserve() {
+                Some(reserved) => reserved,
                 None => {
                     self.reject(true).await;
                     return Err(ListenerError::LocalPortsExhausted);
@@ -115,16 +152,26 @@ impl Request {
             }
         };
 
-        self.accept_from(local_port).await
+        self.accept_reserved(reserved).await
     }
 
-    /// Accepts the request using the specified local port.
-    pub async fn accept_from(mut self, local_port: PortNumber) -> Result<(Sender, Receiver), ListenerError> {
+    /// Accepts the request using the already reserved port.
+    async fn accept_reserved(mut self, reserved_port: ReservedPort) -> Result<(Sender, Receiver), ListenerError> {
+        if let Some(tx_rx) = self.accept_pre_connected().await {
+            return Ok(tx_rx);
+        }
+
+        let local_port: AllocatedSidePort = if self.allocator.is_port_side_supported() {
+            reserved_port.into_remote(self.remote_port)?.into()
+        } else {
+            reserved_port.into_local().into()
+        };
+
         let (port_tx, port_rx) = oneshot::channel();
         let _ = self.tx.send(PortEvt::Accepted { local_port, remote_port: self.remote_port, port_tx }).await;
-        let _ = self.done_tx.take().unwrap().send(());
+        self.done = true;
 
-        port_rx.await.map_err(|_| ListenerError::MultiplexerError)
+        port_rx.await.map_err(|_| ListenerError::ChMux)
     }
 
     /// Rejects the connect request.
@@ -132,18 +179,32 @@ impl Request {
     /// Setting `no_ports` to true indicates to the remote endpoint that the request
     /// was rejected because no local port could be allocated.
     pub async fn reject(mut self, no_ports: bool) {
-        let _ = self.tx.send(PortEvt::Rejected { remote_port: self.remote_port, no_ports }).await;
-        let _ = self.done_tx.take().unwrap().send(());
+        let reserved_port = if self.is_pre_connected() { Some(self.allocator.reserve().await) } else { None };
+        let _ = self.tx.send(PortEvt::Rejected { remote_port: self.remote_port, no_ports, reserved_port }).await;
+        self.done = true;
     }
 }
 
 impl Drop for Request {
     fn drop(&mut self) {
-        // required for correct drop order
+        if self.done {
+            return;
+        }
+
+        let remote_port = self.remote_port;
+        let is_pre_connected = self.pre_connected.is_some();
+        let allocator = self.allocator.clone();
+        let drop_tx = self.tx.clone();
+
+        self.handle.spawn(async move {
+            let reserved_port = if is_pre_connected { Some(allocator.reserve().await) } else { None };
+            let _ = drop_tx.send(PortEvt::Rejected { remote_port, no_ports: false, reserved_port }).await;
+        });
     }
 }
 
 /// Remote connect message.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum RemoteConnectMsg {
     /// Remote connect request.
     Request(Request),
@@ -157,7 +218,8 @@ pub struct Listener {
     no_wait_rx: mpsc::Receiver<RemoteConnectMsg>,
     port_allocator: PortAllocator,
     terminate_tx: mpsc::UnboundedSender<()>,
-    closed: bool,
+    wait_closed: bool,
+    no_wait_closed: bool,
 }
 
 impl fmt::Debug for Listener {
@@ -171,7 +233,7 @@ impl Listener {
         wait_rx: mpsc::Receiver<RemoteConnectMsg>, no_wait_rx: mpsc::Receiver<RemoteConnectMsg>,
         port_allocator: PortAllocator, terminate_tx: mpsc::UnboundedSender<()>,
     ) -> Self {
-        Self { wait_rx, no_wait_rx, port_allocator, terminate_tx, closed: false }
+        Self { wait_rx, no_wait_rx, port_allocator, terminate_tx, wait_closed: false, no_wait_closed: false }
     }
 
     /// Obtains the port allocator.
@@ -184,34 +246,34 @@ impl Listener {
     /// Returns [None] when the client of the remote endpoint has been dropped and
     /// no more connection requests can be made.
     pub async fn accept(&mut self) -> Result<Option<(Sender, Receiver)>, ListenerError> {
-        if self.closed {
-            return Ok(None);
-        }
-
         loop {
             tokio::select! {
-                local_port = self.port_allocator.allocate() => {
+                biased;
+
+                reserved_port = self.port_allocator.reserve(), if !self.wait_closed || !self.no_wait_closed => {
                     match self.inspect().await? {
-                        Some(req) => break Ok(Some(req.accept_from(local_port).await?)),
+                        Some(req) => break Ok(Some(req.accept_reserved(reserved_port).await?)),
                         None => break Ok(None),
                     }
                 },
 
-                no_wait_req_opt = self.no_wait_rx.recv() => {
+                no_wait_req_opt = self.no_wait_rx.recv(), if !self.no_wait_closed => {
                     match no_wait_req_opt {
                         Some(RemoteConnectMsg::Request(no_wait_req)) => {
-                            match self.port_allocator.try_allocate() {
-                                Some(local_port) => break Ok(Some(no_wait_req.accept_from(local_port).await?)),
+                            match self.port_allocator.try_reserve() {
+                                Some(reserved_port) => break Ok(Some(no_wait_req.accept_reserved(reserved_port).await?)),
                                 None => no_wait_req.reject(true).await,
                             }
                         },
                         Some(RemoteConnectMsg::ClientDropped) => {
-                            self.closed = true;
-                            break Ok(None);
+                            self.no_wait_closed = true;
+                            continue;
                         },
-                        None => break Err(ListenerError::MultiplexerError),
+                        None => break Err(ListenerError::ChMux),
                     }
                 },
+
+                else => break Ok(None),
             }
         }
     }
@@ -226,22 +288,25 @@ impl Listener {
     /// Returns [None] when the client of the remote endpoint has been dropped and
     /// no more connection requests can be made.
     pub async fn inspect(&mut self) -> Result<Option<Request>, ListenerError> {
-        if self.closed {
-            return Ok(None);
-        }
+        loop {
+            let (wait, req_opt) = tokio::select! {
+                req_opt = self.wait_rx.recv(), if !self.wait_closed => (true, req_opt),
+                req_opt = self.no_wait_rx.recv(), if !self.no_wait_closed => (false, req_opt),
+                else => return Ok(None),
+            };
 
-        let req_opt = tokio::select! {
-            req_opt = self.wait_rx.recv() => req_opt,
-            req_opt = self.no_wait_rx.recv() => req_opt,
-        };
-
-        match req_opt {
-            Some(RemoteConnectMsg::Request(req)) => Ok(Some(req)),
-            Some(RemoteConnectMsg::ClientDropped) => {
-                self.closed = true;
-                Ok(None)
+            match req_opt {
+                Some(RemoteConnectMsg::Request(req)) => break Ok(Some(req)),
+                Some(RemoteConnectMsg::ClientDropped) => {
+                    if wait {
+                        self.wait_closed = true;
+                    } else {
+                        self.no_wait_closed = true;
+                    }
+                    continue;
+                }
+                None => break Err(ListenerError::ChMux),
             }
-            None => Err(ListenerError::MultiplexerError),
         }
     }
 

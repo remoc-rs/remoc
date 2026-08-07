@@ -19,7 +19,7 @@ pub enum InnerSender {
     /// Local sender.
     Local(tokio::sync::oneshot::Sender<Bytes>),
     /// Remote sender.
-    Remote(bin::Sender),
+    Remote(Box<bin::Sender>),
 }
 
 impl Sender {
@@ -28,7 +28,7 @@ impl Sender {
             Some(local_tx) => Some(InnerSender::Local(local_tx)),
             None => {
                 let mut bin_tx = self.bin_tx.lock().unwrap();
-                bin_tx.take().map(InnerSender::Remote)
+                bin_tx.take().map(|tx| InnerSender::Remote(Box::new(tx)))
             }
         }
     }

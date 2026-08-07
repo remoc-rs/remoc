@@ -1018,8 +1018,9 @@ where
             async move {
                 loop {
                     let event = tokio::select! {
-                        event = self.recv() => event,
+                        biased;
                         _ = &mut dropped_rx => return,
+                        event = self.recv() => event,
                     };
 
                     let mut inner = inner_task.write().await;

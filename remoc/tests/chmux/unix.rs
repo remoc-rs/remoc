@@ -63,7 +63,7 @@ async fn uds_client() {
         let client = client;
 
         println!("Client connecting...");
-        let (mut tx, mut rx) = client.connect().await.unwrap();
+        let (mut tx, mut rx) = client.connect_port().await.unwrap();
         println!("Client connected");
 
         tx.send("Hi from client".into()).await.unwrap();
@@ -146,7 +146,7 @@ async fn uds_round_trip_latency() -> Duration {
     });
 
     // Client: measure round-trip latency.
-    let (mut tx, mut rx) = client.connect().await.unwrap();
+    let (mut tx, mut rx) = client.connect_port().await.unwrap();
 
     // Warm-up round-trip.
     tx.send(Bytes::from_static(b"warmup")).await.unwrap();

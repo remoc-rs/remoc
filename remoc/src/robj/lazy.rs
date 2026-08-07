@@ -199,13 +199,14 @@ where
 
         exec::spawn(async move {
             tokio::select! {
+                biased;
+                Err(_) = keep_rx => (),
                 res = request_rx.recv() => {
                     if let Ok(Some(value_tx)) = res {
                         let value = value_fut.await;
                         let _ = value_tx.send(value);
                     }
                 },
-                Err(_) = keep_rx => (),
             }
         });
 

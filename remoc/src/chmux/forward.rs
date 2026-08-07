@@ -4,7 +4,7 @@ use bytes::Buf;
 use std::{fmt, num::Wrapping};
 use tracing::Instrument;
 
-use super::{ConnectError, PortReq, Received, RecvChunkError, RecvError, SendError};
+use super::{ConnectError, Received, RecvChunkError, RecvError, SendError, port_allocator::ConnectReqsExhausted};
 use crate::exec;
 
 /// An error occurred during forwarding of a message.
@@ -15,6 +15,8 @@ pub enum ForwardError {
     Send(SendError),
     /// Receiving failed.
     Recv(RecvError),
+    /// All local ports are in use.
+    LocalPortsExhausted,
 }
 
 impl From<SendError> for ForwardError {
@@ -29,20 +31,29 @@ impl From<RecvError> for ForwardError {
     }
 }
 
+impl From<ConnectReqsExhausted> for ForwardError {
+    fn from(_: ConnectReqsExhausted) -> Self {
+        Self::LocalPortsExhausted
+    }
+}
+
 impl fmt::Display for ForwardError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            ForwardError::Send(err) => write!(f, "forward send failed: {err}"),
-            ForwardError::Recv(err) => write!(f, "forward receive failed: {err}"),
+            Self::Send(err) => write!(f, "forward send failed: {err}"),
+            Self::Recv(err) => write!(f, "forward receive failed: {err}"),
+            Self::LocalPortsExhausted => write!(f, "all local ports are in use"),
         }
     }
 }
 
 impl From<ForwardError> for std::io::Error {
     fn from(err: ForwardError) -> Self {
+        use std::io::ErrorKind;
         match err {
             ForwardError::Send(err) => err.into(),
             ForwardError::Recv(err) => err.into(),
+            ForwardError::LocalPortsExhausted => Self::new(ErrorKind::AddrInUse, err),
         }
     }
 }
@@ -76,8 +87,9 @@ pub(crate) async fn forward(rx: &mut super::Receiver, tx: &mut super::Sender) ->
 
     loop {
         let event = tokio::select! {
-            res = rx.recv_any() => Event::Received(res?),
+            biased;
             () = tx.closed(), if !closed => Event::Closed,
+            res = rx.recv_any() => Event::Received(res?),
         };
 
         match event {
@@ -111,35 +123,35 @@ pub(crate) async fn forward(rx: &mut super::Receiver, tx: &mut super::Sender) ->
                 let allocator = tx.port_allocator();
 
                 // Allocate local outgoing ports for forwarding.
-                let mut ports = Vec::new();
-                let mut wait = false;
+                let mut connect_reqs = Vec::new();
                 for req in &reqs {
-                    let port = allocator.allocate().await;
-                    ports.push(PortReq::new(port).with_id(req.id()));
-                    wait |= req.is_wait();
+                    let mut connect_req = allocator.connect_req()?;
+                    connect_req = connect_req.with_id(req.id());
+                    if req.is_wait() {
+                        connect_req = connect_req.wait();
+                    }
+                    if req.is_pre_connected() {
+                        connect_req = connect_req.try_pre_connect();
+                    }
+                    connect_reqs.push(connect_req);
                 }
 
                 // Connect them.
-                let connects = tx.connect(ports, wait).await?;
+                let connects = tx.connect(connect_reqs).await?;
                 for (req, connect) in reqs.into_iter().zip(connects) {
                     exec::spawn(
                         async move {
                             let id = req.id();
                             match connect.await {
-                                Ok((out_tx, out_rx)) => {
-                                    let in_port = out_tx.port_allocator().allocate().await;
-                                    match req.accept_from(in_port).await {
-                                        Ok((in_tx, in_rx)) => {
-                                            spawn_forward(id, out_rx, in_tx);
-                                            spawn_forward(id, in_rx, out_tx);
-                                        }
-                                        Err(err) => {
-                                            tracing::debug!(
-                                                "port forwarding for id {id} failed to accept: {err}"
-                                            );
-                                        }
+                                Ok((out_tx, out_rx)) => match req.accept().await {
+                                    Ok((in_tx, in_rx)) => {
+                                        spawn_forward(id, out_rx, in_tx);
+                                        spawn_forward(id, in_rx, out_tx);
                                     }
-                                }
+                                    Err(err) => {
+                                        tracing::debug!("port forwarding for id {id} failed to accept: {err}");
+                                    }
+                                },
                                 Err(err) => {
                                     tracing::debug!("port forwarding for id {id} failed to connect: {err}");
                                     req.reject(matches!(

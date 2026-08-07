@@ -314,6 +314,8 @@ fn drop_when_closed(
     exec::spawn(async move {
         loop {
             tokio::select! {
+                biased;
+                _ = dropped_rx.recv() => break,
                 res = closed_rx.changed() => {
                     match res {
                         Ok(()) if closed_rx.borrow().is_some() => break,
@@ -321,7 +323,6 @@ fn drop_when_closed(
                         Err(_) => break,
                     }
                 },
-                _ = dropped_rx.recv() => break,
             }
         }
 
@@ -722,10 +723,10 @@ where
             .into_iter()
             .filter_map(|parallel_port| {
                 let (parallel_tx, parallel_rx) = tokio::sync::oneshot::channel();
-                PortDeserializer::accept::<D::Error>(parallel_port, |local_port, request| {
+                PortDeserializer::accept::<D::Error>(parallel_port, |request| {
                     {
                         async move {
-                            if let Ok((raw_tx, _raw_rx)) = request.accept_from(local_port).await {
+                            if let Ok((raw_tx, _raw_rx)) = request.accept().await {
                                 let _ = parallel_tx.send(raw_tx);
                             }
                         }
@@ -739,10 +740,10 @@ where
         let parallel = parallel_txs.len();
 
         // Accept chmux port request.
-        PortDeserializer::accept(port, move |local_port, request| {
+        PortDeserializer::accept(port, move |request| {
             async move {
                 // Accept chmux connection request.
-                let (raw_tx, raw_rx) = match request.accept_from(local_port).await {
+                let (raw_tx, raw_rx) = match request.accept().await {
                     Ok(tx_rx) => tx_rx,
                     Err(err) => {
                         let _ = remote_send_err_tx.send(Some(RemoteSendError::Listen(err)));

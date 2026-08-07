@@ -105,8 +105,9 @@ where
         let (conn, tx, rx) = remoc::Connect::framed(a_cfg, transport_a_tx, transport_a_rx).await.unwrap();
         exec::spawn(async move {
             tokio::select! {
-                _ = conn => (),
+                biased;
                 _ = a_drop_tx.closed() => (),
+                _ = conn => (),
             }
         });
         (tx, rx)
@@ -117,8 +118,9 @@ where
         let (conn, tx, rx) = remoc::Connect::framed(b_cfg, transport_b_tx, transport_b_rx).await.unwrap();
         exec::spawn(async move {
             tokio::select! {
-                _ = conn => (),
+                biased;
                 _ = drop_tx.closed() => (),
+                _ = conn => (),
             }
         });
         (tx, rx)

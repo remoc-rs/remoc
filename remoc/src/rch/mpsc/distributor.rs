@@ -29,13 +29,14 @@ where
             };
 
             tokio::select! {
-                res = tx.reserve() => return res.ok(),
+                biased;
                 res = remove => {
                     match res {
                         Some(()) => return None,
                         None => self.remove_rx = None,
                     }
                 }
+                res = tx.reserve() => return res.ok(),
             }
         }
     }
@@ -125,6 +126,8 @@ where
             };
 
             tokio::select! {
+                biased;
+
                 cont = send_task => {
                     if !cont {
                         return;

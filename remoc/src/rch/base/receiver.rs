@@ -80,16 +80,9 @@ impl RecvError {
 
 /// Gathers ports sent from the remote endpoint during deserialization.
 pub struct PortDeserializer {
-    allocator: chmux::PortAllocator,
     /// Callbacks by remote port.
     #[allow(clippy::type_complexity)]
-    expected: HashMap<
-        u32,
-        (
-            chmux::PortNumber,
-            Box<dyn FnOnce(chmux::PortNumber, chmux::Request) -> BoxFuture<'static, ()> + Send + 'static>,
-        ),
-    >,
+    expected: HashMap<u32, Box<dyn FnOnce(chmux::Request) -> BoxFuture<'static, ()> + Send + 'static>>,
     storage: AnyStorage,
     tasks: Vec<BoxFuture<'static, ()>>,
 }
@@ -100,9 +93,8 @@ impl PortDeserializer {
     }
 
     /// Create a new port deserializer and register it as active.
-    fn start(allocator: chmux::PortAllocator, storage: AnyStorage) -> Rc<RefCell<PortDeserializer>> {
-        let this =
-            Rc::new(RefCell::new(Self { allocator, expected: HashMap::new(), storage, tasks: Vec::new() }));
+    fn start(storage: AnyStorage) -> Rc<RefCell<PortDeserializer>> {
+        let this = Rc::new(RefCell::new(Self { expected: HashMap::new(), storage, tasks: Vec::new() }));
         let weak = Rc::downgrade(&this);
         Self::INSTANCE.with(move |i| i.replace(weak));
         this
@@ -129,23 +121,19 @@ impl PortDeserializer {
 
     /// Accept the chmux port with the specified remote port number sent from the remote endpoint.
     ///
-    /// Returns the local port number and calls the specified function with the received connect request.
+    /// Calls the specified function with the received connect request.
     pub fn accept<E>(
-        remote_port: u32,
-        callback: impl FnOnce(chmux::PortNumber, chmux::Request) -> BoxFuture<'static, ()> + Send + 'static,
-    ) -> Result<u32, E>
+        remote_port: u32, callback: impl FnOnce(chmux::Request) -> BoxFuture<'static, ()> + Send + 'static,
+    ) -> Result<(), E>
     where
         E: serde::de::Error,
     {
         let this = Self::instance()?;
         let mut this =
             this.try_borrow_mut().expect("PortDeserializer is referenced multiple times during deserialization");
-        let local_port =
-            this.allocator.try_allocate().ok_or_else(|| serde::de::Error::custom("ports exhausted"))?;
-        let local_port_num = *local_port;
-        this.expected.insert(remote_port, (local_port, Box::new(callback)));
+        this.expected.insert(remote_port, Box::new(callback));
 
-        Ok(local_port_num)
+        Ok(())
     }
 
     /// Returns the data storage of the channel multiplexer.
@@ -326,14 +314,13 @@ impl ErasedReceiver {
                         Some(Received::Chunks) => {
                             // Start deserialization thread.
                             let deserializer = self.deserializer.clone();
-                            let allocator = self.receiver.port_allocator();
                             let handle_storage = self.receiver.storage();
                             let (tx, rx) = tokio::sync::mpsc::channel(BIG_DATA_CHUNK_QUEUE);
 
                             let task = task::spawn_blocking(move || {
                                 let mut cbr = ChannelBytesReader::new(rx);
 
-                                let pds_ref = PortDeserializer::start(allocator, handle_storage);
+                                let pds_ref = PortDeserializer::start(handle_storage);
                                 let item = deserializer.deserialize(&mut cbr)?;
                                 let pds = PortDeserializer::finish(pds_ref);
 
@@ -362,8 +349,7 @@ impl ErasedReceiver {
                             return Err(RecvError::MaxItemSizeExceeded);
                         }
 
-                        let pdf_ref =
-                            PortDeserializer::start(self.receiver.port_allocator(), self.receiver.storage());
+                        let pdf_ref = PortDeserializer::start(self.receiver.storage());
                         let item_res = self.deserializer.deserialize(&mut data.reader());
                         self.data = DataSource::None;
                         self.item = Some(item_res?);
@@ -471,8 +457,8 @@ impl ErasedReceiver {
                 // Call port callbacks from received objects, ignoring superfluous requests for
                 // forward compatibility.
                 for request in requests {
-                    if let Some((local_port, callback)) = pds.expected.remove(&request.id()) {
-                        exec::spawn(callback(local_port, request).in_current_span());
+                    if let Some(callback) = pds.expected.remove(&request.id()) {
+                        exec::spawn(callback(request).in_current_span());
                     }
                 }
 

@@ -118,7 +118,7 @@ async fn basic() {
 
     {
         println!("A client connecting 1...");
-        let ret: Result<(chmux::Sender, chmux::Receiver), _> = a_client.connect().await;
+        let ret: Result<(chmux::Sender, chmux::Receiver), _> = a_client.connect_port().await;
         println!("A client connect result: {:?}", ret);
     }
 
@@ -126,7 +126,7 @@ async fn basic() {
     sleep(Duration::from_secs(3)).await;
 
     println!("A client connecting 2...");
-    let (mut tx, mut rx): (chmux::Sender, chmux::Receiver) = a_client.connect().await.unwrap();
+    let (mut tx, mut rx): (chmux::Sender, chmux::Receiver) = a_client.connect_port().await.unwrap();
     println!("A client connected.");
 
     let mut n_recv = 0;
@@ -207,7 +207,7 @@ async fn receiver_stream() {
         let _ = server_done_tx.send(());
     });
 
-    let (mut tx, mut rx): (chmux::Sender, chmux::Receiver) = a_client.connect().await.unwrap();
+    let (mut tx, mut rx): (chmux::Sender, chmux::Receiver) = a_client.connect_port().await.unwrap();
 
     let mut n = 0;
     loop {
@@ -286,7 +286,7 @@ async fn all_received() {
         let _ = server_done_tx.send(());
     });
 
-    let (mut tx, rx): (chmux::Sender, chmux::Receiver) = a_client.connect().await.unwrap();
+    let (mut tx, rx): (chmux::Sender, chmux::Receiver) = a_client.connect_port().await.unwrap();
     assert!(tx.is_all_received_supported());
     tx.set_global_credits_use(false);
     // Need one more trigger, since receive notification will be sent by subsequent rx.recv() call
@@ -348,7 +348,7 @@ async fn all_received_receiver_dropped() {
         let _ = server_done_tx.send(());
     });
 
-    let (mut tx, rx): (chmux::Sender, chmux::Receiver) = a_client.connect().await.unwrap();
+    let (mut tx, rx): (chmux::Sender, chmux::Receiver) = a_client.connect_port().await.unwrap();
     assert!(tx.is_all_received_supported());
     receiver_ready_rx.await.unwrap();
     tx.send("message".into()).await.unwrap();
@@ -440,7 +440,7 @@ async fn hangup() {
     });
 
     println!("A client connecting to service...");
-    let (mut tx, mut rx): (chmux::Sender, chmux::Receiver) = a_client.connect().await.unwrap();
+    let (mut tx, mut rx): (chmux::Sender, chmux::Receiver) = a_client.connect_port().await.unwrap();
     println!("A client connected.");
 
     let hn = tx.closed();
@@ -483,6 +483,120 @@ async fn hangup() {
     drop(a_client);
 
     println!("Waiting for server close");
+    server_done_rx.await.unwrap();
+
+    drop(a_server);
+
+    println!("Waiting for multiplexers");
+    a_mux_done_rx.await.unwrap();
+    b_mux_done_rx.await.unwrap();
+}
+
+#[cfg_attr(not(feature = "js"), tokio::test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+async fn no_pre_connect() {
+    crate::init();
+
+    println!("Connecting...");
+    loop_transport!(0, a_tx, a_rx, b_tx, b_rx);
+    let ((a_mux, a_client, a_server), (b_mux, b_client, mut b_server)) =
+        try_join(chmux::ChMux::new(cfg(), a_tx, a_rx), chmux::ChMux::new(cfg2(), b_tx, b_rx)).await.unwrap();
+    println!("Connected: a_mux={:?}, b_mux={:?}", a_mux, b_mux);
+
+    let (a_mux_done_tx, a_mux_done_rx) = oneshot::channel();
+    exec::spawn(
+        async move {
+            println!("A mux run");
+            a_mux.run().await.expect("a_mux");
+            let _ = a_mux_done_tx.send(());
+        }
+        .instrument(tracing::info_span!("A mux")),
+    );
+
+    let (b_mux_done_tx, b_mux_done_rx) = oneshot::channel();
+    exec::spawn(
+        async move {
+            println!("B mux run");
+            b_mux.run().await.expect("b_mux");
+            let _ = b_mux_done_tx.send(());
+        }
+        .instrument(tracing::info_span!("B mux")),
+    );
+
+    const N_MSG: usize = 500;
+
+    let (server_done_tx, server_done_rx) = oneshot::channel();
+    exec::spawn(async move {
+        println!("B server start");
+        while let Some((mut tx, mut rx)) = b_server.accept().await.unwrap() {
+            exec::spawn(async move {
+                while let Some(msg) = rx.recv().await.unwrap() {
+                    println!("Server received: {}", String::from_utf8(msg.into()).unwrap());
+                }
+                println!("Server receiver ended");
+            });
+
+            for i in 0..N_MSG {
+                let msg = format!("message no {i}");
+                match tx.send(msg.clone().into()).await {
+                    Ok(()) => (),
+                    Err(SendError::Closed { gracefully }) => {
+                        println!("Client closed connection with gracefully={gracefully}");
+                        break;
+                    }
+                    other => other.unwrap(),
+                }
+                if i.is_multiple_of(100) {
+                    tx.flush().await;
+                }
+                println!("Server sent: {msg}");
+            }
+
+            drop(tx);
+            println!("Server dropped transmitter");
+        }
+
+        println!("B Server quit");
+        drop(b_client);
+        let _ = server_done_tx.send(());
+    });
+
+    {
+        println!("A client connecting 1...");
+        let connect = a_client.connect(a_client.connect_req().unwrap().wait());
+        println!("A client connect_ext result: {connect:?}");
+        let res = connect.await;
+        println!("A client connect result: {res:?}");
+    }
+
+    println!("Delay test...");
+    sleep(Duration::from_secs(3)).await;
+
+    println!("A client connecting 2...");
+    let (mut tx, mut rx): (chmux::Sender, chmux::Receiver) =
+        a_client.connect(a_client.connect_req().unwrap().wait()).await.expect("Connect failed");
+    println!("A client connected.");
+
+    let mut n_recv = 0;
+    while let Some(msg) = rx.recv().await.unwrap() {
+        let s = String::from_utf8(msg.into()).unwrap();
+        println!("A client received: {}", s);
+        n_recv += 1;
+
+        println!("A client replying...");
+        tx.send(format!("Reply: {}", s).into()).await.unwrap();
+        println!("A client replied");
+    }
+    if n_recv != N_MSG {
+        panic!("received not equal number messages than sent");
+    }
+    println!("A client receiver closed");
+
+    drop(tx);
+    drop(rx);
+    drop(a_client);
+
+    println!("Waiting for server");
     server_done_rx.await.unwrap();
 
     drop(a_server);

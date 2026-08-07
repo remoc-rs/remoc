@@ -157,6 +157,7 @@ mod threads {
             while let Some(SleepReq { duration, mut wake_tx }) = sleep_rx.recv().await {
                 wasm_bindgen_futures::spawn_local(async move {
                     tokio::select! {
+                        biased;
                         () = JsSleep::new(duration) => {
                             let _ = wake_tx.send(());
                         },

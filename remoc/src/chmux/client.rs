@@ -10,11 +10,10 @@ use std::{
     },
     task::{Context, Poll},
 };
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot};
 
 use super::{
-    PortReq,
-    port_allocator::{PortAllocator, PortNumber},
+    port_allocator::{ConnectReq, ConnectReqsExhausted, PortAllocator, PortReq},
     receiver::Receiver,
     sender::Sender,
 };
@@ -29,7 +28,7 @@ pub enum ConnectError {
     /// All remote ports are in use.
     RemotePortsExhausted,
     /// Too many connection requests are pending.
-    TooManyPendingConnectionRequests,
+    TooManyPendingConnectReqs,
     /// Connection has been rejected by server.
     Rejected,
     /// A multiplexer error has occurred or it has been terminated.
@@ -41,7 +40,7 @@ impl fmt::Display for ConnectError {
         match self {
             Self::LocalPortsExhausted => write!(f, "all local ports are in use"),
             Self::RemotePortsExhausted => write!(f, "all remote ports are in use"),
-            Self::TooManyPendingConnectionRequests => write!(f, "too many connection requests are pending"),
+            Self::TooManyPendingConnectReqs => write!(f, "too many connection requests are pending"),
             Self::Rejected => write!(f, "connection has been rejected by server"),
             Self::ChMux => write!(f, "multiplexer error"),
         }
@@ -54,69 +53,31 @@ impl From<ConnectError> for std::io::Error {
     fn from(err: ConnectError) -> Self {
         use std::io::ErrorKind;
         match err {
-            ConnectError::LocalPortsExhausted => Self::new(ErrorKind::AddrInUse, err.to_string()),
-            ConnectError::RemotePortsExhausted => Self::new(ErrorKind::AddrInUse, err.to_string()),
-            ConnectError::TooManyPendingConnectionRequests => Self::new(ErrorKind::AddrInUse, err.to_string()),
-            ConnectError::Rejected => Self::new(ErrorKind::ConnectionRefused, err.to_string()),
-            ConnectError::ChMux => Self::new(ErrorKind::ConnectionReset, err.to_string()),
+            ConnectError::LocalPortsExhausted => Self::new(ErrorKind::AddrInUse, err),
+            ConnectError::RemotePortsExhausted => Self::new(ErrorKind::AddrInUse, err),
+            ConnectError::TooManyPendingConnectReqs => Self::new(ErrorKind::AddrInUse, err),
+            ConnectError::Rejected => Self::new(ErrorKind::ConnectionRefused, err),
+            ConnectError::ChMux => Self::new(ErrorKind::ConnectionReset, err),
         }
-    }
-}
-
-/// Accounts connection request credits.
-#[derive(Debug, Clone)]
-struct ConnectRequestCrediter(Arc<Semaphore>);
-
-impl ConnectRequestCrediter {
-    /// Creates a new connection request crediter.
-    pub fn new(limit: u16) -> Self {
-        Self(Arc::new(Semaphore::new(limit.into())))
-    }
-
-    /// Obtains a connection request credit.
-    ///
-    /// Waits for the credit to become available.
-    pub async fn request(&self) -> ConnectRequestCredit {
-        ConnectRequestCredit(self.0.clone().acquire_owned().await.unwrap())
-    }
-
-    /// Tries to obtain a connection request credit.
-    ///
-    /// Does not wait for the credit to become available.
-    pub fn try_request(&self) -> Option<ConnectRequestCredit> {
-        self.0.clone().try_acquire_owned().ok().map(ConnectRequestCredit)
-    }
-}
-
-/// A credit for requesting a connection.
-pub(crate) struct ConnectRequestCredit(OwnedSemaphorePermit);
-
-impl Drop for ConnectRequestCredit {
-    fn drop(&mut self) {
-        let _ = self.0;
     }
 }
 
 /// Connection to remote service request to local multiplexer.
 #[derive(Debug)]
-pub(crate) struct ConnectRequest {
-    /// Local port.
-    pub local_port: PortNumber,
-    /// Port id.
-    pub id: u32,
+pub(super) struct ConnectRequest {
+    /// Port request.
+    pub port_req: PortReq,
     /// Notification that request has been queued for sending.
-    pub sent_tx: mpsc::Sender<()>,
+    pub sent_tx: oneshot::Sender<()>,
     /// Response channel sender.
     pub response_tx: oneshot::Sender<ConnectResponse>,
-    /// Wait for port to become available.
-    pub wait: bool,
 }
 
 /// Connection to remote service response from local multiplexer.
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
-pub(crate) enum ConnectResponse {
-    /// Connection accepted and channel opened.
+pub(super) enum ConnectResponse {
+    /// Connection accepted or pre-connected and channel opened.
     Accepted(Sender, Receiver),
     /// Connection was rejected.
     Rejected {
@@ -125,12 +86,41 @@ pub(crate) enum ConnectResponse {
     },
 }
 
+/// Pre-connection state.
+#[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
+pub(super) enum PreConnectState {
+    /// Port is pre-connected and no accept/reject response has yet been
+    /// received from the remote endpoint.
+    PreConnected,
+    /// Connection accepted.
+    Accepted,
+    /// Connection was rejected.
+    Rejected {
+        /// Remote endpoint had not ports available.
+        no_ports: bool,
+    },
+}
+
+impl PreConnectState {
+    /// Whether the accept/reject response has been received.
+    pub fn is_decided(&self) -> bool {
+        !matches!(self, Self::PreConnected)
+    }
+}
+
 /// An outstanding connection request.
 ///
 /// Await it to obtain the result of the connection request.
 pub struct Connect {
-    pub(crate) sent_rx: mpsc::Receiver<()>,
+    pub(crate) sent_rx: Option<oneshot::Receiver<()>>,
     pub(crate) response: JoinHandle<Result<(Sender, Receiver), ConnectError>>,
+}
+
+impl fmt::Debug for Connect {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("Connect").finish()
+    }
 }
 
 impl Connect {
@@ -142,7 +132,10 @@ impl Connect {
     ///
     /// This will also return when the multiplexer has been terminated.
     pub async fn sent(&mut self) {
-        let _ = self.sent_rx.recv().await;
+        if let Some(sent_rx) = &mut self.sent_rx {
+            let _ = sent_rx.await;
+            self.sent_rx = None;
+        }
     }
 }
 
@@ -162,7 +155,6 @@ impl Future for Connect {
 #[derive(Clone)]
 pub struct Client {
     tx: mpsc::UnboundedSender<ConnectRequest>,
-    crediter: ConnectRequestCrediter,
     port_allocator: PortAllocator,
     listener_dropped: Arc<AtomicBool>,
     terminate_tx: mpsc::UnboundedSender<()>,
@@ -175,17 +167,11 @@ impl fmt::Debug for Client {
 }
 
 impl Client {
-    pub(crate) fn new(
-        tx: mpsc::UnboundedSender<ConnectRequest>, limit: u16, port_allocator: PortAllocator,
+    pub(super) fn new(
+        tx: mpsc::UnboundedSender<ConnectRequest>, port_allocator: PortAllocator,
         listener_dropped: Arc<AtomicBool>, terminate_tx: mpsc::UnboundedSender<()>,
     ) -> Client {
-        Client {
-            tx,
-            crediter: ConnectRequestCrediter::new(limit),
-            port_allocator,
-            listener_dropped,
-            terminate_tx,
-        }
+        Client { tx, port_allocator, listener_dropped, terminate_tx }
     }
 
     /// Obtains the port allocator.
@@ -193,58 +179,44 @@ impl Client {
         self.port_allocator.clone()
     }
 
-    /// Connects to a newly allocated remote port from a newly allocated local port.
-    ///
-    /// This function waits until a local and remote port become available.
-    pub async fn connect(&self) -> Result<(Sender, Receiver), ConnectError> {
-        self.connect_ext(None, true).await?.await
+    /// Allocates a port connection request.
+    pub fn connect_req(&self) -> Result<ConnectReq, ConnectReqsExhausted> {
+        self.port_allocator.connect_req()
     }
 
-    /// Start opening a new port to the remote endpoint with extended options.
-    ///
-    /// If `local_port` is [None] a new local port number is allocated.
-    /// Otherwise the specified port is used.
-    ///
-    /// If `wait` is true, this function waits until a local and remote port become available.
-    /// Otherwise it returns the appropriate [ConnectError] if no ports are available.
-    /// If `wait` is false, it still waits until the listener on the remote endpoint accepts
-    /// or rejects the connection.
+    /// Connects the specified port connection request to the remote endpoint.
     ///
     /// This returns a [Connect] that must be awaited to obtain the result.
-    pub async fn connect_ext(&self, local_port: Option<PortReq>, wait: bool) -> Result<Connect, ConnectError> {
-        // Obtain local port.
-        let local_port = match local_port {
-            Some(local_port) => local_port,
-            None => {
-                if wait {
-                    self.port_allocator.allocate().await.into()
-                } else {
-                    self.port_allocator.try_allocate().ok_or(ConnectError::LocalPortsExhausted)?.into()
-                }
-            }
-        };
-
-        // Obtain credit for connection request.
-        let credit = if wait {
-            self.crediter.request().await
-        } else {
-            match self.crediter.try_request() {
-                Some(credit) => credit,
-                None => return Err(ConnectError::TooManyPendingConnectionRequests),
-            }
-        };
-
-        // Build and send request.
-        let (sent_tx, sent_rx) = mpsc::channel(1);
-        let (response_tx, response_rx) = oneshot::channel();
-        let PortReq { port: local_port, id } = local_port;
-        let req = ConnectRequest { local_port, id, sent_tx, response_tx, wait };
-        let _ = self.tx.send(req);
-
+    pub fn connect(&self, connect_req: ConnectReq) -> Connect {
+        let port_allocator = self.port_allocator.clone();
+        let tx = self.tx.clone();
+        let (sent_tx, sent_rx) = oneshot::channel();
         let listener_dropped = self.listener_dropped.clone();
+
         let response = exec::spawn(async move {
-            // Credit must be kept until response is received.
-            let _credit = credit;
+            if listener_dropped.load(Ordering::Relaxed) {
+                return Err(ConnectError::Rejected);
+            }
+
+            let port_req = connect_req.into_port_req().await.ok_or(ConnectError::LocalPortsExhausted)?;
+
+            // Obtain credit for connection request.
+            // Not necessary when port will be pre-connected, because then request already
+            // carries a connection request credit.
+            let _connect_credit = if port_req.opts.pre_connect_credit.is_some() {
+                None
+            } else {
+                Some(if port_req.opts.wait {
+                    port_allocator.connect_req_credit().await
+                } else {
+                    port_allocator.try_connect_req_credit().ok_or(ConnectError::TooManyPendingConnectReqs)?
+                })
+            };
+
+            // Build and send request.
+            let (response_tx, response_rx) = oneshot::channel();
+            let req = ConnectRequest { port_req, sent_tx, response_tx };
+            let _ = tx.send(req);
 
             // Process response.
             match response_rx.await {
@@ -266,7 +238,17 @@ impl Client {
             }
         });
 
-        Ok(Connect { sent_rx, response })
+        Connect { sent_rx: Some(sent_rx), response }
+    }
+
+    /// Connects to a newly allocated remote port from a newly allocated local port.
+    ///
+    /// This function waits until a local and remote port become available and tries
+    /// to pre-connect the port if possible.
+    pub async fn connect_port(&self) -> Result<(Sender, Receiver), ConnectError> {
+        let req = self.connect_req().map_err(|_| ConnectError::LocalPortsExhausted)?;
+        let req = req.wait().try_pre_connect();
+        self.connect(req).await
     }
 
     /// Terminates the multiplexer, forcibly closing all open ports.

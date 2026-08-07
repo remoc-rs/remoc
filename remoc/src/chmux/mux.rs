@@ -34,7 +34,7 @@ use super::{
     },
     listener::{Listener, RemoteConnectMsg, Request},
     msg::{DataCredits, ExchangedCfg, GlobalCredits, MultiplexMsg},
-    port_allocator::{PortAllocator, PortNumber, SidePort, SidePortNumber},
+    port_allocator::{AllocatedLocalPort, AllocatedSidePort, PortAllocator, SidePort},
     receiver::{PortReceiveMsg, ReceivedData, ReceivedPortRequests, Receiver},
     sender::Sender,
     sizer::{BufferSizer, DummySizer, GlobalCreditsReport},
@@ -53,14 +53,14 @@ enum PortState {
     /// from remote endpoint.
     Connecting {
         /// Allocated local port number.
-        port: PortNumber,
+        port: AllocatedLocalPort,
         /// Channel for providing the response to the local requester.
         response_tx: oneshot::Sender<ConnectResponse>,
     },
     /// Port is connected.
     Connected {
         /// Allocated local or remote port number.
-        _port: SidePortNumber,
+        _port: AllocatedSidePort,
         /// Remote port.
         remote_port: SidePort,
         /// Credit provider for sending.
@@ -96,7 +96,7 @@ pub(crate) enum PortEvt {
     /// Connection has been accepted.
     Accepted {
         /// Allocated local port.
-        local_port: SidePortNumber,
+        local_port: AllocatedSidePort,
         /// Remote port.
         remote_port: u32,
         /// Reply with port sender and receiver.
@@ -357,7 +357,7 @@ where
 
         // Create user objects.
         let cfg = Arc::new(cfg);
-        let port_allocator = PortAllocator::new(cfg.max_ports);
+        let port_allocator = PortAllocator::new(cfg.max_ports, remote_cfg.port_side);
         let remote_listener_dropped = Arc::new(AtomicBool::new(false));
         let multiplexer = ChMux {
             remote_protocol_version,
@@ -517,7 +517,7 @@ where
 
     /// Create port in port registry and return associated sender and receiver.
     #[tracing::instrument(level = "trace", skip(self))]
-    fn create_port(&mut self, local_port: SidePortNumber, remote_port: SidePort) -> (Sender, Receiver) {
+    fn create_port(&mut self, local_port: AllocatedSidePort, remote_port: SidePort) -> (Sender, Receiver) {
         let local_port_num = local_port.num();
 
         let sender_tx = self.channel_tx.clone();
@@ -1140,7 +1140,7 @@ where
                         "received PortOpened message for port {client_port} not in connecting state"
                     )));
                 };
-                let (sender, receiver) = self.create_port(SidePortNumber::Local(port), server_port);
+                let (sender, receiver) = self.create_port(AllocatedSidePort::Local(port), server_port);
                 let _ = response_tx.send(ConnectResponse::Accepted(sender, receiver));
             }
 

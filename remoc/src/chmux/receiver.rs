@@ -61,9 +61,9 @@ impl From<RecvError> for std::io::Error {
     fn from(err: RecvError) -> Self {
         use std::io::ErrorKind;
         match err {
-            RecvError::ChMux => Self::new(ErrorKind::ConnectionReset, err.to_string()),
-            RecvError::ExceedsMaxDataSize(_) => Self::new(ErrorKind::InvalidData, err.to_string()),
-            RecvError::ExceedsMaxPortCount(_) => Self::new(ErrorKind::InvalidData, err.to_string()),
+            RecvError::ChMux => Self::new(ErrorKind::ConnectionReset, err),
+            RecvError::ExceedsMaxDataSize(_) => Self::new(ErrorKind::InvalidData, err),
+            RecvError::ExceedsMaxPortCount(_) => Self::new(ErrorKind::InvalidData, err),
         }
     }
 }

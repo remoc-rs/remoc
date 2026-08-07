@@ -114,7 +114,7 @@ pub(crate) async fn forward(rx: &mut super::Receiver, tx: &mut super::Sender) ->
                 let mut ports = Vec::new();
                 let mut wait = false;
                 for req in &reqs {
-                    let port = allocator.allocate().await;
+                    let port = allocator.allocate_local().await;
                     ports.push(PortReq::new(port).with_id(req.id()));
                     wait |= req.is_wait();
                 }
@@ -127,7 +127,7 @@ pub(crate) async fn forward(rx: &mut super::Receiver, tx: &mut super::Sender) ->
                             let id = req.id();
                             match connect.await {
                                 Ok((out_tx, out_rx)) => {
-                                    let in_port = out_tx.port_allocator().allocate().await;
+                                    let in_port = out_tx.port_allocator().allocate_local().await;
                                     match req.accept_from(in_port).await {
                                         Ok((in_tx, in_rx)) => {
                                             spawn_forward(id, out_rx, in_tx);

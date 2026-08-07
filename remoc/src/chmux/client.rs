@@ -14,7 +14,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 
 use super::{
     PortReq,
-    port_allocator::{PortAllocator, PortNumber},
+    port_allocator::{AllocatedLocalPort, PortAllocator},
     receiver::Receiver,
     sender::Sender,
 };
@@ -54,11 +54,11 @@ impl From<ConnectError> for std::io::Error {
     fn from(err: ConnectError) -> Self {
         use std::io::ErrorKind;
         match err {
-            ConnectError::LocalPortsExhausted => Self::new(ErrorKind::AddrInUse, err.to_string()),
-            ConnectError::RemotePortsExhausted => Self::new(ErrorKind::AddrInUse, err.to_string()),
-            ConnectError::TooManyPendingConnectionRequests => Self::new(ErrorKind::AddrInUse, err.to_string()),
-            ConnectError::Rejected => Self::new(ErrorKind::ConnectionRefused, err.to_string()),
-            ConnectError::ChMux => Self::new(ErrorKind::ConnectionReset, err.to_string()),
+            ConnectError::LocalPortsExhausted => Self::new(ErrorKind::AddrInUse, err),
+            ConnectError::RemotePortsExhausted => Self::new(ErrorKind::AddrInUse, err),
+            ConnectError::TooManyPendingConnectionRequests => Self::new(ErrorKind::AddrInUse, err),
+            ConnectError::Rejected => Self::new(ErrorKind::ConnectionRefused, err),
+            ConnectError::ChMux => Self::new(ErrorKind::ConnectionReset, err),
         }
     }
 }
@@ -101,7 +101,7 @@ impl Drop for ConnectRequestCredit {
 #[derive(Debug)]
 pub(crate) struct ConnectRequest {
     /// Local port.
-    pub local_port: PortNumber,
+    pub local_port: AllocatedLocalPort,
     /// Port id.
     pub id: u32,
     /// Notification that request has been queued for sending.
@@ -220,9 +220,9 @@ impl Client {
             Some(local_port) => local_port,
             None => {
                 if wait {
-                    self.port_allocator.allocate().await.into()
+                    self.port_allocator.allocate_local().await.into()
                 } else {
-                    self.port_allocator.try_allocate().ok_or(ConnectError::LocalPortsExhausted)?.into()
+                    self.port_allocator.try_allocate_local().ok_or(ConnectError::LocalPortsExhausted)?.into()
                 }
             }
         };

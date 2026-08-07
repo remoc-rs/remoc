@@ -151,8 +151,10 @@ impl<T> Error for SendError<T> where T: fmt::Debug {}
 pub struct PortSerializer {
     allocator: chmux::PortAllocator,
     #[allow(clippy::type_complexity)]
-    requests:
-        Vec<(chmux::PortNumber, Box<dyn FnOnce(chmux::Connect) -> BoxFuture<'static, ()> + Send + 'static>)>,
+    requests: Vec<(
+        chmux::AllocatedLocalPort,
+        Box<dyn FnOnce(chmux::Connect) -> BoxFuture<'static, ()> + Send + 'static>,
+    )>,
     storage: AnyStorage,
     tasks: Vec<BoxFuture<'static, ()>>,
 }
@@ -202,7 +204,8 @@ impl PortSerializer {
         let mut this =
             this.try_borrow_mut().expect("PortSerializer is referenced multiple times during serialization");
 
-        let local_port = this.allocator.try_allocate().ok_or_else(|| ser::Error::custom("ports exhausted"))?;
+        let local_port =
+            this.allocator.try_allocate_local().ok_or_else(|| ser::Error::custom("ports exhausted"))?;
         let local_port_num = *local_port;
         this.requests.push((local_port, Box::new(callback)));
 

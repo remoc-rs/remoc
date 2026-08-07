@@ -34,7 +34,7 @@ pub use client::{Client, Connect, ConnectError};
 pub use forward::ForwardError;
 pub use listener::{Listener, ListenerError, ListenerStream, Request};
 pub use mux::ChMux;
-pub use port_allocator::{PortAllocator, PortNumber, PortReq};
+pub use port_allocator::{AllocatedLocalPort, PortAllocator, PortReq};
 pub use receiver::{DataBuf, Received, Receiver, ReceiverStream, RecvAnyError, RecvChunkError, RecvError};
 pub use sender::{AllReceived, ChunkSender, Closed, SendError, Sender, SenderSink, TrySendError};
 pub use sizer::{BufferSize, BufferSizeQuery, BufferSizer, DynamicBuffer, FixedBuffer, GlobalCreditsReport};
@@ -93,10 +93,10 @@ impl From<ChMuxError<std::io::Error, std::io::Error>> for std::io::Error {
         match err {
             ChMuxError::SinkError(err) => err,
             ChMuxError::StreamError(err) => err,
-            ChMuxError::StreamClosed => std::io::Error::new(ErrorKind::ConnectionReset, err.to_string()),
-            ChMuxError::Reset => std::io::Error::new(ErrorKind::ConnectionReset, err.to_string()),
-            ChMuxError::Timeout => std::io::Error::new(ErrorKind::TimedOut, err.to_string()),
-            ChMuxError::Protocol(_) => std::io::Error::new(ErrorKind::InvalidData, err.to_string()),
+            ChMuxError::StreamClosed => std::io::Error::new(ErrorKind::ConnectionReset, err),
+            ChMuxError::Reset => std::io::Error::new(ErrorKind::ConnectionReset, err),
+            ChMuxError::Timeout => std::io::Error::new(ErrorKind::TimedOut, err),
+            ChMuxError::Protocol(_) => std::io::Error::new(ErrorKind::InvalidData, err),
         }
     }
 }

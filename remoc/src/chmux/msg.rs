@@ -614,6 +614,8 @@ pub struct ExchangedCfg {
     pub global_credits: Option<u32>,
     /// Whether sending received reports is supported.
     pub received_report: bool,
+    /// Whether port side specification is supported.
+    pub port_side: bool,
 }
 
 impl ExchangedCfg {
@@ -626,6 +628,7 @@ impl ExchangedCfg {
             connect_queue: cfg.connect_queue,
             global_credits: Some(global_credits),
             received_report: true,
+            port_side: true,
         }
     }
 
@@ -638,6 +641,7 @@ impl ExchangedCfg {
         writer.write_u16::<LE>(self.connect_queue)?;
         writer.write_u32::<LE>(self.global_credits.unwrap())?;
         writer.write_u8(self.received_report.into())?;
+        writer.write_u8(self.port_side.into())?;
 
         Ok(())
     }
@@ -662,6 +666,7 @@ impl ExchangedCfg {
             },
             global_credits: None,
             received_report: false,
+            port_side: false,
         };
 
         let Ok(global_credits) = reader.read_u32::<LE>() else { return Ok(this) };
@@ -669,6 +674,9 @@ impl ExchangedCfg {
 
         let Ok(received_report) = reader.read_u8() else { return Ok(this) };
         this.received_report = received_report != 0;
+
+        let Ok(port_side) = reader.read_u8() else { return Ok(this) };
+        this.port_side = port_side != 0;
 
         Ok(this)
     }

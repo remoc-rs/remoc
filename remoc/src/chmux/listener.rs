@@ -9,11 +9,11 @@ use tokio_util::sync::ReusableBoxFuture;
 
 use super::{
     mux::PortEvt,
-    port_allocator::{PortAllocator, PortNumber, SidePortNumber},
+    port_allocator::{AllocatedSidePort, PortAllocator, RemotePortAlreadyAllocated},
     receiver::Receiver,
     sender::Sender,
 };
-use crate::exec;
+use crate::{chmux::port_allocator::ReservedPort, exec};
 
 /// An multiplexer listener error.
 #[derive(Debug, Clone)]
@@ -21,6 +21,15 @@ use crate::exec;
 pub enum ListenerError {
     /// All local ports are in use.
     LocalPortsExhausted,
+    /// Used mismatched remote port number for accepting.
+    MismatchedRemotePort {
+        /// Port number of remote endpoint in connection request.
+        requesting_remote_port: u32,
+        /// Port number used to accept request.
+        accepted_remote_port: u32,
+    },
+    /// The requested remote port number has alredy been allocated.
+    RemotePortAlreadyAllocated(u32),
     /// A multiplexer error has occurred or it has been terminated.
     MultiplexerError,
 }
@@ -29,6 +38,11 @@ impl fmt::Display for ListenerError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::LocalPortsExhausted => write!(f, "all local ports are in use"),
+            Self::MismatchedRemotePort { requesting_remote_port, accepted_remote_port } => write!(
+                f,
+                "cannot accept request from remote port {requesting_remote_port} using remote port {accepted_remote_port}"
+            ),
+            Self::RemotePortAlreadyAllocated(port) => write!(f, "remote port {port} is already allocated"),
             Self::MultiplexerError => write!(f, "multiplexer error"),
         }
     }
@@ -36,12 +50,20 @@ impl fmt::Display for ListenerError {
 
 impl Error for ListenerError {}
 
+impl From<RemotePortAlreadyAllocated> for ListenerError {
+    fn from(err: RemotePortAlreadyAllocated) -> Self {
+        Self::RemotePortAlreadyAllocated(err.0)
+    }
+}
+
 impl From<ListenerError> for std::io::Error {
     fn from(err: ListenerError) -> Self {
         use std::io::ErrorKind;
         match err {
-            ListenerError::LocalPortsExhausted => Self::new(ErrorKind::AddrInUse, err.to_string()),
-            ListenerError::MultiplexerError => Self::new(ErrorKind::ConnectionReset, err.to_string()),
+            ListenerError::LocalPortsExhausted => Self::new(ErrorKind::AddrInUse, err),
+            ListenerError::MismatchedRemotePort { .. } => Self::new(ErrorKind::InvalidInput, err),
+            ListenerError::RemotePortAlreadyAllocated(_) => Self::new(ErrorKind::AddrInUse, err),
+            ListenerError::MultiplexerError => Self::new(ErrorKind::ConnectionReset, err),
         }
     }
 }
@@ -101,13 +123,13 @@ impl Request {
         self.wait
     }
 
-    /// Accepts the request using a newly allocated local port.
+    /// Accepts the request.
     pub async fn accept(self) -> Result<(Sender, Receiver), ListenerError> {
-        let local_port = if self.wait {
-            self.allocator.allocate().await
+        let reserved = if self.wait {
+            self.allocator.reserve().await
         } else {
-            match self.allocator.try_allocate() {
-                Some(local_port) => local_port,
+            match self.allocator.try_reserve() {
+                Some(reserved) => reserved,
                 None => {
                     self.reject(true).await;
                     return Err(ListenerError::LocalPortsExhausted);
@@ -115,20 +137,36 @@ impl Request {
             }
         };
 
+        self.accept_reserved(reserved).await
+    }
+
+    /// Accepts the request using the already reserved port.
+    pub async fn accept_reserved(self, reserved_port: ReservedPort) -> Result<(Sender, Receiver), ListenerError> {
+        let local_port: AllocatedSidePort = if self.allocator.is_port_side_supported() {
+            reserved_port.into_remote(self.remote_port)?.into()
+        } else {
+            reserved_port.into_local().into()
+        };
+
         self.accept_from(local_port).await
     }
 
     /// Accepts the request using the specified local port.
-    pub async fn accept_from(mut self, local_port: PortNumber) -> Result<(Sender, Receiver), ListenerError> {
+    pub async fn accept_from(
+        mut self, local_port: impl Into<AllocatedSidePort>,
+    ) -> Result<(Sender, Receiver), ListenerError> {
+        let local_port = local_port.into();
+        if let AllocatedSidePort::Remote(remote_port) = &local_port
+            && **remote_port != self.remote_port
+        {
+            return Err(ListenerError::MismatchedRemotePort {
+                requesting_remote_port: **remote_port,
+                accepted_remote_port: self.remote_port,
+            });
+        }
+
         let (port_tx, port_rx) = oneshot::channel();
-        let _ = self
-            .tx
-            .send(PortEvt::Accepted {
-                local_port: SidePortNumber::Local(local_port),
-                remote_port: self.remote_port,
-                port_tx,
-            })
-            .await;
+        let _ = self.tx.send(PortEvt::Accepted { local_port, remote_port: self.remote_port, port_tx }).await;
         let _ = self.done_tx.take().unwrap().send(());
 
         port_rx.await.map_err(|_| ListenerError::MultiplexerError)
@@ -197,9 +235,11 @@ impl Listener {
 
         loop {
             tokio::select! {
-                local_port = self.port_allocator.allocate() => {
+                biased;
+
+                reserved_port = self.port_allocator.reserve() => {
                     match self.inspect().await? {
-                        Some(req) => break Ok(Some(req.accept_from(local_port).await?)),
+                        Some(req) => break Ok(Some(req.accept_reserved(reserved_port).await?)),
                         None => break Ok(None),
                     }
                 },
@@ -207,8 +247,8 @@ impl Listener {
                 no_wait_req_opt = self.no_wait_rx.recv() => {
                     match no_wait_req_opt {
                         Some(RemoteConnectMsg::Request(no_wait_req)) => {
-                            match self.port_allocator.try_allocate() {
-                                Some(local_port) => break Ok(Some(no_wait_req.accept_from(local_port).await?)),
+                            match self.port_allocator.try_reserve() {
+                                Some(reserved_port) => break Ok(Some(no_wait_req.accept_reserved(reserved_port).await?)),
                                 None => no_wait_req.reject(true).await,
                             }
                         },

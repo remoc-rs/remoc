@@ -22,7 +22,7 @@ use super::{
     io::{ChannelBytesWriter, LimitedBytesWriter},
 };
 use crate::{
-    chmux::{self, AllReceived, AnyStorage},
+    chmux::{self, AllReceived, AnyStorage, ConnectReq},
     codec::{self, AnySend, ErasedSerializer, SerializationError, StreamingUnavailable},
     exec::{self, task},
 };
@@ -189,24 +189,54 @@ impl PortSerializer {
         }
     }
 
-    /// Open a chmux port to the remote endpoint.
+    /// Open a chmux port to the remote endpoint using the specified connection request.
     ///
-    /// Returns the local port number and calls the specified function with the connect object.
-    pub fn connect<E>(
-        callback: impl FnOnce(chmux::Connect) -> BoxFuture<'static, ()> + Send + 'static,
-    ) -> Result<u32, E>
+    /// Calls the specified function with the connect object.
+    pub fn connect<E, C, F>(connect_req: ConnectReq, callback: C) -> Result<(), E>
     where
         E: serde::ser::Error,
+        C: FnOnce(chmux::Connect) -> F + Send + 'static,
+        F: Future<Output = ()> + Send + 'static,
     {
         let this = Self::instance()?;
         let mut this =
             this.try_borrow_mut().expect("PortSerializer is referenced multiple times during serialization");
 
-        let local_port = this.allocator.connect_req().map_err(ser::Error::custom)?;
-        let local_port_num = local_port.port();
-        this.requests.push((local_port, Box::new(callback)));
+        this.requests.push((connect_req, Box::new(|connect| callback(connect).boxed())));
+        Ok(())
+    }
 
-        Ok(local_port_num)
+    /// Allocates a connection request.
+    pub fn connect_req<E>() -> Result<ConnectReq, E>
+    where
+        E: serde::ser::Error,
+    {
+        let this = Self::instance()?;
+        let this =
+            this.try_borrow_mut().expect("PortSerializer is referenced multiple times during serialization");
+
+        this.allocator.connect_req().map_err(ser::Error::custom)
+    }
+
+    /// Open a chmux port to the remote endpoint using the specified connection request.
+    ///
+    /// This function waits until a local and remote port become available and tries
+    /// to pre-connect the port if possible.
+    ///
+    /// Returns the local port number and calls the specified function with the connect object.    
+    pub fn connect_port<E, C, F>(callback: C) -> Result<u32, E>
+    where
+        E: serde::ser::Error,
+        C: FnOnce(chmux::Connect) -> F + Send + 'static,
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let req = Self::connect_req()?;
+        let req = req.wait().try_pre_connect();
+        let port = req.port();
+
+        Self::connect(req, callback)?;
+
+        Ok(port)
     }
 
     /// Returns the data storage of the channel multiplexer.

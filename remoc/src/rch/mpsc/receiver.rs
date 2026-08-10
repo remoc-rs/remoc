@@ -1,4 +1,4 @@
-use futures::{FutureExt, Stream, future, ready};
+use futures::{Stream, future, ready};
 use serde::{Deserialize, Serialize};
 use std::{
     convert::TryFrom,
@@ -546,13 +546,10 @@ where
         let mut parallel_rxs = Vec::new();
         for _ in 0..self.parallel.unwrap_or(storage.cfg().mpsc_parallel) {
             let (parallel_tx, parallel_rx) = tokio::sync::oneshot::channel();
-            let Ok(parallel_port) = PortSerializer::connect::<S::Error>(move |connect| {
-                async move {
-                    if let Ok((raw_tx, _raw_rx)) = connect.await {
-                        let _ = parallel_tx.send(raw_tx);
-                    }
+            let Ok(parallel_port) = PortSerializer::connect_port::<S::Error, _, _>(async move |connect| {
+                if let Ok((raw_tx, _raw_rx)) = connect.await {
+                    let _ = parallel_tx.send(raw_tx);
                 }
-                .boxed()
             }) else {
                 continue;
             };
@@ -560,39 +557,36 @@ where
             parallel_rxs.push(parallel_rx);
         }
 
-        let port = PortSerializer::connect(|connect| {
-            async move {
-                // Receiver has been dropped after sending, so we receive its channels.
-                let ReceiverInner { rx, closed_tx, remote_send_err_tx, closed: _ } = match successor_rx.await {
-                    Ok(inner) => inner,
-                    Err(_) => return,
-                };
+        let port = PortSerializer::connect_port(async move |connect| {
+            // Receiver has been dropped after sending, so we receive its channels.
+            let ReceiverInner { rx, closed_tx, remote_send_err_tx, closed: _ } = match successor_rx.await {
+                Ok(inner) => inner,
+                Err(_) => return,
+            };
 
-                // Establish chmux channel.
-                let (raw_tx, raw_rx) = match connect.await {
-                    Ok(tx_rx) => tx_rx,
-                    Err(err) => {
-                        let _ = remote_send_err_tx.send(Some(RemoteSendError::Connect(err)));
-                        return;
-                    }
-                };
+            // Establish chmux channel.
+            let (raw_tx, raw_rx) = match connect.await {
+                Ok(tx_rx) => tx_rx,
+                Err(err) => {
+                    let _ = remote_send_err_tx.send(Some(RemoteSendError::Connect(err)));
+                    return;
+                }
+            };
 
-                // Establish additional parallel chmux channels.
-                let mut raw_txs = vec![raw_tx];
-                raw_txs.extend(future::join_all(parallel_rxs).await.into_iter().filter_map(|res| res.ok()));
+            // Establish additional parallel chmux channels.
+            let mut raw_txs = vec![raw_tx];
+            raw_txs.extend(future::join_all(parallel_rxs).await.into_iter().filter_map(|res| res.ok()));
 
-                super::send_impl(
-                    ErasedSerializer::new::<Result<T, RecvError>, Codec>(),
-                    Box::new(rx),
-                    raw_txs,
-                    raw_rx,
-                    remote_send_err_tx,
-                    closed_tx,
-                    MAX_ITEM_SIZE,
-                )
-                .await;
-            }
-            .boxed()
+            super::send_impl(
+                ErasedSerializer::new::<Result<T, RecvError>, Codec>(),
+                Box::new(rx),
+                raw_txs,
+                raw_rx,
+                remote_send_err_tx,
+                closed_tx,
+                MAX_ITEM_SIZE,
+            )
+            .await;
         })?;
 
         // Encode chmux port number in transport type and serialize it.
@@ -643,15 +637,10 @@ where
             .into_iter()
             .filter_map(|parallel_port| {
                 let (parallel_tx, parallel_rx) = tokio::sync::oneshot::channel();
-                PortDeserializer::accept::<D::Error>(parallel_port, |request| {
-                    {
-                        async move {
-                            if let Ok((_raw_tx, raw_rx)) = request.accept().await {
-                                let _ = parallel_tx.send(raw_rx);
-                            }
-                        }
+                PortDeserializer::accept::<D::Error, _, _>(parallel_port, async move |request| {
+                    if let Ok((_raw_tx, raw_rx)) = request.accept().await {
+                        let _ = parallel_tx.send(raw_rx);
                     }
-                    .boxed()
                 })
                 .ok()?;
                 Some(parallel_rx)
@@ -659,33 +648,30 @@ where
             .collect();
         let parallel = parallel_txs.len();
 
-        PortDeserializer::accept(port, |request| {
-            async move {
-                // Accept chmux connection request.
-                let (raw_tx, raw_rx) = match request.accept().await {
-                    Ok(tx_rx) => tx_rx,
-                    Err(err) => {
-                        let _ = tx.send(SendReq::new(Err(RecvError::RemoteListen(err)))).await;
-                        return;
-                    }
-                };
+        PortDeserializer::accept(port, async move |request| {
+            // Accept chmux connection request.
+            let (raw_tx, raw_rx) = match request.accept().await {
+                Ok(tx_rx) => tx_rx,
+                Err(err) => {
+                    let _ = tx.send(SendReq::new(Err(RecvError::RemoteListen(err)))).await;
+                    return;
+                }
+            };
 
-                // Establish additional parallel chmux channels.
-                let mut raw_rxs = vec![raw_rx];
-                raw_rxs.extend(future::join_all(parallel_txs).await.into_iter().filter_map(|res| res.ok()));
+            // Establish additional parallel chmux channels.
+            let mut raw_rxs = vec![raw_rx];
+            raw_rxs.extend(future::join_all(parallel_txs).await.into_iter().filter_map(|res| res.ok()));
 
-                super::recv_impl(
-                    ErasedDeserializer::new::<Result<T, RecvError>, Codec>(),
-                    &tx,
-                    raw_tx,
-                    raw_rxs,
-                    remote_send_err_rx,
-                    closed_rx,
-                    MAX_ITEM_SIZE,
-                )
-                .await;
-            }
-            .boxed()
+            super::recv_impl(
+                ErasedDeserializer::new::<Result<T, RecvError>, Codec>(),
+                &tx,
+                raw_tx,
+                raw_rxs,
+                remote_send_err_rx,
+                closed_rx,
+                MAX_ITEM_SIZE,
+            )
+            .await;
         })?;
 
         Ok(Self::new(rx, closed_tx, closed, remote_send_err_tx, Some(max_item_size), Some(parallel)))

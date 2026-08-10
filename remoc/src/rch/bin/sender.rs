@@ -1,4 +1,3 @@
-use futures::FutureExt;
 use serde::{Deserialize, Serialize};
 use std::{
     fmt, mem,
@@ -119,20 +118,17 @@ impl Serialize for Sender {
         match (receiver_tx, interlock_confirm) {
             // Local-remote connection.
             (Some(receiver_tx), Some(interlock_confirm)) => {
-                let port = PortSerializer::connect(|connect| {
-                    async move {
-                        let _ = interlock_confirm.send(());
+                let port = PortSerializer::connect_port(async move |connect| {
+                    let _ = interlock_confirm.send(());
 
-                        match connect.await {
-                            Ok((_, raw_rx)) => {
-                                let _ = receiver_tx.send(Ok(raw_rx));
-                            }
-                            Err(err) => {
-                                let _ = receiver_tx.send(Err(ConnectError::Connect(err)));
-                            }
+                    match connect.await {
+                        Ok((_, raw_rx)) => {
+                            let _ = receiver_tx.send(Ok(raw_rx));
+                        }
+                        Err(err) => {
+                            let _ = receiver_tx.send(Err(ConnectError::Connect(err)));
                         }
                     }
-                    .boxed()
                 })?;
 
                 TransportedSender { port }.serialize(serializer)
@@ -160,18 +156,13 @@ impl<'de> Deserialize<'de> for Sender {
         let TransportedSender { port } = TransportedSender::deserialize(deserializer)?;
 
         let (sender_tx, sender_rx) = tokio::sync::mpsc::unbounded_channel();
-        PortDeserializer::accept(port, |request| {
-            async move {
-                match request.accept().await {
-                    Ok((raw_tx, _)) => {
-                        let _ = sender_tx.send(Ok(raw_tx));
-                    }
-                    Err(err) => {
-                        let _ = sender_tx.send(Err(ConnectError::Listen(err)));
-                    }
-                }
+        PortDeserializer::accept(port, async move |request| match request.accept().await {
+            Ok((raw_tx, _)) => {
+                let _ = sender_tx.send(Ok(raw_tx));
             }
-            .boxed()
+            Err(err) => {
+                let _ = sender_tx.send(Err(ConnectError::Listen(err)));
+            }
         })?;
 
         Ok(Self {

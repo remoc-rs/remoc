@@ -122,16 +122,16 @@ impl PortDeserializer {
     /// Accept the chmux port with the specified remote port number sent from the remote endpoint.
     ///
     /// Calls the specified function with the received connect request.
-    pub fn accept<E>(
-        remote_port: u32, callback: impl FnOnce(chmux::Request) -> BoxFuture<'static, ()> + Send + 'static,
-    ) -> Result<(), E>
+    pub fn accept<E, C, F>(remote_port: u32, callback: C) -> Result<(), E>
     where
         E: serde::de::Error,
+        C: FnOnce(chmux::Request) -> F + Send + 'static,
+        F: Future<Output = ()> + Send + 'static,
     {
         let this = Self::instance()?;
         let mut this =
             this.try_borrow_mut().expect("PortDeserializer is referenced multiple times during deserialization");
-        this.expected.insert(remote_port, Box::new(callback));
+        this.expected.insert(remote_port, Box::new(|request| callback(request).boxed()));
 
         Ok(())
     }

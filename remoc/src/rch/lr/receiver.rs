@@ -1,4 +1,3 @@
-use futures::FutureExt;
 use serde::{Deserialize, Serialize, de::DeserializeOwned, ser};
 use std::{
     error::Error,
@@ -190,22 +189,19 @@ where
             interlock.sender.start_send()
         };
 
-        let port = PortSerializer::connect(move |connect| {
-            async move {
-                let _ = interlock_confirm.send(());
+        let port = PortSerializer::connect_port(async move |connect| {
+            let _ = interlock_confirm.send(());
 
-                match connect.await {
-                    Ok((raw_tx, _)) => {
-                        let mut tx = base::Sender::new(raw_tx);
-                        tx.set_max_item_size(max_item_size);
-                        let _ = sender_tx.send(Ok(tx));
-                    }
-                    Err(err) => {
-                        let _ = sender_tx.send(Err(ConnectError::Connect(err)));
-                    }
+            match connect.await {
+                Ok((raw_tx, _)) => {
+                    let mut tx = base::Sender::new(raw_tx);
+                    tx.set_max_item_size(max_item_size);
+                    let _ = sender_tx.send(Ok(tx));
+                }
+                Err(err) => {
+                    let _ = sender_tx.send(Err(ConnectError::Connect(err)));
                 }
             }
-            .boxed()
         })?;
 
         TransportedReceiver::<T, Codec> {
@@ -233,20 +229,15 @@ where
         let max_item_size = usize::try_from(max_item_size).unwrap_or(usize::MAX);
 
         let (receiver_tx, receiver_rx) = tokio::sync::mpsc::unbounded_channel();
-        PortDeserializer::accept(port, move |request| {
-            async move {
-                match request.accept().await {
-                    Ok((_, raw_rx)) => {
-                        let mut rx = base::Receiver::new(raw_rx);
-                        rx.set_max_item_size(max_item_size);
-                        let _ = receiver_tx.send(Ok(rx));
-                    }
-                    Err(err) => {
-                        let _ = receiver_tx.send(Err(ConnectError::Listen(err)));
-                    }
-                }
+        PortDeserializer::accept(port, async move |request| match request.accept().await {
+            Ok((_, raw_rx)) => {
+                let mut rx = base::Receiver::new(raw_rx);
+                rx.set_max_item_size(max_item_size);
+                let _ = receiver_tx.send(Ok(rx));
             }
-            .boxed()
+            Err(err) => {
+                let _ = receiver_tx.send(Err(ConnectError::Listen(err)));
+            }
         })?;
 
         Ok(Self {

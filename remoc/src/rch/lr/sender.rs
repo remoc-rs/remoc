@@ -236,22 +236,19 @@ where
             interlock.receiver.start_send()
         };
 
-        let port = PortSerializer::connect(move |connect| {
-            async move {
-                let _ = interlock_confirm.send(());
+        let port = PortSerializer::connect_port(async move |connect| {
+            let _ = interlock_confirm.send(());
 
-                match connect.await {
-                    Ok((_, raw_rx)) => {
-                        let mut rx = base::Receiver::new(raw_rx);
-                        rx.set_max_item_size(max_item_size);
-                        let _ = receiver_tx.send(Ok(rx));
-                    }
-                    Err(err) => {
-                        let _ = receiver_tx.send(Err(ConnectError::Connect(err)));
-                    }
+            match connect.await {
+                Ok((_, raw_rx)) => {
+                    let mut rx = base::Receiver::new(raw_rx);
+                    rx.set_max_item_size(max_item_size);
+                    let _ = receiver_tx.send(Ok(rx));
+                }
+                Err(err) => {
+                    let _ = receiver_tx.send(Err(ConnectError::Connect(err)));
                 }
             }
-            .boxed()
         })?;
 
         TransportedSender::<T, Codec> {

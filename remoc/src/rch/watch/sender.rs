@@ -1,4 +1,3 @@
-use futures::FutureExt;
 use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt, marker::PhantomData, sync::Mutex, time::Duration};
 
@@ -413,39 +412,36 @@ where
         let (successor_tx, successor_rx) = tokio::sync::oneshot::channel();
         *self.successor_tx.lock().unwrap() = Some(successor_tx);
 
-        let port = PortSerializer::connect(move |connect| {
-            async move {
-                // Sender has been dropped after sending, so we receive its channels.
-                let SenderInner { tx, remote_send_err_rx, current_err, receiver_rate_limit_rx, .. } =
-                    match successor_rx.await {
-                        Ok(inner) => inner,
-                        Err(_) => return,
-                    };
-                let remote_send_err_rx = remote_send_err_rx.into_inner().unwrap();
-                let current_err = current_err.into_inner().unwrap();
-
-                // Establish chmux channel.
-                let (raw_tx, raw_rx) = match connect.await {
-                    Ok(tx_rx) => tx_rx,
-                    Err(err) => {
-                        let _ = tx.send(Err(RecvError::RemoteConnect(err)));
-                        return;
-                    }
+        let port = PortSerializer::connect_port(async move |connect| {
+            // Sender has been dropped after sending, so we receive its channels.
+            let SenderInner { tx, remote_send_err_rx, current_err, receiver_rate_limit_rx, .. } =
+                match successor_rx.await {
+                    Ok(inner) => inner,
+                    Err(_) => return,
                 };
+            let remote_send_err_rx = remote_send_err_rx.into_inner().unwrap();
+            let current_err = current_err.into_inner().unwrap();
 
-                super::recv_impl(
-                    ErasedDeserializer::new::<Result<T, RecvError>, Codec>(),
-                    Box::new(tx),
-                    raw_tx,
-                    raw_rx,
-                    remote_send_err_rx,
-                    current_err,
-                    max_item_size,
-                    receiver_rate_limit_rx,
-                )
-                .await;
-            }
-            .boxed()
+            // Establish chmux channel.
+            let (raw_tx, raw_rx) = match connect.await {
+                Ok(tx_rx) => tx_rx,
+                Err(err) => {
+                    let _ = tx.send(Err(RecvError::RemoteConnect(err)));
+                    return;
+                }
+            };
+
+            super::recv_impl(
+                ErasedDeserializer::new::<Result<T, RecvError>, Codec>(),
+                Box::new(tx),
+                raw_tx,
+                raw_rx,
+                remote_send_err_rx,
+                current_err,
+                max_item_size,
+                receiver_rate_limit_rx,
+            )
+            .await;
         })?;
 
         // Encode chmux port number in transport type and serialize it.
@@ -499,31 +495,28 @@ where
         let transfer_strategy2 = transfer_strategy.clone();
 
         // Accept chmux port request.
-        PortDeserializer::accept(port, move |request| {
-            async move {
-                // Accept chmux connection request.
-                let (raw_tx, raw_rx) = match request.accept().await {
-                    Ok(tx_rx) => tx_rx,
-                    Err(err) => {
-                        let _ = remote_send_err_tx.send(RemoteSendError::Listen(err));
-                        return;
-                    }
-                };
+        PortDeserializer::accept(port, async move |request| {
+            // Accept chmux connection request.
+            let (raw_tx, raw_rx) = match request.accept().await {
+                Ok(tx_rx) => tx_rx,
+                Err(err) => {
+                    let _ = remote_send_err_tx.send(RemoteSendError::Listen(err));
+                    return;
+                }
+            };
 
-                super::send_impl(
-                    ErasedSerializer::new::<Result<T, RecvError>, Codec>(),
-                    Box::new(rx),
-                    raw_tx,
-                    raw_rx,
-                    remote_send_err_tx,
-                    max_item_size,
-                    sender_rate_limit_rx,
-                    receiver_rate_limit_tx,
-                    transfer_strategy,
-                )
-                .await;
-            }
-            .boxed()
+            super::send_impl(
+                ErasedSerializer::new::<Result<T, RecvError>, Codec>(),
+                Box::new(rx),
+                raw_tx,
+                raw_rx,
+                remote_send_err_tx,
+                max_item_size,
+                sender_rate_limit_rx,
+                receiver_rate_limit_tx,
+                transfer_strategy,
+            )
+            .await;
         })?;
 
         Ok(Self::new(

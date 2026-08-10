@@ -1,4 +1,4 @@
-use futures::{FutureExt, Stream, ready};
+use futures::{Stream, ready};
 use serde::{Deserialize, Serialize};
 use std::{
     error::Error,
@@ -326,31 +326,28 @@ where
         let receiver_rate_limit = receiver_rate_limit_tx.get();
         let transfer_strategy = self.transfer_strategy.clone();
 
-        let port = PortSerializer::connect(move |connect| {
-            async move {
-                // Establish chmux channel.
-                let (raw_tx, raw_rx) = match connect.await {
-                    Ok(tx_rx) => tx_rx,
-                    Err(err) => {
-                        let _ = remote_send_err_tx.send(RemoteSendError::Connect(err));
-                        return;
-                    }
-                };
+        let port = PortSerializer::connect_port(async move |connect| {
+            // Establish chmux channel.
+            let (raw_tx, raw_rx) = match connect.await {
+                Ok(tx_rx) => tx_rx,
+                Err(err) => {
+                    let _ = remote_send_err_tx.send(RemoteSendError::Connect(err));
+                    return;
+                }
+            };
 
-                super::send_impl(
-                    ErasedSerializer::new::<Result<T, RecvError>, Codec>(),
-                    Box::new(rx),
-                    raw_tx,
-                    raw_rx,
-                    remote_send_err_tx,
-                    MAX_ITEM_SIZE,
-                    sender_rate_limit_rx,
-                    receiver_rate_limit_tx,
-                    transfer_strategy,
-                )
-                .await;
-            }
-            .boxed()
+            super::send_impl(
+                ErasedSerializer::new::<Result<T, RecvError>, Codec>(),
+                Box::new(rx),
+                raw_tx,
+                raw_rx,
+                remote_send_err_tx,
+                MAX_ITEM_SIZE,
+                sender_rate_limit_rx,
+                receiver_rate_limit_tx,
+                transfer_strategy,
+            )
+            .await;
         })?;
 
         // Encode chmux port number in transport type and serialize it.
@@ -399,30 +396,27 @@ where
         let (remote_send_err_tx, remote_send_err_rx) = tokio::sync::mpsc::unbounded_channel();
         let (receiver_rate_limit_tx, receiver_rate_limit_rx) = rate_limit_channel(receiver_rate_limit);
 
-        PortDeserializer::accept(port, |request| {
-            async move {
-                // Accept chmux connection request.
-                let (raw_tx, raw_rx) = match request.accept().await {
-                    Ok(tx_rx) => tx_rx,
-                    Err(err) => {
-                        let _ = tx.send(Err(RecvError::RemoteListen(err)));
-                        return;
-                    }
-                };
+        PortDeserializer::accept(port, async move |request| {
+            // Accept chmux connection request.
+            let (raw_tx, raw_rx) = match request.accept().await {
+                Ok(tx_rx) => tx_rx,
+                Err(err) => {
+                    let _ = tx.send(Err(RecvError::RemoteListen(err)));
+                    return;
+                }
+            };
 
-                super::recv_impl(
-                    ErasedDeserializer::new::<Result<T, RecvError>, Codec>(),
-                    Box::new(tx),
-                    raw_tx,
-                    raw_rx,
-                    remote_send_err_rx,
-                    None,
-                    MAX_ITEM_SIZE,
-                    receiver_rate_limit_rx,
-                )
-                .await;
-            }
-            .boxed()
+            super::recv_impl(
+                ErasedDeserializer::new::<Result<T, RecvError>, Codec>(),
+                Box::new(tx),
+                raw_tx,
+                raw_rx,
+                remote_send_err_rx,
+                None,
+                MAX_ITEM_SIZE,
+                receiver_rate_limit_rx,
+            )
+            .await;
         })?;
 
         // A once transported receiver will only send values when forwarding,

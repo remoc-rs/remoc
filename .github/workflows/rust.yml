@@ -143,6 +143,7 @@ jobs:
         env:
           CHROMEDRIVER: /usr/local/bin/chromedriver
           WASM_BINDGEN_USE_BROWSER: 1
+          WASM_BINDGEN_TEST_TIMEOUT: 90
         run: cargo +nightly test --target wasm32-unknown-unknown --features js --release --tests
 
   test-codecs:

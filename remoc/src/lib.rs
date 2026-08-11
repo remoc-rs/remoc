@@ -305,3 +305,4 @@ pub use provider::Provider;
 pub mod doctest;
 
 mod util;
+mod varint;

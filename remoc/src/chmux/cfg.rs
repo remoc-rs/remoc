@@ -1,6 +1,9 @@
 //! Channel multiplexer configuration.
 
-use std::time::Duration;
+use std::{
+    sync::{Arc, atomic::AtomicBool},
+    time::Duration,
+};
 
 use super::{
     msg::MAX_MSG_LENGTH,
@@ -47,6 +50,17 @@ pub struct Cfg {
     ///
     /// By default this is 64 kB.
     pub io_buffer_size: usize,
+    /// Enable variable integer encoding of message frame length.
+    ///
+    /// If set to `Some(_)`, we advertise to the remote endpoint that we support
+    /// variable integer encoding of the message frame length. If the remote endpoint
+    /// also supports that, `true` is written in the AtomicBool, which indicates
+    /// to the message frame encoder/decoder that it should switch to variable
+    /// integer encoding.
+    ///
+    /// This is automatically enabled by [`Connect::io`](crate::Connect::io).
+    /// You just need to modify this setting when using a custom message frame.
+    pub io_frame_len_varint: Option<Arc<AtomicBool>>,
     /// Maximum number of open ports.
     ///
     /// This must not exceed 2^30 = 1_073_741_824.
@@ -166,6 +180,7 @@ impl Default for Cfg {
         Self {
             connection_timeout: Some(Duration::from_secs(150)),
             flush_interval: None,
+            io_frame_len_varint: None,
             io_buffer_size: 65_536,
             max_ports: 8192,
             ports_exhausted: OnPortsExhausted::Timeout(Duration::from_secs(60)),

@@ -5,10 +5,16 @@ use futures::{Sink, SinkExt};
 use std::{
     io,
     pin::Pin,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     task::{Context, Poll},
 };
 use tokio::io::AsyncWrite;
 use tokio_util::codec::{Decoder, Encoder, FramedWrite};
+
+use crate::varint::{VarintDecoder, varint_max, varint_u32};
 
 /// A codec for frames delimited by a header specifying their lengths.
 #[derive(Debug, Clone)]
@@ -19,6 +25,10 @@ pub(crate) struct LengthCodec {
     state: DecodeState,
     /// Decode buffer size.
     decode_buffer_size: Option<usize>,
+    /// Use variable integer encoding for length field.
+    varint: Arc<AtomicBool>,
+    /// Variable integer decoder.
+    varint_decoder: VarintDecoder,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -33,11 +43,18 @@ struct Header {
 }
 
 impl LengthCodec {
-    const HEADER_LEN: usize = size_of::<u32>();
+    const MAX_HEADER_LEN: usize =
+        if VarintDecoder::MAX_LENGTH > size_of::<u32>() { VarintDecoder::MAX_LENGTH } else { size_of::<u32>() };
 
     /// Creates a new `LengthCodec` with the default configuration values.
-    pub fn new(max_frame_len: u32) -> Self {
-        Self { max_frame_len, state: DecodeState::Header, decode_buffer_size: None }
+    pub fn new(max_frame_len: u32, varint: Arc<AtomicBool>) -> Self {
+        Self {
+            max_frame_len,
+            state: DecodeState::Header,
+            decode_buffer_size: None,
+            varint,
+            varint_decoder: VarintDecoder::new(),
+        }
     }
 
     /// Reserve at least `additional` space in buffer `buf`.
@@ -58,15 +75,29 @@ impl LengthCodec {
     }
 
     fn decode_header(&mut self, src: &mut BytesMut) -> io::Result<Option<Header>> {
-        if src.len() < Self::HEADER_LEN {
-            self.reserve(src, Self::HEADER_LEN);
-            return Ok(None);
-        }
+        let length = if !self.varint.load(Ordering::Relaxed) {
+            if src.len() < Self::MAX_HEADER_LEN {
+                self.reserve(src, Self::MAX_HEADER_LEN);
+                return Ok(None);
+            }
+            src.get_u32()
+        } else {
+            loop {
+                if src.is_empty() {
+                    self.reserve(src, Self::MAX_HEADER_LEN);
+                    return Ok(None);
+                }
 
-        let length = src.get_u32();
+                if let Some(length) = self.varint_decoder.decode(src.get_u8())? {
+                    break length;
+                }
+            }
+        };
+
         if length > self.max_frame_len {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "frame exceeds maximum size"));
         }
+
         self.reserve(src, (length as usize).saturating_sub(src.len()));
 
         Ok(Some(Header { length }))
@@ -106,7 +137,7 @@ impl Decoder for LengthCodec {
         match self.decode_data(header, src)? {
             Some(data) => {
                 self.state = DecodeState::Header;
-                self.reserve(src, src.len().saturating_sub(Self::HEADER_LEN));
+                self.reserve(src, src.len().saturating_sub(Self::MAX_HEADER_LEN));
                 Ok(Some(data))
             }
             None => Ok(None),
@@ -118,9 +149,17 @@ impl Encoder<Bytes> for LengthCodec {
     type Error = io::Error;
 
     fn encode(&mut self, data: Bytes, dst: &mut BytesMut) -> io::Result<()> {
-        dst.reserve(Self::HEADER_LEN + data.len());
+        dst.reserve(Self::MAX_HEADER_LEN + data.len());
 
-        dst.put_u32(data.len() as u32);
+        let length = data.len() as u32;
+        if !self.varint.load(Ordering::Relaxed) {
+            dst.put_u32(length);
+        } else {
+            let mut buf = [0u8; varint_max::<u32>()];
+            let used_buf = varint_u32(length, &mut buf);
+            dst.extend_from_slice(used_buf);
+        }
+
         dst.extend_from_slice(&data[..]);
 
         Ok(())

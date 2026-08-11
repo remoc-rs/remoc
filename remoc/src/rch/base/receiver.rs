@@ -129,8 +129,7 @@ impl PortDeserializer {
         F: Future<Output = ()> + Send + 'static,
     {
         let this = Self::instance()?;
-        let mut this =
-            this.try_borrow_mut().expect("PortDeserializer is referenced multiple times during deserialization");
+        let mut this = this.borrow_mut();
         this.expected.insert(remote_port, Box::new(|request| callback(request).boxed()));
 
         Ok(())
@@ -142,8 +141,7 @@ impl PortDeserializer {
         E: serde::de::Error,
     {
         let this = Self::instance()?;
-        let this =
-            this.try_borrow().expect("PortDeserializer is referenced multiple times during deserialization");
+        let this = this.borrow();
 
         Ok(this.storage.clone())
     }
@@ -154,8 +152,7 @@ impl PortDeserializer {
         E: serde::de::Error,
     {
         let this = Self::instance()?;
-        let mut this =
-            this.try_borrow_mut().expect("PortDeserializer is referenced multiple times during deserialization");
+        let mut this = this.borrow_mut();
 
         this.tasks.push(task.boxed());
         Ok(())

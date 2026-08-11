@@ -1,3 +1,5 @@
+//! Multiplexer messages.
+
 use byteorder::{LE, ReadBytesExt, WriteBytesExt};
 use std::{
     io::{self, ErrorKind},
@@ -5,6 +7,7 @@ use std::{
 };
 
 use super::{Cfg, ChMuxError, port_allocator::SidePort, sizer::GlobalCreditsReport};
+use crate::varint::{VarintRead, VarintWrite};
 
 fn invalid_data(msg: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, format!("invalid value for {msg} received"))
@@ -652,6 +655,8 @@ pub struct ExchangedCfg {
     pub pre_connect: bool,
     /// Variable integer encoding is supported.
     pub varint: bool,
+    /// Message frame length variable integer encoding is supported.
+    pub frame_len_varint: bool,
 }
 
 impl ExchangedCfg {
@@ -667,6 +672,7 @@ impl ExchangedCfg {
             port_side: true,
             pre_connect: true,
             varint: true,
+            frame_len_varint: cfg.io_frame_len_varint.is_some(),
         }
     }
 
@@ -682,6 +688,7 @@ impl ExchangedCfg {
         writer.write_u8(self.port_side.into())?;
         writer.write_u8(self.pre_connect.into())?;
         writer.write_u8(self.varint.into())?;
+        writer.write_u8(self.frame_len_varint.into())?;
 
         Ok(())
     }
@@ -709,6 +716,7 @@ impl ExchangedCfg {
             port_side: false,
             pre_connect: false,
             varint: false,
+            frame_len_varint: false,
         };
 
         let Ok(global_credits) = reader.read_u32::<LE>() else { return Ok(this) };
@@ -725,6 +733,9 @@ impl ExchangedCfg {
 
         let Ok(varint) = reader.read_u8() else { return Ok(this) };
         this.varint = varint != 0;
+
+        let Ok(frame_len_varint) = reader.read_u8() else { return Ok(this) };
+        this.frame_len_varint = frame_len_varint != 0;
 
         Ok(this)
     }
@@ -750,87 +761,4 @@ pub struct GlobalCredits {
     pub credits: u32,
     /// Sequence number in [GlobalCreditsStatus::seq] for credit status reporting.
     pub seq: u8,
-}
-
-/// Variable integer writer.
-trait VarintWrite {
-    /// Write u32 in variable integer encoding if `varint` is true.
-    fn write_v32(&mut self, n: u32, varint: bool) -> Result<usize, io::Error>;
-}
-
-impl<T: std::io::Write> VarintWrite for T {
-    fn write_v32(&mut self, n: u32, varint: bool) -> Result<usize, io::Error> {
-        if !varint {
-            return self.write_u32::<LE>(n).map(|_| size_of::<u32>());
-        }
-
-        let mut buf = [0u8; varint_max::<u32>()];
-        let used_buf = varint_u32(n, &mut buf);
-        self.write_all(used_buf)?;
-        Ok(used_buf.len())
-    }
-}
-
-/// Variable integer reader.
-trait VarintRead {
-    /// Read u32 in variable integer encoding if `varint` is true.
-    fn read_v32(&mut self, varint: bool) -> Result<u32, io::Error>;
-}
-
-impl<T: std::io::Read> VarintRead for T {
-    fn read_v32(&mut self, varint: bool) -> Result<u32, io::Error> {
-        if !varint {
-            return self.read_u32::<LE>();
-        }
-
-        let mut out = 0;
-        for i in 0..varint_max::<u32>() {
-            let val = self.read_u8()?;
-            let carry = (val & 0x7F) as u32;
-            out |= carry << (7 * i);
-
-            if (val & 0x80) == 0 {
-                if i == varint_max::<u32>() - 1 && val > max_of_last_byte::<u32>() {
-                    return Err(io::Error::new(ErrorKind::InvalidData, "invalid varint"));
-                } else {
-                    return Ok(out);
-                }
-            }
-        }
-
-        Err(io::Error::new(ErrorKind::InvalidData, "invalid varint"))
-    }
-}
-
-/// Returns the maximum number of bytes required to encode T.
-const fn varint_max<T: Sized>() -> usize {
-    const BITS_PER_BYTE: usize = 8;
-    const BITS_PER_VARINT_BYTE: usize = 7;
-
-    let bits = size_of::<T>() * BITS_PER_BYTE;
-    let roundup_bits = bits + (BITS_PER_VARINT_BYTE - 1);
-    roundup_bits / BITS_PER_VARINT_BYTE
-}
-
-/// Returns the maximum value stored in the last encoded byte.
-const fn max_of_last_byte<T: Sized>() -> u8 {
-    let max_bits = size_of::<T>() * 8;
-    let extra_bits = max_bits % 7;
-    (1 << extra_bits) - 1
-}
-
-/// Encode u32 in variable integer encoding.
-fn varint_u32(n: u32, out: &mut [u8; varint_max::<u32>()]) -> &mut [u8] {
-    let mut value = n;
-    for i in 0..varint_max::<u32>() {
-        out[i] = value.to_le_bytes()[0];
-        if value < 128 {
-            return &mut out[..=i];
-        }
-
-        out[i] |= 0x80;
-        value >>= 7;
-    }
-    debug_assert_eq!(value, 0);
-    &mut out[..]
 }

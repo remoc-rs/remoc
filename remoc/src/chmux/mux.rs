@@ -363,6 +363,11 @@ where
             None => fut.await?,
         };
 
+        // Enable variable integer encoding of message length if supported.
+        if let Some(io_frame_len_varint) = &cfg.io_frame_len_varint {
+            io_frame_len_varint.store(remote_cfg.frame_len_varint, Ordering::Relaxed);
+        }
+
         // Setup global credits.
         let (send_credit_provider, send_credit_user) =
             remote_cfg.global_credits.map(|initial| credit_send_pair(CreditPool::Global, initial)).unzip();

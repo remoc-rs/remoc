@@ -199,8 +199,7 @@ impl PortSerializer {
         F: Future<Output = ()> + Send + 'static,
     {
         let this = Self::instance()?;
-        let mut this =
-            this.try_borrow_mut().expect("PortSerializer is referenced multiple times during serialization");
+        let mut this = this.borrow_mut();
 
         this.requests.push((connect_req, Box::new(|connect| callback(connect).boxed())));
         Ok(())
@@ -212,8 +211,7 @@ impl PortSerializer {
         E: serde::ser::Error,
     {
         let this = Self::instance()?;
-        let this =
-            this.try_borrow_mut().expect("PortSerializer is referenced multiple times during serialization");
+        let this = this.borrow_mut();
 
         this.allocator.connect_req().map_err(ser::Error::custom)
     }
@@ -244,7 +242,7 @@ impl PortSerializer {
         E: serde::ser::Error,
     {
         let this = Self::instance()?;
-        let this = this.try_borrow().expect("PortSerializer is referenced multiple times during serialization");
+        let this = this.borrow();
 
         Ok(this.storage.clone())
     }
@@ -255,8 +253,7 @@ impl PortSerializer {
         E: serde::ser::Error,
     {
         let this = Self::instance()?;
-        let mut this =
-            this.try_borrow_mut().expect("PortSerializer is referenced multiple times during serialization");
+        let mut this = this.borrow_mut();
 
         this.tasks.push(task.boxed());
         Ok(())

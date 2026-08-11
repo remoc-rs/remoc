@@ -7,6 +7,7 @@ use std::{
     error::Error,
     fmt, io,
     pin::Pin,
+    sync::{Arc, atomic::AtomicBool},
     task::{Context, Poll},
 };
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -248,7 +249,7 @@ impl<'transport> Connect<'transport, io::Error, io::Error> {
     /// # Panics
     /// Panics if the chmux configuration is invalid.
     pub async fn io<Read, Write, Tx, Rx, Codec>(
-        cfg: crate::Cfg, input: Read, output: Write,
+        mut cfg: crate::Cfg, input: Read, output: Write,
     ) -> Result<
         (Connect<'transport, io::Error, io::Error>, base::Sender<Tx, Codec>, base::Receiver<Rx, Codec>),
         ConnectError<io::Error, io::Error>,
@@ -260,16 +261,20 @@ impl<'transport> Connect<'transport, io::Error, io::Error> {
         Rx: RemoteSend,
         Codec: codec::Codec,
     {
-        let encoder = io_transport::LengthCodec::new(u32::MAX);
+        let varint = Arc::new(AtomicBool::new(false));
+
+        let encoder = io_transport::LengthCodec::new(u32::MAX, varint.clone());
         let transport_sink = io_transport::FilterFlushOuter(FramedWrite::with_capacity(
             io_transport::FilterFlushInner::new(output),
             encoder,
             cfg.io_buffer_size,
         ));
 
-        let decoder = io_transport::LengthCodec::new(cfg.max_frame_length());
+        let decoder = io_transport::LengthCodec::new(cfg.max_frame_length(), varint.clone());
         let transport_stream =
             FramedRead::with_capacity(input, decoder, cfg.io_buffer_size).map_ok(|item| item.freeze());
+
+        cfg.io_frame_len_varint = Some(varint);
 
         Self::framed(cfg, transport_sink, transport_stream).await
     }

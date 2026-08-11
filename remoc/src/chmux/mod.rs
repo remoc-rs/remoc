@@ -29,12 +29,12 @@ mod sender;
 mod sizer;
 
 pub use any_storage::{AnyBox, AnyEntry, AnyStorage};
-pub use cfg::{Cfg, PortsExhausted};
+pub use cfg::{Cfg, OnPortsExhausted};
 pub use client::{Client, Connect, ConnectError};
 pub use forward::ForwardError;
 pub use listener::{Listener, ListenerError, ListenerStream, Request};
 pub use mux::ChMux;
-pub use port_allocator::{ConnectReq, PortAllocator, SidePort};
+pub use port_allocator::{ConnectReq, PortAllocator, PortsExhausted, SidePort};
 pub use receiver::{DataBuf, Received, Receiver, ReceiverStream, RecvAnyError, RecvChunkError, RecvError};
 pub use sender::{AllReceived, ChunkSender, Closed, SendError, Sender, SenderSink, TrySendError};
 pub use sizer::{BufferSize, BufferSizeQuery, BufferSizer, DynamicBuffer, FixedBuffer, GlobalCreditsReport};

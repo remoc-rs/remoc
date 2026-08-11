@@ -21,10 +21,10 @@ use tokio_util::sync::ReusableBoxFuture;
 
 use super::{
     AnyStorage, Connect, ConnectError, ConnectReq, PortAllocator,
-    client::{ConnectResponse, PreConnectState},
+    client::{ConnectRsp, PreConnectState},
     credit::{AssignedCredits, CreditPool, MixedAssignedCredits, MixedCreditUser},
     mux::PortEvt,
-    port_allocator::{ConnectReqsExhausted, SidePort},
+    port_allocator::{PortsExhausted, SidePort},
 };
 use crate::exec::{self, runtime};
 
@@ -92,6 +92,12 @@ impl Error for SendError {}
 impl<T> From<mpsc::error::SendError<T>> for SendError {
     fn from(_err: mpsc::error::SendError<T>) -> Self {
         Self::ChMux
+    }
+}
+
+impl From<PortsExhausted> for SendError {
+    fn from(_: PortsExhausted) -> Self {
+        SendError::LocalPortsExhausted
     }
 }
 
@@ -498,7 +504,7 @@ impl Sender {
     }
 
     /// Allocates a port connection request.
-    pub fn connect_req(&self) -> Result<ConnectReq, ConnectReqsExhausted> {
+    pub fn connect_req(&self) -> Result<ConnectReq, PortsExhausted> {
         self.port_allocator.connect_req()
     }
 
@@ -518,7 +524,7 @@ impl Sender {
         let mut connects = Vec::new();
 
         for connect_req in connect_reqs {
-            let port_req = connect_req.into_port_req().await.ok_or(SendError::LocalPortsExhausted)?;
+            let port_req = connect_req.into_port_req().await?;
 
             let (sent_tx, sent_rx) = oneshot::channel();
             sent_txs.push(sent_tx);
@@ -528,8 +534,8 @@ impl Sender {
 
             let response = exec::spawn(async move {
                 match response_rx.await {
-                    Ok(ConnectResponse::Accepted(sender, receiver)) => Ok((sender, receiver)),
-                    Ok(ConnectResponse::Rejected { no_ports }) => {
+                    Ok(ConnectRsp::Accepted(sender, receiver)) => Ok((sender, receiver)),
+                    Ok(ConnectRsp::Rejected { no_ports }) => {
                         if no_ports {
                             Err(ConnectError::RemotePortsExhausted)
                         } else {

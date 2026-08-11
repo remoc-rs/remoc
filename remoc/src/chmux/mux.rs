@@ -30,7 +30,7 @@ use tokio_util::sync::ReusableBoxFuture;
 
 use super::{
     AnyStorage, Cfg, ChMuxError, PROTOCOL_VERSION, PROTOCOL_VERSION_PORT_ID,
-    client::{Client, ConnectRequest, ConnectResponse, PreConnectState},
+    client::{Client, ClientReq, ConnectRsp, PreConnectState},
     credit::{
         CreditPool, CreditProvider, CreditUser, GlobalCreditMonitor, MixedCreditUser, PortCreditMonitor,
         UsedGlobalCredit, credit_send_pair, port_credit_monitor,
@@ -61,7 +61,7 @@ enum PortState {
         /// Allocated local port number.
         port: AllocatedLocalPort,
         /// Channel for providing the response to the local requester.
-        response_tx: oneshot::Sender<ConnectResponse>,
+        response_tx: oneshot::Sender<ConnectRsp>,
     },
     /// Port is connected.
     Connected {
@@ -152,7 +152,7 @@ pub(super) enum PortEvt {
         /// Last chunk of ports.
         last: bool,
         /// Ports to send, together with response channel.
-        ports: Vec<(PortReq, oneshot::Sender<ConnectResponse>)>,
+        ports: Vec<(PortReq, oneshot::Sender<ConnectRsp>)>,
     },
     /// Flush send queue.
     Flush {
@@ -206,7 +206,7 @@ pub(super) enum PortEvt {
 #[derive(Debug)]
 enum GlobalEvt {
     /// Connect request from local client.
-    ConnectReq(ConnectRequest),
+    ConnectReq(ClientReq),
     /// All local clients have been dropped.
     AllClientsDropped,
     /// Local listener has been dropped.
@@ -264,7 +264,7 @@ pub struct ChMux<TransportSink, TransportStream> {
     /// Remote protocol version.
     remote_protocol_version: u8,
     /// Channel for connection requests from local client.
-    connect_rx: Option<mpsc::UnboundedReceiver<ConnectRequest>>,
+    connect_rx: Option<mpsc::UnboundedReceiver<ClientReq>>,
     /// Channels for connection requests from remote endpoint with wait set and not set.
     listen_tx: Option<(mpsc::Sender<RemoteConnectMsg>, mpsc::Sender<RemoteConnectMsg>)>,
     /// Port allocator.
@@ -373,6 +373,7 @@ where
             remote_cfg.connect_queue,
             remote_cfg.port_side,
             remote_cfg.pre_connect,
+            cfg.ports_exhausted,
         );
         let pre_connect_port_pool =
             (0..cfg.connect_queue).map(|_| port_allocator.try_reserve().unwrap()).collect();
@@ -937,7 +938,7 @@ where
 
         match event {
             // Process local connect request.
-            GlobalEvt::ConnectReq(ConnectRequest { port_req, sent_tx, response_tx }) => {
+            GlobalEvt::ConnectReq(ClientReq { port_req, sent_tx, response_tx }) => {
                 if !self.remote_listener_dropped.load(Ordering::Relaxed) {
                     let PortReq { port, opts: PortReqOpts { id, pre_connect_credit, wait } } = port_req;
                     let port_num = *port;
@@ -948,7 +949,7 @@ where
                             let remote_port = local_port.side_port();
                             let (sender, receiver) =
                                 self.create_port(local_port, remote_port, Some(pre_connect_credit));
-                            let _ = response_tx.send(ConnectResponse::Accepted(sender, receiver));
+                            let _ = response_tx.send(ConnectRsp::Accepted(sender, receiver));
                             true
                         }
                         None => {
@@ -964,7 +965,7 @@ where
                     send_msg(permit, MultiplexMsg::OpenPort { client_port: port_num, wait, id, pre_connect });
                     let _ = sent_tx.send(());
                 } else {
-                    let _ = response_tx.send(ConnectResponse::Rejected { no_ports: false });
+                    let _ = response_tx.send(ConnectRsp::Rejected { no_ports: false });
                 }
             }
 
@@ -1033,7 +1034,7 @@ where
                                 let remote_port = local_port.side_port();
                                 let (sender, receiver) =
                                     self.create_port(local_port, remote_port, Some(pre_connect_credit));
-                                let _ = response_tx.send(ConnectResponse::Accepted(sender, receiver));
+                                let _ = response_tx.send(ConnectRsp::Accepted(sender, receiver));
                             }
                             None => {
                                 let port_num = *port_req.port;
@@ -1246,7 +1247,7 @@ where
                         let PortState::Connecting { port, response_tx } = entry.remove() else { unreachable!() };
                         let (sender, receiver) =
                             self.create_port(AllocatedSidePort::Local(port), server_port, None);
-                        let _ = response_tx.send(ConnectResponse::Accepted(sender, receiver));
+                        let _ = response_tx.send(ConnectRsp::Accepted(sender, receiver));
                     }
                     PortState::Connected {
                         pre_connected_tx: Some(pre_connected_tx), pre_connect_credit, ..
@@ -1272,7 +1273,7 @@ where
                 match entry.get_mut() {
                     PortState::Connecting { .. } => {
                         let PortState::Connecting { response_tx, .. } = entry.remove() else { unreachable!() };
-                        let _ = response_tx.send(ConnectResponse::Rejected { no_ports });
+                        let _ = response_tx.send(ConnectRsp::Rejected { no_ports });
                     }
                     PortState::Connected {
                         pre_connected_tx: Some(pre_connected_tx), pre_connect_credit, ..

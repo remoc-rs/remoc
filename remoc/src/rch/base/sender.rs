@@ -230,8 +230,7 @@ impl PortSerializer {
         C: FnOnce(chmux::Connect) -> F + Send + 'static,
         F: Future<Output = ()> + Send + 'static,
     {
-        let req = Self::connect_req()?;
-        let req = req.wait().try_pre_connect();
+        let req = Self::connect_req()?.try_pre_connect();
         let port = req.port();
 
         Self::connect(req, callback)?;
@@ -539,12 +538,7 @@ impl ErasedSender {
         let PortSerializer { requests, tasks, .. } = ps;
 
         // Extract ports and connect callbacks.
-        let mut ports = Vec::new();
-        let mut callbacks = Vec::new();
-        for (port_req, callback) in requests {
-            ports.push(port_req.try_pre_connect().wait());
-            callbacks.push(callback);
-        }
+        let (ports, callbacks): (Vec<_>, Vec<_>) = requests.into_iter().unzip();
 
         // Request connecting chmux ports.
         let connects = if ports.is_empty() {

@@ -11,11 +11,13 @@ use super::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum PortsExhausted {
+pub enum OnPortsExhausted {
     /// Immediately fail connect request.
     Fail,
-    /// Wait for a port to become available with an optional timeout.
-    Wait(Option<Duration>),
+    /// Wait for a port to become available indefinitely.
+    Wait,
+    /// Wait for a port to become available for the specified duration, then fail.
+    Timeout(Duration),
 }
 
 /// Channel multiplexer configuration.
@@ -52,9 +54,8 @@ pub struct Cfg {
     pub max_ports: u32,
     /// Default behavior when ports are exhausted and a connect is requested.
     ///
-    /// This can be overridden on a per-request basis.
     /// By default this is wait with a timeout of 60 seconds.
-    pub ports_exhausted: PortsExhausted,
+    pub ports_exhausted: OnPortsExhausted,
     /// Maximum size of received data per message in bytes.
     ///
     /// [Receiver::recv_chunk](super::Receiver::recv_chunk) is not affected by this limit.
@@ -167,7 +168,7 @@ impl Default for Cfg {
             flush_interval: None,
             io_buffer_size: 65_536,
             max_ports: 8192,
-            ports_exhausted: PortsExhausted::Wait(Some(Duration::from_secs(60))),
+            ports_exhausted: OnPortsExhausted::Timeout(Duration::from_secs(60)),
             max_data_size: 524_288,
             max_received_ports: 128,
             chunk_size: 32_768,

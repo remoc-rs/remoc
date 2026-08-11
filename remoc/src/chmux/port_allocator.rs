@@ -10,7 +10,8 @@ use std::{
 };
 use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
 
-use super::msg::PortDataItem;
+use super::{cfg::OnPortsExhausted, msg::PortDataItem};
+use crate::exec::time::timeout;
 
 /// The requested remote port number has alredy been allocated.
 #[derive(Debug, Clone)]
@@ -31,22 +32,33 @@ impl From<RemotePortAlreadyAllocated> for std::io::Error {
     }
 }
 
-/// Number of available [`ConnectReq`]s has been exceeded.
+/// No ports or connection requests are currently available.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ConnectReqsExhausted;
+pub struct PortsExhausted;
 
-impl fmt::Display for ConnectReqsExhausted {
+impl fmt::Display for PortsExhausted {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "no ConnectReqs are currently available")
+        write!(f, "no ports or connection requests are currently available")
     }
 }
 
-impl Error for ConnectReqsExhausted {}
+impl Error for PortsExhausted {}
 
-impl From<ConnectReqsExhausted> for std::io::Error {
-    fn from(err: ConnectReqsExhausted) -> Self {
+impl From<PortsExhausted> for std::io::Error {
+    fn from(err: PortsExhausted) -> Self {
         Self::new(ErrorKind::AddrInUse, err)
+    }
+}
+
+/// Try running the waiting and trying variants according to the ports exhausted policy.
+async fn try_exhausted<T>(
+    on_ports_exhausted: &OnPortsExhausted, wait_fn: impl AsyncFnOnce() -> T, try_fn: impl FnOnce() -> Option<T>,
+) -> Result<T, PortsExhausted> {
+    match on_ports_exhausted {
+        OnPortsExhausted::Fail => try_fn().ok_or(PortsExhausted),
+        OnPortsExhausted::Wait => Ok(wait_fn().await),
+        OnPortsExhausted::Timeout(duration) => timeout(*duration, wait_fn()).await.map_err(|_| PortsExhausted),
     }
 }
 
@@ -59,6 +71,7 @@ struct PortAllocatorInner {
     quarantined_list: VecDeque<u32>,
     limit: usize,
     next: u32,
+    ports_exhausted: OnPortsExhausted,
     notify: Arc<Notify>,
 }
 
@@ -117,7 +130,7 @@ impl PortAllocatorInner {
         };
 
         self.local_pre_allocated.insert(number);
-        Some(PreAllocatedLocalPort { number, allocator: this.clone() })
+        Some(PreAllocatedLocalPort { number, allocator: this.clone(), ports_exhausted: self.ports_exhausted })
     }
 
     fn try_allocate_remote(
@@ -153,6 +166,7 @@ pub struct PortAllocator {
     connect_credits: Arc<Semaphore>,
     port_side_supported: bool,
     pre_connect_supported: bool,
+    ports_exhausted: OnPortsExhausted,
 }
 
 impl fmt::Debug for PortAllocator {
@@ -167,6 +181,7 @@ impl fmt::Debug for PortAllocator {
             .field("connect_credits", &self.connect_credits.available_permits())
             .field("port_side_supported", &self.port_side_supported)
             .field("pre_connect_supported", &self.pre_connect_supported)
+            .field("ports_exhausted", &self.ports_exhausted)
             .finish()
     }
 }
@@ -175,6 +190,7 @@ impl PortAllocator {
     /// Creates a new port number allocator.
     pub(crate) fn new(
         port_limit: u32, connect_limit: u16, port_side_supported: bool, pre_connect_supported: bool,
+        ports_exhausted: OnPortsExhausted,
     ) -> PortAllocator {
         let ports = PortAllocatorInner {
             local_used: HashSet::new(),
@@ -185,6 +201,7 @@ impl PortAllocator {
             quarantined_list: VecDeque::new(),
             limit: port_limit as usize,
             next: 0,
+            ports_exhausted,
             notify: Arc::new(Notify::new()),
         };
 
@@ -193,6 +210,7 @@ impl PortAllocator {
             connect_credits: Arc::new(Semaphore::new(connect_limit.into())),
             port_side_supported,
             pre_connect_supported,
+            ports_exhausted,
         }
     }
 
@@ -209,15 +227,24 @@ impl PortAllocator {
     /// Pre-allocates a local port number.
     ///
     /// If the pre-allocation limit is exceeded, `None` is returned.
-    pub(super) fn pre_allocate_local(&self) -> Option<PreAllocatedLocalPort> {
-        let mut inner = self.ports.lock().unwrap();
-        inner.try_pre_allocate_local(&self.ports)
+    pub(super) fn pre_allocate_local(&self) -> Result<PreAllocatedLocalPort, PortsExhausted> {
+        let mut ports = self.ports.lock().unwrap();
+        ports.try_pre_allocate_local(&self.ports).ok_or(PortsExhausted)
     }
 
     /// Reserves a port number for accepting an incoming connection.
     ///
-    /// If all ports are currently in use, this waits for a port number to become available.
-    pub(super) async fn reserve(&self) -> ReservedPort {
+    /// If all ports are currently in use, this waits for a port number to become available
+    /// according to the configuration.
+    pub(super) async fn reserve(&self) -> Result<ReservedPort, PortsExhausted> {
+        try_exhausted(&self.ports_exhausted, async || self.wait_reserve().await, || self.try_reserve()).await
+    }
+
+    /// Reserves a port number for accepting an incoming connection.
+    ///
+    /// If all ports are currently in use, this waits for a port number to become available
+    /// forever.    
+    pub(super) async fn wait_reserve(&self) -> ReservedPort {
         loop {
             let notified;
 
@@ -238,14 +265,26 @@ impl PortAllocator {
     ///
     /// If all ports are currently in use, this returns [None].
     pub(super) fn try_reserve(&self) -> Option<ReservedPort> {
-        let mut inner = self.ports.lock().unwrap();
-        inner.try_reserve(self.ports.clone())
+        let mut ports = self.ports.lock().unwrap();
+        ports.try_reserve(self.ports.clone())
     }
 
     /// Obtains a connection request credit.
     ///
-    /// Waits for the credit to become available.
-    pub(super) async fn connect_req_credit(&self) -> ConnectReqCredit {
+    /// Waits for the credit to become available according to the configuration.
+    pub(super) async fn connect_req_credit(&self) -> Result<ConnectReqCredit, PortsExhausted> {
+        try_exhausted(
+            &self.ports_exhausted,
+            async || self.wait_connect_req_credit().await,
+            || self.try_connect_req_credit(),
+        )
+        .await
+    }
+
+    /// Obtains a connection request credit.
+    ///
+    /// Waits for the credit to become available forever.
+    async fn wait_connect_req_credit(&self) -> ConnectReqCredit {
         ConnectReqCredit(self.connect_credits.clone().acquire_owned().await.unwrap())
     }
 
@@ -257,7 +296,7 @@ impl PortAllocator {
     }
 
     /// Allocates a port connection request.
-    pub fn connect_req(&self) -> Result<ConnectReq, ConnectReqsExhausted> {
+    pub fn connect_req(&self) -> Result<ConnectReq, PortsExhausted> {
         ConnectReq::new(self.clone())
     }
 }
@@ -387,11 +426,23 @@ impl Drop for AllocatedLocalPort {
 pub(super) struct PreAllocatedLocalPort {
     number: u32,
     allocator: Arc<Mutex<PortAllocatorInner>>,
+    ports_exhausted: OnPortsExhausted,
 }
 
 impl PreAllocatedLocalPort {
-    /// Waits until the port becomes available and allocates it.
-    pub async fn allocate(self) -> AllocatedLocalPort {
+    /// Waits until the port becomes available according to the configuration and allocates it.
+    pub async fn allocate(self) -> Result<AllocatedLocalPort, PortsExhausted> {
+        match &self.ports_exhausted {
+            OnPortsExhausted::Fail => self.try_allocate().map_err(|_| PortsExhausted),
+            OnPortsExhausted::Wait => Ok(self.wait_allocate().await),
+            OnPortsExhausted::Timeout(duration) => {
+                timeout(*duration, self.wait_allocate()).await.map_err(|_| PortsExhausted)
+            }
+        }
+    }
+
+    /// Waits until the port becomes available forever and allocates it.
+    async fn wait_allocate(self) -> AllocatedLocalPort {
         loop {
             let notified;
 
@@ -719,19 +770,23 @@ impl fmt::Debug for ConnectReq {
 }
 
 impl ConnectReq {
-    fn new(port_allocator: PortAllocator) -> Result<Self, ConnectReqsExhausted> {
-        let pre_port = port_allocator.pre_allocate_local().ok_or(ConnectReqsExhausted)?;
+    fn new(port_allocator: PortAllocator) -> Result<Self, PortsExhausted> {
+        let pre_port = port_allocator.pre_allocate_local()?;
         Ok(Self {
             port_allocator,
-            opts: PortReqOpts { id: *pre_port, wait: false, pre_connect_credit: None },
+            opts: PortReqOpts { id: *pre_port, wait: true, pre_connect_credit: None },
             pre_port,
         })
     }
 
-    pub(super) async fn into_port_req(self) -> Option<PortReq> {
+    pub(super) async fn into_port_req(self) -> Result<PortReq, PortsExhausted> {
         let Self { pre_port, opts, .. } = self;
-        let port = if opts.wait { pre_port.allocate().await } else { pre_port.try_allocate().ok()? };
-        Some(PortReq { port, opts })
+        let port = if opts.wait {
+            pre_port.allocate().await?
+        } else {
+            pre_port.try_allocate().map_err(|_| PortsExhausted)?
+        };
+        Ok(PortReq { port, opts })
     }
 
     /// Allocated port number.
@@ -746,10 +801,14 @@ impl ConnectReq {
         self
     }
 
-    /// Wait for a local port (if pre-allocated) and remote port to become available.
+    /// Do not wait for a local and remote ports to become available.
+    ///
+    /// If this is called and the local or remote endpoint has no ports readily available,
+    /// the connect request will fail regardless of the setting of
+    /// [`Cfg::ports_exhausted`](`super::cfg::Cfg::ports_exhausted`).
     #[must_use]
-    pub fn wait(mut self) -> Self {
-        self.opts.wait = true;
+    pub fn no_wait(mut self) -> Self {
+        self.opts.wait = false;
         self
     }
 
@@ -761,11 +820,13 @@ impl ConnectReq {
     ///
     /// If the remote endpoint does not support pre-connection, this is ignored.
     ///
-    /// This waits until a slot is available in the connect queue.
+    /// This waits until a slot is available in the connect queue according to the
+    /// [configuration](super::cfg::Cfg::ports_exhausted). If no slot becomes available,
+    /// the port is not pre-connected.
     #[must_use]
     pub async fn pre_connect(mut self) -> Self {
         if self.port_allocator.is_pre_connect_supported() && self.opts.pre_connect_credit.is_none() {
-            self.opts.pre_connect_credit = Some(self.port_allocator.connect_req_credit().await);
+            self.opts.pre_connect_credit = self.port_allocator.connect_req_credit().await.ok();
         }
         self
     }

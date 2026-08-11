@@ -4,7 +4,7 @@ use bytes::Buf;
 use std::{fmt, num::Wrapping};
 use tracing::Instrument;
 
-use super::{ConnectError, Received, RecvChunkError, RecvError, SendError, port_allocator::ConnectReqsExhausted};
+use super::{ConnectError, Received, RecvChunkError, RecvError, SendError, port_allocator::PortsExhausted};
 use crate::exec;
 
 /// An error occurred during forwarding of a message.
@@ -31,8 +31,8 @@ impl From<RecvError> for ForwardError {
     }
 }
 
-impl From<ConnectReqsExhausted> for ForwardError {
-    fn from(_: ConnectReqsExhausted) -> Self {
+impl From<PortsExhausted> for ForwardError {
+    fn from(_: PortsExhausted) -> Self {
         Self::LocalPortsExhausted
     }
 }
@@ -127,8 +127,8 @@ pub(crate) async fn forward(rx: &mut super::Receiver, tx: &mut super::Sender) ->
                 for req in &reqs {
                     let mut connect_req = allocator.connect_req()?;
                     connect_req = connect_req.with_id(req.id());
-                    if req.is_wait() {
-                        connect_req = connect_req.wait();
+                    if !req.is_wait() {
+                        connect_req = connect_req.no_wait();
                     }
                     if req.is_pre_connected() {
                         connect_req = connect_req.try_pre_connect();

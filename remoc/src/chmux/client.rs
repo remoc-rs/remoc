@@ -13,7 +13,7 @@ use std::{
 use tokio::sync::{mpsc, oneshot};
 
 use super::{
-    port_allocator::{ConnectReq, ConnectReqsExhausted, PortAllocator, PortReq},
+    port_allocator::{ConnectReq, PortAllocator, PortReq, PortsExhausted},
     receiver::Receiver,
     sender::Sender,
 };
@@ -49,6 +49,12 @@ impl fmt::Display for ConnectError {
 
 impl Error for ConnectError {}
 
+impl From<PortsExhausted> for ConnectError {
+    fn from(_: PortsExhausted) -> Self {
+        ConnectError::LocalPortsExhausted
+    }
+}
+
 impl From<ConnectError> for std::io::Error {
     fn from(err: ConnectError) -> Self {
         use std::io::ErrorKind;
@@ -64,19 +70,19 @@ impl From<ConnectError> for std::io::Error {
 
 /// Connection to remote service request to local multiplexer.
 #[derive(Debug)]
-pub(super) struct ConnectRequest {
+pub(super) struct ClientReq {
     /// Port request.
     pub port_req: PortReq,
     /// Notification that request has been queued for sending.
     pub sent_tx: oneshot::Sender<()>,
     /// Response channel sender.
-    pub response_tx: oneshot::Sender<ConnectResponse>,
+    pub response_tx: oneshot::Sender<ConnectRsp>,
 }
 
 /// Connection to remote service response from local multiplexer.
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
-pub(super) enum ConnectResponse {
+pub(super) enum ConnectRsp {
     /// Connection accepted or pre-connected and channel opened.
     Accepted(Sender, Receiver),
     /// Connection was rejected.
@@ -154,7 +160,7 @@ impl Future for Connect {
 /// This can be cloned to make simultaneous requests.
 #[derive(Clone)]
 pub struct Client {
-    tx: mpsc::UnboundedSender<ConnectRequest>,
+    tx: mpsc::UnboundedSender<ClientReq>,
     port_allocator: PortAllocator,
     listener_dropped: Arc<AtomicBool>,
     terminate_tx: mpsc::UnboundedSender<()>,
@@ -168,8 +174,8 @@ impl fmt::Debug for Client {
 
 impl Client {
     pub(super) fn new(
-        tx: mpsc::UnboundedSender<ConnectRequest>, port_allocator: PortAllocator,
-        listener_dropped: Arc<AtomicBool>, terminate_tx: mpsc::UnboundedSender<()>,
+        tx: mpsc::UnboundedSender<ClientReq>, port_allocator: PortAllocator, listener_dropped: Arc<AtomicBool>,
+        terminate_tx: mpsc::UnboundedSender<()>,
     ) -> Client {
         Client { tx, port_allocator, listener_dropped, terminate_tx }
     }
@@ -180,7 +186,7 @@ impl Client {
     }
 
     /// Allocates a port connection request.
-    pub fn connect_req(&self) -> Result<ConnectReq, ConnectReqsExhausted> {
+    pub fn connect_req(&self) -> Result<ConnectReq, PortsExhausted> {
         self.port_allocator.connect_req()
     }
 
@@ -198,7 +204,7 @@ impl Client {
                 return Err(ConnectError::Rejected);
             }
 
-            let port_req = connect_req.into_port_req().await.ok_or(ConnectError::LocalPortsExhausted)?;
+            let port_req = connect_req.into_port_req().await?;
 
             // Obtain credit for connection request.
             // Not necessary when port will be pre-connected, because then request already
@@ -207,7 +213,10 @@ impl Client {
                 None
             } else {
                 Some(if port_req.opts.wait {
-                    port_allocator.connect_req_credit().await
+                    port_allocator
+                        .connect_req_credit()
+                        .await
+                        .map_err(|_| ConnectError::TooManyPendingConnectReqs)?
                 } else {
                     port_allocator.try_connect_req_credit().ok_or(ConnectError::TooManyPendingConnectReqs)?
                 })
@@ -215,13 +224,13 @@ impl Client {
 
             // Build and send request.
             let (response_tx, response_rx) = oneshot::channel();
-            let req = ConnectRequest { port_req, sent_tx, response_tx };
+            let req = ClientReq { port_req, sent_tx, response_tx };
             let _ = tx.send(req);
 
             // Process response.
             match response_rx.await {
-                Ok(ConnectResponse::Accepted(sender, receiver)) => Ok((sender, receiver)),
-                Ok(ConnectResponse::Rejected { no_ports }) => {
+                Ok(ConnectRsp::Accepted(sender, receiver)) => Ok((sender, receiver)),
+                Ok(ConnectRsp::Rejected { no_ports }) => {
                     if no_ports {
                         Err(ConnectError::RemotePortsExhausted)
                     } else {
@@ -247,8 +256,7 @@ impl Client {
     /// to pre-connect the port if possible.
     pub async fn connect_port(&self) -> Result<(Sender, Receiver), ConnectError> {
         let req = self.connect_req().map_err(|_| ConnectError::LocalPortsExhausted)?;
-        let req = req.wait().try_pre_connect();
-        self.connect(req).await
+        self.connect(req.try_pre_connect()).await
     }
 
     /// Terminates the multiplexer, forcibly closing all open ports.

@@ -9,7 +9,9 @@ use tokio_util::sync::ReusableBoxFuture;
 
 use super::{
     mux::PortEvt,
-    port_allocator::{AllocatedSidePort, PortAllocator, RemotePortAlreadyAllocated, ReservedPort},
+    port_allocator::{
+        AllocatedSidePort, PortAllocator, PortsExhausted, RemotePortAlreadyAllocated, ReservedPort,
+    },
     receiver::Receiver,
     sender::Sender,
 };
@@ -42,6 +44,12 @@ impl Error for ListenerError {}
 impl From<RemotePortAlreadyAllocated> for ListenerError {
     fn from(err: RemotePortAlreadyAllocated) -> Self {
         Self::RemotePortAlreadyAllocated(err.0)
+    }
+}
+
+impl From<PortsExhausted> for ListenerError {
+    fn from(_: PortsExhausted) -> Self {
+        Self::LocalPortsExhausted
     }
 }
 
@@ -124,24 +132,31 @@ impl Request {
     /// If this is a pre-connected connect request, accept it.
     ///
     /// Otherwise returns `None`.
-    async fn accept_pre_connected(&mut self) -> Option<(Sender, Receiver)> {
-        let reserved_port = self.allocator.reserve().await;
-        let mutex = self.pre_connected.take()?;
+    async fn accept_pre_connected(&mut self) -> Result<Option<(Sender, Receiver)>, ListenerError> {
+        if self.pre_connected.is_none() {
+            return Ok(None);
+        }
+
+        let reserved_port = self.allocator.reserve().await?;
+        let permit = self.tx.reserve().await.map_err(|_| ListenerError::ChMux)?;
+
+        let mutex = self.pre_connected.take().unwrap();
         let (sender, receiver) = mutex.into_inner().unwrap();
-        let _ =
-            self.tx.send(PortEvt::AcceptedAfterPreConnect { remote_port: self.remote_port, reserved_port }).await;
+
+        permit.send(PortEvt::AcceptedAfterPreConnect { remote_port: self.remote_port, reserved_port });
         self.done = true;
-        Some((sender, receiver))
+
+        Ok(Some((sender, receiver)))
     }
 
     /// Accepts the request.
     pub async fn accept(mut self) -> Result<(Sender, Receiver), ListenerError> {
-        if let Some(tx_rx) = self.accept_pre_connected().await {
+        if let Some(tx_rx) = self.accept_pre_connected().await? {
             return Ok(tx_rx);
         }
 
         let reserved = if self.wait {
-            self.allocator.reserve().await
+            self.allocator.reserve().await?
         } else {
             match self.allocator.try_reserve() {
                 Some(reserved) => reserved,
@@ -157,7 +172,7 @@ impl Request {
 
     /// Accepts the request using the already reserved port.
     async fn accept_reserved(mut self, reserved_port: ReservedPort) -> Result<(Sender, Receiver), ListenerError> {
-        if let Some(tx_rx) = self.accept_pre_connected().await {
+        if let Some(tx_rx) = self.accept_pre_connected().await? {
             return Ok(tx_rx);
         }
 
@@ -179,7 +194,8 @@ impl Request {
     /// Setting `no_ports` to true indicates to the remote endpoint that the request
     /// was rejected because no local port could be allocated.
     pub async fn reject(mut self, no_ports: bool) {
-        let reserved_port = if self.is_pre_connected() { Some(self.allocator.reserve().await) } else { None };
+        let reserved_port =
+            if self.is_pre_connected() { Some(self.allocator.wait_reserve().await) } else { None };
         let _ = self.tx.send(PortEvt::Rejected { remote_port: self.remote_port, no_ports, reserved_port }).await;
         self.done = true;
     }
@@ -197,7 +213,7 @@ impl Drop for Request {
         let drop_tx = self.tx.clone();
 
         self.handle.spawn(async move {
-            let reserved_port = if is_pre_connected { Some(allocator.reserve().await) } else { None };
+            let reserved_port = if is_pre_connected { Some(allocator.wait_reserve().await) } else { None };
             let _ = drop_tx.send(PortEvt::Rejected { remote_port, no_ports: false, reserved_port }).await;
         });
     }
@@ -250,7 +266,7 @@ impl Listener {
             tokio::select! {
                 biased;
 
-                reserved_port = self.port_allocator.reserve(), if !self.wait_closed || !self.no_wait_closed => {
+                reserved_port = self.port_allocator.wait_reserve(), if !self.wait_closed || !self.no_wait_closed => {
                     match self.inspect().await? {
                         Some(req) => break Ok(Some(req.accept_reserved(reserved_port).await?)),
                         None => break Ok(None),

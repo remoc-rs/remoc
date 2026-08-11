@@ -12,7 +12,7 @@ use wasm_bindgen_test::wasm_bindgen_test;
 
 use crate::loop_transport;
 use remoc::{
-    chmux::{self, PortsExhausted, ReceiverStream, SendError},
+    chmux::{self, OnPortsExhausted, ReceiverStream, SendError},
     exec,
     exec::time::{sleep, timeout},
 };
@@ -21,7 +21,7 @@ fn cfg() -> chmux::Cfg {
     chmux::Cfg {
         connection_timeout: Some(Duration::from_secs(1)),
         max_ports: 20,
-        ports_exhausted: PortsExhausted::Fail,
+        ports_exhausted: OnPortsExhausted::Fail,
         max_data_size: 1_000_000,
         max_received_ports: 100,
         chunk_size: 9,
@@ -36,7 +36,7 @@ fn cfg2() -> chmux::Cfg {
     chmux::Cfg {
         connection_timeout: Some(Duration::from_secs(1)),
         max_ports: 20,
-        ports_exhausted: PortsExhausted::Wait(Some(Duration::from_secs(5))),
+        ports_exhausted: OnPortsExhausted::Timeout(Duration::from_secs(5)),
         max_data_size: 1_000_000,
         max_received_ports: 100,
         chunk_size: 4,
@@ -563,7 +563,7 @@ async fn no_pre_connect() {
 
     {
         println!("A client connecting 1...");
-        let connect = a_client.connect(a_client.connect_req().unwrap().wait());
+        let connect = a_client.connect(a_client.connect_req().unwrap().no_wait());
         println!("A client connect_ext result: {connect:?}");
         let res = connect.await;
         println!("A client connect result: {res:?}");
@@ -574,7 +574,7 @@ async fn no_pre_connect() {
 
     println!("A client connecting 2...");
     let (mut tx, mut rx): (chmux::Sender, chmux::Receiver) =
-        a_client.connect(a_client.connect_req().unwrap().wait()).await.expect("Connect failed");
+        a_client.connect(a_client.connect_req().unwrap().no_wait()).await.expect("Connect failed");
     println!("A client connected.");
 
     let mut n_recv = 0;

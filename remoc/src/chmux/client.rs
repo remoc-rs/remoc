@@ -21,7 +21,6 @@ use crate::{exec, exec::task::JoinHandle};
 
 /// An error occurred during connecting to a remote service.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ConnectError {
     /// All local ports are in use.
     LocalPortsExhausted,
@@ -33,6 +32,19 @@ pub enum ConnectError {
     Rejected,
     /// A multiplexer error has occurred or it has been terminated.
     ChMux,
+}
+
+#[cfg(feature = "serde")]
+crate::versioned::impl_enum! {
+    ConnectError,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        LocalPortsExhausted => "_0",
+        RemotePortsExhausted => "_1",
+        TooManyPendingConnectReqs => "_2",
+        Rejected => "_3",
+        ChMux => "_4",
+    }
 }
 
 impl fmt::Display for ConnectError {

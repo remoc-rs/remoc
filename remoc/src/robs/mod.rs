@@ -76,7 +76,7 @@ use tokio::sync::watch;
 use crate::prelude::*;
 
 /// An error occurred during sending an event for an observable collection.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub enum SendError {
     /// Sending to a remote endpoint failed.
     RemoteSend(rch::base::SendErrorKind),
@@ -86,6 +86,17 @@ pub enum SendError {
     RemoteListen(chmux::ListenerError),
     /// Forwarding at a remote endpoint to another remote endpoint failed.
     RemoteForward,
+}
+
+crate::versioned::impl_enum! {
+    SendError,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        RemoteSend(err: rch::base::SendErrorKind) => "_0",
+        RemoteConnect(err: chmux::ConnectError) => "_1",
+        RemoteListen(err: chmux::ListenerError) => "_2",
+        RemoteForward => "_3",
+    }
 }
 
 impl fmt::Display for SendError {
@@ -130,7 +141,7 @@ impl<T> TryFrom<rch::mpsc::SendError<T>> for SendError {
 }
 
 /// An error occurred during receiving an event or initial value of an observed collection.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub enum RecvError {
     /// The observed collection was dropped before `done` was called on it.
     Closed,
@@ -149,6 +160,20 @@ pub enum RecvError {
     RemoteListen(chmux::ListenerError),
     /// Invalid index.
     InvalidIndex(usize),
+}
+
+crate::versioned::impl_enum! {
+    RecvError,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Closed => "_0",
+        Lagged => "_1",
+        MaxSizeExceeded(size: usize) => "_2",
+        RemoteReceive(err: rch::base::RecvError) => "_3",
+        RemoteConnect(err: chmux::ConnectError) => "_4",
+        RemoteListen(err: chmux::ListenerError) => "_5",
+        InvalidIndex(idx: usize) => "_6",
+    }
 }
 
 impl fmt::Display for RecvError {

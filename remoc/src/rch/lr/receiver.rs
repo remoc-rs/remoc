@@ -13,13 +13,14 @@ use super::{
     },
     Interlock, Location,
 };
+use crate::versioned::RemocCompact;
 use crate::{
     chmux,
     codec::{self, DeserializationError},
 };
 
 /// An error that occurred during receiving from a remote endpoint.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub enum RecvError {
     /// Receiving data over the chmux channel failed.
     Receive(chmux::RecvError),
@@ -31,6 +32,18 @@ pub enum RecvError {
     Connect(ConnectError),
     /// Maximum item size was exceeded.
     MaxItemSizeExceeded,
+}
+
+crate::versioned::impl_enum! {
+    RecvError,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Receive(err: chmux::RecvError) => "_0",
+        Deserialize(err: DeserializationError) => "_1",
+        MissingPorts(ports: Vec<u32>) => "_2",
+        Connect(err: ConnectError) => "_3",
+        MaxItemSizeExceeded => "_4",
+    }
 }
 
 impl From<base::RecvError> for RecvError {
@@ -96,21 +109,27 @@ impl<T, Codec> fmt::Debug for Receiver<T, Codec> {
 }
 
 /// A raw chmux channel receiver in transport.
-#[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct TransportedReceiver<T, Codec> {
+struct TransportedReceiver {
     /// chmux port number.
-    pub port: u32,
-    /// Data type.
-    data: PhantomData<T>,
-    /// Data codec.
-    codec: PhantomData<Codec>,
+    port: u32,
     /// Maximum item size in bytes.
-    #[serde(default = "default_max_item_size")]
     max_item_size: u64,
 }
 
 const fn default_max_item_size() -> u64 {
     u64::MAX
+}
+
+crate::versioned::impl_struct! {
+    TransportedReceiver,
+    versioner = RemocCompact,
+    fields {
+        port: u32 => "_0",
+        data: PhantomData<()> = PhantomData,
+        codec: PhantomData<()> = PhantomData,
+        #[serde(default = "default_max_item_size")]
+        max_item_size: u64 => "_1",
+    }
 }
 
 impl<T, Codec> Receiver<T, Codec>
@@ -204,13 +223,8 @@ where
             }
         })?;
 
-        TransportedReceiver::<T, Codec> {
-            port,
-            data: PhantomData,
-            max_item_size: max_item_size.try_into().unwrap_or(u64::MAX),
-            codec: PhantomData,
-        }
-        .serialize(serializer)
+        TransportedReceiver { port, max_item_size: max_item_size.try_into().unwrap_or(u64::MAX) }
+            .serialize(serializer)
     }
 }
 
@@ -224,8 +238,7 @@ where
     where
         D: serde::Deserializer<'de>,
     {
-        let TransportedReceiver::<T, Codec> { port, max_item_size, .. } =
-            TransportedReceiver::deserialize(deserializer)?;
+        let TransportedReceiver { port, max_item_size } = TransportedReceiver::deserialize(deserializer)?;
         let max_item_size = usize::try_from(max_item_size).unwrap_or(usize::MAX);
 
         let (receiver_tx, receiver_rx) = tokio::sync::mpsc::unbounded_channel();

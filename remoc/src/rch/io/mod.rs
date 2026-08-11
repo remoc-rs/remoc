@@ -123,10 +123,9 @@
 //! # tokio_test::block_on(remoc::doctest::client_server(client, server));
 //! ```
 
-use serde::{Deserialize, Serialize};
-
 use super::{bin, oneshot};
 use crate::codec;
+use crate::versioned::RemocCompact;
 
 mod receiver;
 mod sender;
@@ -137,14 +136,22 @@ pub use sender::Sender;
 use sender::SizeMode;
 
 /// Internal enum to track size information on the receiver side.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(bound(serialize = "Codec: codec::Codec"))]
-#[serde(bound(deserialize = "Codec: codec::Codec"))]
+#[derive(Debug)]
 pub(super) enum SizeInfo<Codec> {
     /// Size was known at channel creation.
     Determined(u64),
     /// Size will be received when sender shuts down.
     Undetermined(oneshot::Receiver<u64, Codec>),
+}
+
+crate::versioned::impl_enum! {
+    SizeInfo<Codec>,
+    versioner = RemocCompact,
+    variants {
+        Determined(size: u64) => "_0",
+        Undetermined(rx: oneshot::Receiver<u64, Codec>) => "_1",
+    }
+    where Codec: codec::Codec
 }
 
 /// Creates a new I/O channel with unknown size.

@@ -1,5 +1,4 @@
 use futures::FutureExt;
-use serde::{Deserialize, Serialize};
 use std::{
     convert::{TryFrom, TryInto},
     error::Error,
@@ -18,7 +17,7 @@ use super::{
 use crate::{RemoteSend, chmux, codec, exec};
 
 /// An error occurred during sending over a broadcast channel.
-#[derive(Clone, custom_debug::Debug, Serialize, Deserialize)]
+#[derive(Clone, custom_debug::Debug)]
 pub enum SendError<T> {
     /// All receivers have been dropped.
     Closed(#[debug(skip)] T),
@@ -30,6 +29,19 @@ pub enum SendError<T> {
     RemoteListen(chmux::ListenerError),
     /// Forwarding at a remote endpoint to another remote endpoint failed.
     RemoteForward,
+}
+
+crate::versioned::impl_enum! {
+    SendError<T>,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Closed(item: T) => "_0",
+        RemoteSend(err: base::SendErrorKind) => "_1",
+        RemoteConnect(err: chmux::ConnectError) => "_2",
+        RemoteListen(err: chmux::ListenerError) => "_3",
+        RemoteForward => "_4",
+    }
+    where T: RemoteSend
 }
 
 impl<T> fmt::Display for SendError<T> {

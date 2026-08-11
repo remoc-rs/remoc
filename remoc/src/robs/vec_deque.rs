@@ -73,7 +73,6 @@
 //! ```
 //!
 
-use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashSet, VecDeque},
     fmt,
@@ -89,7 +88,7 @@ use super::{ChangeNotifier, ChangeSender, RecvError, SendError, default_on_err, 
 use crate::{exec, prelude::*};
 
 /// A VecDeque change event.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VecDequeEvent<T> {
     /// An item was added at the end.
     PushBack(T),
@@ -124,14 +123,35 @@ pub enum VecDequeEvent<T> {
     /// The VecDeque has reached its final state and
     /// no further events will occur.
     Done,
-
-    // NOTE: All variants with #[serde(skip)] must be at the end of the enum
-    //       to workaround serde issue serde-rs/serde#2224.
-    //
     /// The incremental subscription has reached the value of the observed
     /// VecDeque at the time it was subscribed.
-    #[serde(skip)]
     InitialComplete,
+}
+
+crate::versioned::impl_enum! {
+    VecDequeEvent<T>,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        PushBack(value: T) => "_0",
+        PushFront(value: T) => "_1",
+        PopBack => "_2",
+        PopFront => "_3",
+        Insert(index: usize, value: T) => "_4",
+        Set(index: usize, value: T) => "_5",
+        Remove(index: usize) => "_6",
+        SwapRemoveBack(index: usize) => "_7",
+        SwapRemoveFront(index: usize) => "_8",
+        Resize(len: usize, value: T) => "_9",
+        Truncate(len: usize) => "_10",
+        Retain(indices: HashSet<usize>) => "_11",
+        RetainNot(indices: HashSet<usize>) => "_12",
+        Clear => "_13",
+        ShrinkToFit => "_14",
+        Done => "_15",
+        #[skip]
+        InitialComplete,
+    }
+    where T: RemoteSend
 }
 
 /// A VecDeque that emits an event for each change.
@@ -813,9 +833,7 @@ where
 }
 
 /// Initial value of an observable VecDeque subscription.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(bound(serialize = "T: RemoteSend, Codec: crate::codec::Codec"))]
-#[serde(bound(deserialize = "T: RemoteSend, Codec: crate::codec::Codec"))]
+#[derive(Debug)]
 enum VecDequeInitialValue<T, Codec = crate::codec::Default> {
     /// Initial value is present.
     Value(VecDeque<T>),
@@ -826,6 +844,16 @@ enum VecDequeInitialValue<T, Codec = crate::codec::Default> {
         /// Receiver.
         rx: rch::mpsc::Receiver<T, Codec>,
     },
+}
+
+crate::versioned::impl_enum! {
+    VecDequeInitialValue<T, Codec>,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Value(value: VecDeque<T>) => "_0",
+        Incremental { len: usize, rx: rch::mpsc::Receiver<T, Codec> } => "_1",
+    }
+    where T: RemoteSend, Codec: crate::codec::Codec
 }
 
 impl<T, Codec> VecDequeInitialValue<T, Codec>
@@ -872,22 +900,29 @@ where
 /// The event stream can also be processed event-wise using [recv](Self::recv).
 /// If the subscription is not incremental [take_initial](Self::take_initial) must
 /// be called before the first call to [recv](Self::recv).
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(bound(serialize = "T: RemoteSend, Codec: crate::codec::Codec"))]
-#[serde(bound(deserialize = "T: RemoteSend, Codec: crate::codec::Codec"))]
+#[derive(Debug)]
 pub struct VecDequeSubscription<T, Codec = crate::codec::Default> {
     /// Value of VecDeque at time of subscription.
     initial: VecDequeInitialValue<T, Codec>,
     /// Initial value received completely.
-    #[serde(skip, default)]
     complete: bool,
     /// Change events receiver.
     ///
     /// `None` if [ObservableVecDeque::done] has been called before subscribing.
     events: Option<rch::broadcast::Receiver<VecDequeEvent<T>, Codec>>,
     /// Event stream ended.
-    #[serde(skip, default)]
     done: bool,
+}
+
+crate::versioned::impl_struct! {
+    VecDequeSubscription<T, Codec>,
+    versioner = crate::versioned::RemocCompact,
+    fields {
+        initial: VecDequeInitialValue<T, Codec> => "_0",
+        events: Option<rch::broadcast::Receiver<VecDequeEvent<T>, Codec>> => "_1",
+    }
+    default { complete, done }
+    where T: RemoteSend, Codec: crate::codec::Codec
 }
 
 impl<T, Codec> VecDequeSubscription<T, Codec>

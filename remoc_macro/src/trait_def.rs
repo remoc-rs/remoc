@@ -1468,7 +1468,32 @@ impl TraitDef {
         };
 
         let impl_generics_where_pred = &impl_generics_where.unwrap().predicates;
-        let impl_generics_where_str = quote! { #impl_generics_where_pred }.to_string();
+
+        // Generic parameters for the versioning macro, which expects const generic
+        // parameters to follow the type generic parameters, separated by a semicolon.
+        let versioned_generics = {
+            let mut ty_params = Vec::new();
+            let mut const_params = Vec::new();
+            for p in &ty_generics.params {
+                match p {
+                    GenericParam::Type(tp) => {
+                        let id = &tp.ident;
+                        ty_params.push(quote! { #id });
+                    }
+                    GenericParam::Const(cp) => {
+                        let (id, ty) = (&cp.ident, &cp.ty);
+                        const_params.push(quote! { const #id: #ty });
+                    }
+                    GenericParam::Lifetime(_) => (),
+                }
+            }
+            let consts = if const_params.is_empty() {
+                quote! {}
+            } else {
+                quote! { ; #( #const_params ),* }
+            };
+            quote! { < #( #ty_params ),* #consts > }
+        };
 
         let assoc = &self.assoc_types;
 
@@ -1514,24 +1539,34 @@ impl TraitDef {
 
         quote! {
             #[doc=#doc]
-            #[derive(::remoc::rtc::Serialize, ::remoc::rtc::Deserialize)]
-            #[serde(crate = "::remoc::_serde")]
-            #[serde(bound(serialize = #impl_generics_where_str))]
-            #[serde(bound(deserialize = #impl_generics_where_str))]
             #attrs
             #vis struct #client_ident #ty_generics #ty_generics_where_ty {
                 req_tx: ::remoc::rch::mpsc::Sender<
                     ::remoc::rtc::Req<#req_value #req_generics, #req_ref #req_generics, #req_ref_mut #req_generics>,
                     Codec,
                 >,
-                #[serde(default = "::remoc::rtc::missing_max_reply_size", with = "::remoc::rtc::serde_max_reply_size")]
                 max_reply_size: usize,
-                #[serde(skip)]
-                #[serde(default = "::remoc::rtc::empty_client_drop_tx")]
                 drop_tx: ::remoc::rtc::local_broadcast::Sender<()>,
-                #[serde(skip)]
-                #[serde(default = "::remoc::rtc::default_client_monitor")]
                 monitor: ::std::sync::Arc<dyn ::remoc::rtc::ClientMonitor<#req_params>>,
+            }
+
+            ::remoc::versioned::impl_struct! {
+                #client_ident #versioned_generics,
+                versioner = ::remoc::versioned::RemocCompact,
+                fields {
+                    req_tx: ::remoc::rch::mpsc::Sender<
+                        ::remoc::rtc::Req<#req_value #req_generics, #req_ref #req_generics, #req_ref_mut #req_generics>,
+                        Codec,
+                    > => "_0",
+                    #[serde(default = "::remoc::rtc::missing_max_reply_size")]
+                    #[serde(with = "::remoc::rtc::serde_max_reply_size")]
+                    max_reply_size: usize => "_1",
+                }
+                default {
+                    drop_tx = ::remoc::rtc::empty_client_drop_tx(),
+                    monitor = ::remoc::rtc::default_client_monitor(),
+                }
+                where #impl_generics_where_pred
             }
 
             #clone

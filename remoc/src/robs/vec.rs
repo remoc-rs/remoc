@@ -65,7 +65,6 @@
 //! ```
 //!
 
-use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
     fmt,
@@ -81,7 +80,7 @@ use super::{ChangeNotifier, ChangeSender, RecvError, SendError, default_on_err, 
 use crate::{exec, prelude::*};
 
 /// A vector change event.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VecEvent<T> {
     /// An item was added at the end.
     Push(T),
@@ -112,14 +111,33 @@ pub enum VecEvent<T> {
     /// The vector has reached its final state and
     /// no further events will occur.
     Done,
-
-    // NOTE: All variants with #[serde(skip)] must be at the end of the enum
-    //       to workaround serde issue serde-rs/serde#2224.
-    //
     /// The incremental subscription has reached the value of the observed
     /// vector at the time it was subscribed.
-    #[serde(skip)]
     InitialComplete,
+}
+
+crate::versioned::impl_enum! {
+    VecEvent<T>,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Push(value: T) => "_0",
+        Pop => "_1",
+        Insert(index: usize, value: T) => "_2",
+        Set(index: usize, value: T) => "_3",
+        Remove(index: usize) => "_4",
+        SwapRemove(index: usize) => "_5",
+        Fill(value: T) => "_6",
+        Resize(len: usize, value: T) => "_7",
+        Truncate(len: usize) => "_8",
+        Retain(indices: HashSet<usize>) => "_9",
+        RetainNot(indices: HashSet<usize>) => "_10",
+        Clear => "_11",
+        ShrinkToFit => "_12",
+        Done => "_13",
+        #[skip]
+        InitialComplete,
+    }
+    where T: RemoteSend
 }
 
 /// A vector that emits an event for each change.
@@ -742,9 +760,7 @@ where
 }
 
 /// Initial value of an observable vector subscription.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(bound(serialize = "T: RemoteSend, Codec: crate::codec::Codec"))]
-#[serde(bound(deserialize = "T: RemoteSend, Codec: crate::codec::Codec"))]
+#[derive(Debug)]
 enum VecInitialValue<T, Codec = crate::codec::Default> {
     /// Initial value is present.
     Value(Vec<T>),
@@ -755,6 +771,16 @@ enum VecInitialValue<T, Codec = crate::codec::Default> {
         /// Receiver.
         rx: rch::mpsc::Receiver<T, Codec>,
     },
+}
+
+crate::versioned::impl_enum! {
+    VecInitialValue<T, Codec>,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Value(value: Vec<T>) => "_0",
+        Incremental { len: usize, rx: rch::mpsc::Receiver<T, Codec> } => "_1",
+    }
+    where T: RemoteSend, Codec: crate::codec::Codec
 }
 
 impl<T, Codec> VecInitialValue<T, Codec>
@@ -801,22 +827,29 @@ where
 /// The event stream can also be processed event-wise using [recv](Self::recv).
 /// If the subscription is not incremental [take_initial](Self::take_initial) must
 /// be called before the first call to [recv](Self::recv).
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(bound(serialize = "T: RemoteSend, Codec: crate::codec::Codec"))]
-#[serde(bound(deserialize = "T: RemoteSend, Codec: crate::codec::Codec"))]
+#[derive(Debug)]
 pub struct VecSubscription<T, Codec = crate::codec::Default> {
     /// Value of vector at time of subscription.
     initial: VecInitialValue<T, Codec>,
     /// Initial value received completely.
-    #[serde(skip, default)]
     complete: bool,
     /// Change events receiver.
     ///
     /// `None` if [ObservableVec::done] has been called before subscribing.
     events: Option<rch::broadcast::Receiver<VecEvent<T>, Codec>>,
     /// Event stream ended.
-    #[serde(skip, default)]
     done: bool,
+}
+
+crate::versioned::impl_struct! {
+    VecSubscription<T, Codec>,
+    versioner = crate::versioned::RemocCompact,
+    fields {
+        initial: VecInitialValue<T, Codec> => "_0",
+        events: Option<rch::broadcast::Receiver<VecEvent<T>, Codec>> => "_1",
+    }
+    default { complete, done }
+    where T: RemoteSend, Codec: crate::codec::Codec
 }
 
 impl<T, Codec> VecSubscription<T, Codec>

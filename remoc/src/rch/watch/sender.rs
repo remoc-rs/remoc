@@ -10,13 +10,14 @@ use super::{
     default_rate_limit, rate_limit_channel,
     receiver::RecvError,
 };
+use crate::versioned::RemocCompact;
 use crate::{
     RemoteSend, chmux,
     codec::{self, ErasedDeserializer, ErasedSerializer},
 };
 
 /// An error occurred during sending over an mpsc channel.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub enum SendError {
     /// The receiver was dropped or the connection failed.
     Closed,
@@ -28,6 +29,18 @@ pub enum SendError {
     RemoteListen(chmux::ListenerError),
     /// Forwarding at a remote endpoint to another remote endpoint failed.
     RemoteForward,
+}
+
+crate::versioned::impl_enum! {
+    SendError,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Closed => "_0",
+        RemoteSend(err: base::SendErrorKind) => "_1",
+        RemoteConnect(err: chmux::ConnectError) => "_2",
+        RemoteListen(err: chmux::ListenerError) => "_3",
+        RemoteForward => "_4",
+    }
 }
 
 impl SendError {
@@ -128,27 +141,42 @@ pub(crate) struct SenderInner<T, Codec> {
 }
 
 /// Watch sender in transport.
-#[derive(Serialize, Deserialize)]
-pub(crate) struct TransportedSender<T> {
+struct TransportedSender<T> {
     /// chmux port number.
     port: u32,
     /// Current data value.
     data: Result<T, RecvError>,
-    /// Data codec.
-    #[serde(default)]
-    codec: PhantomData<()>,
     /// Maximum item size in bytes.
-    #[serde(default = "default_max_item_size")]
     max_item_size: u64,
     /// Minimum delay between sending value updates.
-    #[serde(default = "default_rate_limit")]
     sender_rate_limit: Duration,
     /// Minimum delay between receiving value updates.
-    #[serde(default = "default_rate_limit")]
     receiver_rate_limit: Duration,
     /// Transfer strategy.
-    #[serde(default)]
     transfer_strategy: TransferStrategy,
+}
+
+crate::versioned::impl_struct! {
+    TransportedSender<T>,
+    versioner = RemocCompact,
+    fields {
+        port: u32 => "_0",
+        #[compact]
+        data: Result<T, RecvError> => "_1",
+        #[serde(default)]
+        codec: PhantomData<()> = PhantomData,
+        #[serde(default = "default_max_item_size")]
+        max_item_size: u64 => "_2",
+        #[compact]
+        #[serde(default = "default_rate_limit")]
+        sender_rate_limit: Duration => "_3",
+        #[compact]
+        #[serde(default = "default_rate_limit")]
+        receiver_rate_limit: Duration => "_4",
+        #[serde(default)]
+        transfer_strategy: TransferStrategy => "_5",
+    }
+    where T: RemoteSend + Clone
 }
 
 impl<T, Codec> Sender<T, Codec>
@@ -446,16 +474,15 @@ where
 
         // Encode chmux port number in transport type and serialize it.
         let data = self.inner.as_ref().unwrap().tx.borrow().clone();
-        let transported = TransportedSender::<T> {
+        TransportedSender::<T> {
             port,
             data,
-            codec: PhantomData,
             max_item_size: max_item_size.try_into().unwrap_or(u64::MAX),
             sender_rate_limit,
             receiver_rate_limit,
             transfer_strategy,
-        };
-        transported.serialize(serializer)
+        }
+        .serialize(serializer)
     }
 }
 
@@ -477,8 +504,7 @@ where
             sender_rate_limit,
             receiver_rate_limit,
             transfer_strategy,
-            ..
-        } = TransportedSender::<T>::deserialize(deserializer)?;
+        } = TransportedSender::deserialize(deserializer)?;
         let max_item_size = usize::try_from(max_item_size).unwrap_or(usize::MAX);
         let (sender_rate_limit_tx, sender_rate_limit_rx) = tokio::sync::watch::channel(sender_rate_limit);
         if data.is_err() {

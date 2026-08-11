@@ -334,7 +334,7 @@ use crate::{
 pub use remoc_macro::remote;
 
 /// Call a method on a remotable trait failed.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub enum CallError {
     /// Processing request failed.
     ///
@@ -353,6 +353,19 @@ pub enum CallError {
     RemoteListen(chmux::ListenerError),
     /// Forwarding at a remote endpoint to another remote endpoint failed.
     RemoteForward,
+}
+
+crate::versioned::impl_enum! {
+    CallError,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Dropped => "_0",
+        RemoteSend(err: base::SendErrorKind) => "_1",
+        RemoteReceive(err: base::RecvError) => "_2",
+        RemoteConnect(err: chmux::ConnectError) => "_3",
+        RemoteListen(err: chmux::ListenerError) => "_4",
+        RemoteForward => "_5",
+    }
 }
 
 impl fmt::Display for CallError {
@@ -411,7 +424,6 @@ pub trait ReqEnum {
 /// This groups the methods of a remotable trait by how they take `self`.
 /// Each variant holds a per-kind request enum that in turn has one variant per
 /// method of that kind.
-#[derive(Serialize, Deserialize)]
 pub enum Req<Value, Ref, RefMut> {
     /// Request for a method taking self by value (`self`).
     Value(Value),
@@ -419,6 +431,17 @@ pub enum Req<Value, Ref, RefMut> {
     Ref(Ref),
     /// Request for a method taking self by mutable reference (`&mut self`).
     RefMut(RefMut),
+}
+
+crate::versioned::impl_enum! {
+    Req<Value, Ref, RefMut>,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Value(req: Value) => "_0",
+        Ref(req: Ref) => "_1",
+        RefMut(req: RefMut) => "_2",
+    }
+    where Value: RemoteSend, Ref: RemoteSend, RefMut: RemoteSend
 }
 
 impl<Value, Ref, RefMut> Req<Value, Ref, RefMut>
@@ -1296,13 +1319,18 @@ pub async fn send_reply<T, E, Codec>(
 #[doc(hidden)]
 pub mod serde_max_reply_size {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::borrow::Borrow;
 
     /// Serialization function.
-    pub fn serialize<S>(max_reply_size: &usize, serializer: S) -> Result<S::Ok, S::Error>
+    ///
+    /// This is generic over `T` so that it can also be used for a field holding
+    /// a reference, as used by the generated serialization types.
+    pub fn serialize<T, S>(max_reply_size: &T, serializer: S) -> Result<S::Ok, S::Error>
     where
+        T: Borrow<usize>,
         S: Serializer,
     {
-        let max_reply_size = u64::try_from(*max_reply_size).unwrap_or(u64::MAX);
+        let max_reply_size = u64::try_from(*max_reply_size.borrow()).unwrap_or(u64::MAX);
         max_reply_size.serialize(serializer)
     }
 

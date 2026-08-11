@@ -17,6 +17,7 @@ use super::{
     },
     Distributor, SendReq,
 };
+use crate::versioned::RemocCompact;
 use crate::{
     RemoteSend, chmux,
     codec::{self, ErasedDeserializer, ErasedSerializer},
@@ -24,7 +25,7 @@ use crate::{
 };
 
 /// An error occurred during receiving over an mpsc channel.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub enum RecvError {
     /// Receiving from a remote endpoint failed.
     RemoteReceive(base::RecvError),
@@ -32,6 +33,16 @@ pub enum RecvError {
     RemoteConnect(chmux::ConnectError),
     /// Listening for a connection from a received channel failed.
     RemoteListen(chmux::ListenerError),
+}
+
+crate::versioned::impl_enum! {
+    RecvError,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        RemoteReceive(err: base::RecvError) => "_0",
+        RemoteConnect(err: chmux::ConnectError) => "_1",
+        RemoteListen(err: chmux::ListenerError) => "_2",
+    }
 }
 
 impl fmt::Display for RecvError {
@@ -71,7 +82,7 @@ impl RecvError {
 }
 
 /// An error occurred during trying to receive over an mpsc channel.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub enum TryRecvError {
     /// All channel senders have been dropped.
     Closed,
@@ -84,6 +95,18 @@ pub enum TryRecvError {
     RemoteConnect(chmux::ConnectError),
     /// Listening for a connection from a received channel failed.
     RemoteListen(chmux::ListenerError),
+}
+
+crate::versioned::impl_enum! {
+    TryRecvError,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Closed => "_0",
+        Empty => "_1",
+        RemoteReceive(err: base::RecvError) => "_2",
+        RemoteConnect(err: chmux::ConnectError) => "_3",
+        RemoteListen(err: chmux::ListenerError) => "_4",
+    }
 }
 
 impl fmt::Display for TryRecvError {
@@ -156,25 +179,33 @@ pub(crate) struct ReceiverInner<T> {
 }
 
 /// Mpsc receiver in transport.
-#[derive(Serialize, Deserialize)]
-pub(crate) struct TransportedReceiver {
+struct TransportedReceiver {
     /// chmux port number.
     port: u32,
-    /// Data type.
-    #[serde(default)]
-    data: PhantomData<()>,
-    /// Data codec.
-    #[serde(default)]
-    codec: PhantomData<()>,
     /// Receiver has been closed.
-    #[serde(default)]
     closed: bool,
     /// Maximum item size.
-    #[serde(default)]
     max_item_size: u64,
     /// Additional chmux port numbers for multi base channel operation.
-    #[serde(default)]
     parallel: Vec<u32>,
+}
+
+crate::versioned::impl_struct! {
+    TransportedReceiver,
+    versioner = RemocCompact,
+    fields {
+        port: u32 => "_0",
+        #[serde(default)]
+        data: PhantomData<()> = PhantomData,
+        #[serde(default)]
+        codec: PhantomData<()> = PhantomData,
+        #[serde(default)]
+        closed: bool => "_1",
+        #[serde(default)]
+        max_item_size: u64 => "_2",
+        #[serde(default)]
+        parallel: Vec<u32> => "_3",
+    }
 }
 
 impl<T, Codec> Receiver<T, Codec>
@@ -590,15 +621,13 @@ where
         })?;
 
         // Encode chmux port number in transport type and serialize it.
-        let transported = TransportedReceiver {
+        TransportedReceiver {
             port,
-            data: PhantomData,
-            codec: PhantomData,
             closed: self.inner.as_ref().unwrap().closed,
             max_item_size: self.max_item_size().try_into().unwrap_or(u64::MAX),
             parallel,
-        };
-        transported.serialize(serializer)
+        }
+        .serialize(serializer)
     }
 }
 
@@ -616,7 +645,7 @@ where
         assert!(BUFFER > 0, "BUFFER must not be zero");
 
         // Get chmux port number from deserialized transport type.
-        let TransportedReceiver { port, closed, max_item_size, parallel, .. } =
+        let TransportedReceiver { port, closed, max_item_size, parallel } =
             TransportedReceiver::deserialize(deserializer)?;
 
         let max_item_size = usize::try_from(max_item_size).unwrap_or(usize::MAX);

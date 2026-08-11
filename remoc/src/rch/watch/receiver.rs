@@ -18,13 +18,14 @@ use super::{
     },
     RateLimitSender, Ref, TransferStrategy, default_max_item_size, default_rate_limit, rate_limit_channel,
 };
+use crate::versioned::RemocCompact;
 use crate::{
     RemoteSend, chmux,
     codec::{self, ErasedDeserializer, ErasedSerializer},
 };
 
 /// An error occurred during receiving over a watch channel.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub enum RecvError {
     /// Receiving from a remote endpoint failed.
     RemoteReceive(base::RecvError),
@@ -32,6 +33,16 @@ pub enum RecvError {
     RemoteConnect(chmux::ConnectError),
     /// Listening for a connection from a received channel failed.
     RemoteListen(chmux::ListenerError),
+}
+
+crate::versioned::impl_enum! {
+    RecvError,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        RemoteReceive(err: base::RecvError) => "_0",
+        RemoteConnect(err: chmux::ConnectError) => "_1",
+        RemoteListen(err: chmux::ListenerError) => "_2",
+    }
 }
 
 impl fmt::Display for RecvError {
@@ -57,12 +68,21 @@ impl RecvError {
 }
 
 /// An error occurred during waiting for a change on a watch channel.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub enum ChangedError {
     /// The sender has been dropped.
     Closed,
     /// A final receive error occurred, meaning that no further values can be received.
     Recv(RecvError),
+}
+
+crate::versioned::impl_enum! {
+    ChangedError,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Closed => "_0",
+        Recv(err: RecvError) => "_1",
+    }
 }
 
 impl ChangedError {
@@ -114,24 +134,37 @@ impl<T, Codec, const MAX_ITEM_SIZE: usize> fmt::Debug for Receiver<T, Codec, MAX
 }
 
 /// Watch receiver in transport.
-#[derive(Serialize, Deserialize)]
-pub(crate) struct TransportedReceiver<T> {
+struct TransportedReceiver<T> {
     /// chmux port number.
     port: u32,
     /// Current data value.
     data: Result<T, RecvError>,
-    /// Data codec.
-    #[serde(default)]
-    codec: PhantomData<()>,
     /// Maximum item size.
-    #[serde(default = "default_max_item_size")]
     max_item_size: u64,
     /// Minimum delay between sending value updates.
-    #[serde(default = "default_rate_limit")]
     rate_limit: Duration,
     /// Transfer strategy.
-    #[serde(default)]
     transfer_strategy: TransferStrategy,
+}
+
+crate::versioned::impl_struct! {
+    TransportedReceiver<T>,
+    versioner = RemocCompact,
+    fields {
+        port: u32 => "_0",
+        #[compact]
+        data: Result<T, RecvError> => "_1",
+        #[serde(default)]
+        codec: PhantomData<()> = PhantomData,
+        #[serde(default = "default_max_item_size")]
+        max_item_size: u64 => "_2",
+        #[compact]
+        #[serde(default = "default_rate_limit")]
+        rate_limit: Duration => "_3",
+        #[serde(default)]
+        transfer_strategy: TransferStrategy => "_4",
+    }
+    where T: RemoteSend + Clone
 }
 
 impl<T, Codec> Receiver<T, Codec>
@@ -351,15 +384,14 @@ where
         })?;
 
         // Encode chmux port number in transport type and serialize it.
-        let transported = TransportedReceiver::<T> {
+        TransportedReceiver::<T> {
             port,
             data,
             max_item_size: self.max_item_size().try_into().unwrap_or(u64::MAX),
             rate_limit: receiver_rate_limit,
             transfer_strategy: self.transfer_strategy.clone(),
-            codec: PhantomData,
-        };
-        transported.serialize(serializer)
+        }
+        .serialize(serializer)
     }
 }
 
@@ -374,14 +406,8 @@ where
         D: serde::Deserializer<'de>,
     {
         // Get chmux port number from deserialized transport type.
-        let TransportedReceiver {
-            port,
-            data,
-            max_item_size,
-            rate_limit: receiver_rate_limit,
-            transfer_strategy,
-            ..
-        } = TransportedReceiver::<T>::deserialize(deserializer)?;
+        let TransportedReceiver { port, data, max_item_size, rate_limit: receiver_rate_limit, transfer_strategy } =
+            TransportedReceiver::deserialize(deserializer)?;
 
         let max_item_size = usize::try_from(max_item_size).unwrap_or(usize::MAX);
         if max_item_size > MAX_ITEM_SIZE {

@@ -64,7 +64,6 @@
 //! consider [remote trait calling](crate::rtc) instead.
 //!
 
-use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt};
 
 use crate::{
@@ -73,7 +72,7 @@ use crate::{
 };
 
 /// An error occurred during calling a remote function.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub enum CallError {
     /// Provider was dropped or function panicked.
     Dropped,
@@ -83,6 +82,17 @@ pub enum CallError {
     RemoteConnect(chmux::ConnectError),
     /// Listening for a connection from a received channel failed.
     RemoteListen(chmux::ListenerError),
+}
+
+crate::versioned::impl_enum! {
+    CallError,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Dropped => "_0",
+        RemoteReceive(err: base::RecvError) => "_1",
+        RemoteConnect(err: chmux::ConnectError) => "_2",
+        RemoteListen(err: chmux::ListenerError) => "_3",
+    }
 }
 
 impl fmt::Display for CallError {

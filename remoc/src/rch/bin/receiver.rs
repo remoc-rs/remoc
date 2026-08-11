@@ -11,7 +11,7 @@ use super::{
     },
     Interlock, Location,
 };
-use crate::{Cfg, Connect, chmux, codec, exec};
+use crate::{Cfg, Connect, chmux, codec, exec, versioned::RemocCompact};
 
 #[derive(Default)]
 pub(super) enum LocalConnect {
@@ -38,10 +38,17 @@ impl fmt::Debug for Receiver {
 }
 
 /// A chmux channel receiver in transport.
-#[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct TransportedReceiver {
+struct TransportedReceiver {
     /// chmux port number.
-    pub port: u32,
+    port: u32,
+}
+
+crate::versioned::impl_struct! {
+    TransportedReceiver,
+    versioner = RemocCompact,
+    fields {
+        port: u32 => "_0",
+    }
 }
 
 impl Receiver {

@@ -19,7 +19,6 @@ use crate::exec::runtime;
 
 /// An multiplexer listener error.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ListenerError {
     /// All local ports are in use.
     LocalPortsExhausted,
@@ -27,6 +26,17 @@ pub enum ListenerError {
     RemotePortAlreadyAllocated(u32),
     /// A multiplexer error has occurred or it has been terminated.
     ChMux,
+}
+
+#[cfg(feature = "serde")]
+crate::versioned::impl_enum! {
+    ListenerError,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        LocalPortsExhausted => "_0",
+        RemotePortAlreadyAllocated(port: u32) => "_1",
+        ChMux => "_2",
+    }
 }
 
 impl fmt::Display for ListenerError {

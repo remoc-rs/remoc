@@ -81,6 +81,7 @@ use tokio::sync::{OwnedRwLockMappedWriteGuard, OwnedRwLockReadGuard, OwnedRwLock
 use tracing::Instrument;
 use uuid::Uuid;
 
+use crate::versioned::RemocCompact;
 use crate::{
     chmux::{AnyBox, AnyEntry},
     codec, exec,
@@ -91,13 +92,22 @@ use crate::{
 };
 
 /// An error during getting the value of a handle.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub enum HandleError {
     /// The value of the handle is not stored locally or it has already
     /// been taken.
     Unknown,
     /// The values of the handle is of another type.
     MismatchedType(String),
+}
+
+crate::versioned::impl_enum! {
+    HandleError,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Unknown => "_0",
+        MismatchedType(ty: String) => "_1",
+    }
 }
 
 impl fmt::Display for HandleError {
@@ -334,18 +344,25 @@ impl<T, Codec> Drop for Handle<T, Codec> {
 }
 
 /// Handle in transport.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(bound(serialize = "Codec: codec::Codec"))]
-#[serde(bound(deserialize = "Codec: codec::Codec"))]
-pub(crate) struct TransportedHandle<T, Codec> {
+struct TransportedHandle<Codec> {
     /// Handle id.
     id: Uuid,
     /// Dropped notification.
     dropped_tx: mpsc::Sender<(), Codec, 1>,
-    /// Data type.
-    data: PhantomData<T>,
-    /// Codec
-    codec: PhantomData<Codec>,
+}
+
+crate::versioned::impl_struct! {
+    TransportedHandle<Codec>,
+    versioner = RemocCompact,
+    fields {
+        id: Uuid => "_0",
+        dropped_tx: mpsc::Sender<(), Codec, 1> => "_1",
+        #[serde(default)]
+        data: PhantomData<()> = PhantomData,
+        #[serde(default)]
+        codec: PhantomData<()> = PhantomData,
+    }
+    where Codec: codec::Codec
 }
 
 impl<T, Codec> Serialize for Handle<T, Codec>
@@ -396,9 +413,7 @@ where
             State::Empty => unreachable!("state is only empty when dropping"),
         };
 
-        let transported = TransportedHandle::<T, Codec> { id, dropped_tx, data: PhantomData, codec: PhantomData };
-
-        transported.serialize(serializer)
+        TransportedHandle { id, dropped_tx }.serialize(serializer)
     }
 }
 
@@ -411,7 +426,7 @@ where
     where
         D: serde::Deserializer<'de>,
     {
-        let TransportedHandle { id, dropped_tx, .. } = TransportedHandle::<T, Codec>::deserialize(deserializer)?;
+        let TransportedHandle { id, dropped_tx } = TransportedHandle::deserialize(deserializer)?;
 
         let handle_storage = PortDeserializer::storage()?;
         let state = match handle_storage.remove(id) {

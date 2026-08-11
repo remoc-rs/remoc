@@ -1,4 +1,3 @@
-use serde::{Deserialize, Serialize};
 use std::{
     error::Error,
     fmt,
@@ -8,13 +7,17 @@ use std::{
 use tracing::Instrument;
 
 use super::msg::{ReadRequest, Value, WriteRequest};
+use crate::versioned::RemocCompact;
 use crate::{
     RemoteSend, chmux, codec, exec,
-    rch::{base, mpsc, oneshot},
+    rch::{
+        base::{self},
+        mpsc, oneshot,
+    },
 };
 
 /// An error occurred during locking of an RwLock value for reading or writing.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub enum LockError {
     /// The [owner](super::Owner) has been dropped.
     Dropped,
@@ -24,6 +27,17 @@ pub enum LockError {
     RemoteConnect(chmux::ConnectError),
     /// Listening for a connection from a received channel failed.
     RemoteListen(chmux::ListenerError),
+}
+
+crate::versioned::impl_enum! {
+    LockError,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Dropped => "_0",
+        RemoteReceive(err: base::RecvError) => "_1",
+        RemoteConnect(err: chmux::ConnectError) => "_2",
+        RemoteListen(err: chmux::ListenerError) => "_3",
+    }
 }
 
 impl fmt::Display for LockError {
@@ -51,12 +65,21 @@ impl From<oneshot::RecvError> for LockError {
 impl Error for LockError {}
 
 /// An error occurred during committing an RwLock value.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub enum CommitError {
     /// The [owner](super::Owner) has been dropped.
     Dropped,
     /// Commit failed.
     Failed,
+}
+
+crate::versioned::impl_enum! {
+    CommitError,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Dropped => "_0",
+        Failed => "_1",
+    }
 }
 
 impl fmt::Display for CommitError {
@@ -90,18 +113,9 @@ impl Error for CommitError {}
 /// This can be cloned and sent to remote endpoints.
 ///
 /// See [module-level documentation](super) for details.
-#[derive(Serialize, Deserialize)]
-#[serde(bound(serialize = "T: RemoteSend, Codec: codec::Codec"))]
-#[serde(bound(deserialize = "T: RemoteSend, Codec: codec::Codec"))]
 pub struct ReadLock<T, Codec = codec::Default> {
     req_tx: mpsc::Sender<ReadRequest<T, Codec>, Codec, 1>,
-    #[serde(skip)]
-    #[serde(default = "empty_cache")]
     cache: Arc<tokio::sync::RwLock<Option<Value<T, Codec>>>>,
-}
-
-fn empty_cache<T, Codec>() -> Arc<tokio::sync::RwLock<Option<Value<T, Codec>>>> {
-    Arc::new(tokio::sync::RwLock::new(None))
 }
 
 impl<T, Codec> Clone for ReadLock<T, Codec> {
@@ -116,13 +130,23 @@ impl<T, Codec> fmt::Debug for ReadLock<T, Codec> {
     }
 }
 
+crate::versioned::impl_struct! {
+    ReadLock<T, Codec>,
+    versioner = RemocCompact,
+    fields {
+        req_tx: mpsc::Sender<ReadRequest<T, Codec>, Codec, 1> => "_0",
+    }
+    default { cache }
+    where T: RemoteSend, Codec: codec::Codec
+}
+
 impl<T, Codec> ReadLock<T, Codec>
 where
     T: RemoteSend + Sync,
     Codec: codec::Codec,
 {
-    pub(crate) fn new(read_req_tx: mpsc::Sender<ReadRequest<T, Codec>, Codec, 1>) -> Self {
-        Self { req_tx: read_req_tx, cache: empty_cache() }
+    pub(super) fn new(read_req_tx: mpsc::Sender<ReadRequest<T, Codec>, Codec, 1>) -> Self {
+        Self { req_tx: read_req_tx, cache: Default::default() }
     }
 
     /// Fetches the current shared value, possibly from the local cache.
@@ -258,12 +282,19 @@ impl<T, Codec> Drop for ReadGuard<'_, T, Codec> {
 /// This can be cloned and sent to remote endpoints.
 ///
 /// See [module-level documentation](super) for details.
-#[derive(Serialize, Deserialize)]
-#[serde(bound(serialize = "T: RemoteSend, Codec: codec::Codec"))]
-#[serde(bound(deserialize = "T: RemoteSend, Codec: codec::Codec"))]
 pub struct RwLock<T, Codec = codec::Default> {
     read: ReadLock<T, Codec>,
     req_tx: mpsc::Sender<WriteRequest<T, Codec>, Codec, 1>,
+}
+
+crate::versioned::impl_struct! {
+    RwLock<T, Codec>,
+    versioner = RemocCompact,
+    fields {
+        read: ReadLock<T, Codec> => "_0",
+        req_tx: mpsc::Sender<WriteRequest<T, Codec>, Codec, 1> => "_1",
+    }
+    where T: RemoteSend, Codec: codec::Codec
 }
 
 impl<T, Codec> Clone for RwLock<T, Codec> {
@@ -283,7 +314,7 @@ where
     T: RemoteSend + Sync,
     Codec: codec::Codec,
 {
-    pub(crate) fn new(
+    pub(super) fn new(
         read_lock: ReadLock<T, Codec>, write_req_tx: mpsc::Sender<WriteRequest<T, Codec>, Codec, 1>,
     ) -> Self {
         Self { read: read_lock, req_tx: write_req_tx }

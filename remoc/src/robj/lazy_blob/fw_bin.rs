@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize, ser};
 use std::sync::Mutex;
 use tracing::Instrument;
 
+use crate::versioned::RemocCompact;
 use crate::{exec, rch::bin};
 
 /// A chmux sender that can be remotely sent and forwarded.
@@ -35,9 +36,17 @@ impl Sender {
 }
 
 /// A chmux sender that can be remotely sent and forwarded in transport form.
-#[derive(Serialize, Deserialize)]
-pub(crate) struct TransportedSender {
+struct TransportedSender {
+    /// The binary channel sender.
     bin_tx: bin::Sender,
+}
+
+crate::versioned::impl_struct! {
+    TransportedSender,
+    versioner = RemocCompact,
+    fields {
+        bin_tx: bin::Sender => "_0",
+    }
 }
 
 impl Serialize for Sender {

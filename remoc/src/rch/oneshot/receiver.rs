@@ -12,7 +12,7 @@ use super::super::{DEFAULT_MAX_ITEM_SIZE, base, mpsc};
 use crate::{RemoteSend, chmux, codec};
 
 /// An error occurred during receiving over an oneshot channel.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub enum RecvError {
     /// Sender dropped without sending a value.
     Closed,
@@ -22,6 +22,17 @@ pub enum RecvError {
     RemoteConnect(chmux::ConnectError),
     /// Listening for a connection from a received channel failed.
     RemoteListen(chmux::ListenerError),
+}
+
+crate::versioned::impl_enum! {
+    RecvError,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Closed => "_0",
+        RemoteReceive(err: base::RecvError) => "_1",
+        RemoteConnect(err: chmux::ConnectError) => "_2",
+        RemoteListen(err: chmux::ListenerError) => "_3",
+    }
 }
 
 impl fmt::Display for RecvError {
@@ -72,7 +83,7 @@ impl RecvError {
 }
 
 /// An error occurred during trying to receive over an oneshot channel.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub enum TryRecvError {
     /// No value has been received yet.
     Empty,
@@ -84,6 +95,18 @@ pub enum TryRecvError {
     RemoteConnect(chmux::ConnectError),
     /// Listening for a connection from a received channel failed.
     RemoteListen(chmux::ListenerError),
+}
+
+crate::versioned::impl_enum! {
+    TryRecvError,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Empty => "_0",
+        Closed => "_1",
+        RemoteReceive(err: base::RecvError) => "_2",
+        RemoteConnect(err: chmux::ConnectError) => "_3",
+        RemoteListen(err: chmux::ListenerError) => "_4",
+    }
 }
 
 impl fmt::Display for TryRecvError {

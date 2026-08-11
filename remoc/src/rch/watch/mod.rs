@@ -78,7 +78,6 @@
 
 use bytes::Buf;
 use futures::{FutureExt, future::BoxFuture};
-use serde::{Deserialize, Serialize};
 use std::{
     fmt,
     future::{self, Future},
@@ -89,7 +88,11 @@ use std::{
     time::Duration,
 };
 
-use super::{DEFAULT_MAX_ITEM_SIZE, RemoteSendError, base};
+use super::{
+    DEFAULT_MAX_ITEM_SIZE, RemoteSendError,
+    base::{self},
+};
+use crate::versioned::RemocCompact;
 use crate::{
     RemoteSend, chmux,
     codec::{self, AnySend, ErasedDeserializer, ErasedSerializer},
@@ -260,7 +263,7 @@ impl Forwarding {
 }
 
 /// Strategy for transfering values to the remote endpoint.
-#[derive(Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default, Clone, PartialEq, Eq)]
 pub enum TransferStrategy {
     /// Only a single value may be in transfer.
     ///
@@ -277,8 +280,18 @@ pub enum TransferStrategy {
     /// No global credits and thus buffer space is being used.
     /// This limits the achievable bandwidth of the channel.
     #[default]
-    #[serde(other)]
     ChannelBuffered,
+}
+
+crate::versioned::impl_enum! {
+    TransferStrategy,
+    versioner = RemocCompact,
+    variants {
+        Single => "_0",
+        GlobalBuffered => "_1",
+        #[serde(other)]
+        ChannelBuffered => "_59",
+    }
 }
 
 /// Extensions for watch channels.

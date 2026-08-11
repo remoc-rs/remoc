@@ -1,5 +1,4 @@
 use futures::{Stream, ready};
-use serde::{Deserialize, Serialize};
 use std::{
     convert::TryFrom,
     error::Error,
@@ -13,10 +12,10 @@ use super::{
     super::{DEFAULT_BUFFER, DEFAULT_MAX_ITEM_SIZE, base, mpsc},
     BroadcastMsg,
 };
-use crate::{RemoteSend, chmux, codec};
+use crate::{RemoteSend, chmux, codec, versioned::RemocCompact};
 
 /// An error occurred during receiving over a broadcast channel.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub enum RecvError {
     /// There are no more active senders implying no further messages will ever be sent.
     Closed,
@@ -30,6 +29,18 @@ pub enum RecvError {
     RemoteConnect(chmux::ConnectError),
     /// Listening for a connection from a received channel failed.
     RemoteListen(chmux::ListenerError),
+}
+
+crate::versioned::impl_enum! {
+    RecvError,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Closed => "_0",
+        Lagged => "_1",
+        RemoteReceive(err: base::RecvError) => "_2",
+        RemoteConnect(err: chmux::ConnectError) => "_3",
+        RemoteListen(err: chmux::ListenerError) => "_4",
+    }
 }
 
 impl RecvError {
@@ -93,7 +104,7 @@ impl TryFrom<TryRecvError> for RecvError {
 impl Error for RecvError {}
 
 /// An error occurred during trying to receive over a broadcast channel.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub enum TryRecvError {
     /// The channel is currently empty. There are still active sender, so data may yet become available.
     Empty,
@@ -109,6 +120,19 @@ pub enum TryRecvError {
     RemoteConnect(chmux::ConnectError),
     /// Listening for a connection from a received channel failed.
     RemoteListen(chmux::ListenerError),
+}
+
+crate::versioned::impl_enum! {
+    TryRecvError,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Empty => "_0",
+        Closed => "_1",
+        Lagged => "_2",
+        RemoteReceive(err: base::RecvError) => "_3",
+        RemoteConnect(err: chmux::ConnectError) => "_4",
+        RemoteListen(err: chmux::ListenerError) => "_5",
+    }
 }
 
 impl TryRecvError {
@@ -192,9 +216,6 @@ impl Error for TryRecvError {}
 ///
 /// This can be converted into a [Stream](futures::Stream) of values by wrapping it into
 /// a [ReceiverStream].
-#[derive(Serialize, Deserialize)]
-#[serde(bound(serialize = "T: RemoteSend, Codec: codec::Codec"))]
-#[serde(bound(deserialize = "T: RemoteSend, Codec: codec::Codec"))]
 pub struct Receiver<
     T,
     Codec = codec::Default,
@@ -202,6 +223,15 @@ pub struct Receiver<
     const MAX_ITEM_SIZE: usize = DEFAULT_MAX_ITEM_SIZE,
 > {
     rx: mpsc::Receiver<BroadcastMsg<T>, Codec, BUFFER, MAX_ITEM_SIZE>,
+}
+
+crate::versioned::impl_struct! {
+    Receiver<T, Codec; const BUFFER: usize, const MAX_ITEM_SIZE: usize>,
+    versioner = RemocCompact,
+    fields {
+        rx: mpsc::Receiver<BroadcastMsg<T>, Codec, BUFFER, MAX_ITEM_SIZE> => "_0",
+    }
+    where T: RemoteSend, Codec: codec::Codec
 }
 
 impl<T, Codec, const BUFFER: usize, const MAX_ITEM_SIZE: usize> fmt::Debug
@@ -263,7 +293,7 @@ where
 }
 
 /// An error occurred during receiving over a broadcast channel receiver stream.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub enum StreamError {
     /// The receiver stream lagged too far behind.
     ///
@@ -275,6 +305,17 @@ pub enum StreamError {
     RemoteConnect(chmux::ConnectError),
     /// Listening for a connection from a received channel failed.
     RemoteListen(chmux::ListenerError),
+}
+
+crate::versioned::impl_enum! {
+    StreamError,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Lagged => "_0",
+        RemoteReceive(err: base::RecvError) => "_1",
+        RemoteConnect(err: chmux::ConnectError) => "_2",
+        RemoteListen(err: chmux::ListenerError) => "_3",
+    }
 }
 
 impl StreamError {

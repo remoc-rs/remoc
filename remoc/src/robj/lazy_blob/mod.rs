@@ -64,14 +64,13 @@ use futures::{
     FutureExt, future,
     future::{BoxFuture, MaybeDone},
 };
-use serde::{Deserialize, Serialize};
 use std::{convert::TryFrom, fmt, pin::Pin, sync::Arc};
 use tokio::sync::Mutex;
 use tracing::Instrument;
 
+use crate::versioned::RemocCompact;
 use crate::{
-    chmux,
-    chmux::DataBuf,
+    chmux::{self, DataBuf},
     codec, exec,
     rch::{ConnectError, mpsc},
 };
@@ -161,14 +160,10 @@ impl Drop for Provider {
 /// Allows efficient transmission of large binary data on-demand.
 ///
 /// See [module-level documentation](self) for details.
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(bound(serialize = "Codec: codec::Codec"))]
-#[serde(bound(deserialize = "Codec: codec::Codec"))]
+#[derive(Clone)]
 pub struct LazyBlob<Codec = codec::Default> {
     req_tx: mpsc::Sender<fw_bin::Sender, Codec, 1>,
     len: u64,
-    #[serde(skip)]
-    #[serde(default)]
     #[allow(clippy::type_complexity)]
     fetch_task: Arc<Mutex<Option<Pin<Box<MaybeDone<BoxFuture<'static, Result<DataBuf, FetchError>>>>>>>>,
 }
@@ -177,6 +172,17 @@ impl<Codec> fmt::Debug for LazyBlob<Codec> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("LazyBlob").field("len", &self.len).finish()
     }
+}
+
+crate::versioned::impl_struct! {
+    LazyBlob<Codec>,
+    versioner = RemocCompact,
+    fields {
+        req_tx: mpsc::Sender<fw_bin::Sender, Codec, 1> => "_0",
+        len: u64 => "_1",
+    }
+    default { fetch_task }
+    where Codec: codec::Codec
 }
 
 impl<Codec> LazyBlob<Codec>

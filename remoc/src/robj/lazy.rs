@@ -47,17 +47,20 @@ use futures::{
     Future, FutureExt,
     future::{self, BoxFuture, MaybeDone},
 };
-use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt, marker::PhantomData, ops::Deref, pin::Pin, sync::Arc};
 use tokio::sync::Mutex;
 
+use crate::versioned::RemocCompact;
 use crate::{
     RemoteSend, chmux, codec, exec,
-    rch::{base, mpsc, oneshot},
+    rch::{
+        base::{self},
+        mpsc, oneshot,
+    },
 };
 
 /// An error occurred during fetching a lazily transmitted value.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub enum FetchError {
     /// Provider dropped before getting the value.
     Dropped,
@@ -67,6 +70,17 @@ pub enum FetchError {
     RemoteConnect(chmux::ConnectError),
     /// Listening for a connection from a received channel failed.
     RemoteListen(chmux::ListenerError),
+}
+
+crate::versioned::impl_enum! {
+    FetchError,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Dropped => "_0",
+        RemoteReceive(err: base::RecvError) => "_1",
+        RemoteConnect(err: chmux::ConnectError) => "_2",
+        RemoteListen(err: chmux::ListenerError) => "_3",
+    }
 }
 
 impl fmt::Display for FetchError {
@@ -137,15 +151,20 @@ impl Drop for Provider {
 /// Allow the reception of a value when requested.
 ///
 /// See [module-level documentation](self) for details.
-#[derive(Serialize, Deserialize)]
-#[serde(bound(serialize = "T: RemoteSend, Codec: codec::Codec"))]
-#[serde(bound(deserialize = "T: RemoteSend, Codec: codec::Codec"))]
 pub struct Lazy<T, Codec = codec::Default> {
     request_tx: mpsc::Sender<oneshot::Sender<T, Codec>, Codec, 1>,
-    #[serde(skip)]
-    #[serde(default)]
     #[allow(clippy::type_complexity)]
     fetch_task: Arc<Mutex<Option<Pin<Box<MaybeDone<BoxFuture<'static, Result<Arc<T>, FetchError>>>>>>>>,
+}
+
+crate::versioned::impl_struct! {
+    Lazy<T, Codec>,
+    versioner = RemocCompact,
+    fields {
+        request_tx: mpsc::Sender<oneshot::Sender<T, Codec>, Codec, 1> => "_0",
+    }
+    default { fetch_task }
+    where T: RemoteSend, Codec: codec::Codec
 }
 
 impl<T, Codec> fmt::Debug for Lazy<T, Codec> {

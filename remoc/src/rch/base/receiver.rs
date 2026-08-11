@@ -3,7 +3,7 @@ use futures::{
     Future,
     future::{BoxFuture, FutureExt},
 };
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::de::DeserializeOwned;
 use std::{
     any::Any,
     cell::RefCell,
@@ -27,7 +27,7 @@ use crate::{
 };
 
 /// An error that occurred during receiving from a remote endpoint.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub enum RecvError {
     /// Receiving data over the chmux channel failed.
     Receive(chmux::RecvError),
@@ -37,6 +37,17 @@ pub enum RecvError {
     MissingPorts(Vec<u32>),
     /// Maximum item size was exceeded.
     MaxItemSizeExceeded,
+}
+
+crate::versioned::impl_enum! {
+    RecvError,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Receive(err: chmux::RecvError) => "_0",
+        Deserialize(err: DeserializationError) => "_1",
+        MissingPorts(ports: Vec<u32>) => "_2",
+        MaxItemSizeExceeded => "_3",
+    }
 }
 
 impl From<chmux::RecvError> for RecvError {

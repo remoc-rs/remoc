@@ -9,7 +9,6 @@ use crate::exec;
 
 /// An error occurred during forwarding of a message.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ForwardError {
     /// Sending failed.
     Send(SendError),
@@ -17,6 +16,17 @@ pub enum ForwardError {
     Recv(RecvError),
     /// All local ports are in use.
     LocalPortsExhausted,
+}
+
+#[cfg(feature = "serde")]
+crate::versioned::impl_enum! {
+    ForwardError,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Send(err: SendError) => "_0",
+        Recv(err: RecvError) => "_1",
+        LocalPortsExhausted => "_2",
+    }
 }
 
 impl From<SendError> for ForwardError {

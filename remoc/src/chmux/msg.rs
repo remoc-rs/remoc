@@ -657,6 +657,8 @@ pub struct ExchangedCfg {
     pub varint: bool,
     /// Message frame length variable integer encoding is supported.
     pub frame_len_varint: bool,
+    /// Transported types use compact serialized format.
+    pub compact_transported: bool,
 }
 
 impl ExchangedCfg {
@@ -673,6 +675,7 @@ impl ExchangedCfg {
             pre_connect: true,
             varint: true,
             frame_len_varint: cfg.io_frame_len_varint.is_some(),
+            compact_transported: true,
         }
     }
 
@@ -689,6 +692,7 @@ impl ExchangedCfg {
         writer.write_u8(self.pre_connect.into())?;
         writer.write_u8(self.varint.into())?;
         writer.write_u8(self.frame_len_varint.into())?;
+        writer.write_u8(self.compact_transported.into())?;
 
         Ok(())
     }
@@ -717,6 +721,7 @@ impl ExchangedCfg {
             pre_connect: false,
             varint: false,
             frame_len_varint: false,
+            compact_transported: false,
         };
 
         let Ok(global_credits) = reader.read_u32::<LE>() else { return Ok(this) };
@@ -736,6 +741,9 @@ impl ExchangedCfg {
 
         let Ok(frame_len_varint) = reader.read_u8() else { return Ok(this) };
         this.frame_len_varint = frame_len_varint != 0;
+
+        let Ok(compact_transported) = reader.read_u8() else { return Ok(this) };
+        this.compact_transported = compact_transported != 0;
 
         Ok(this)
     }

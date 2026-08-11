@@ -136,7 +136,6 @@
 //!
 
 use futures::FutureExt;
-use serde::{Deserialize, Serialize};
 use std::{
     error::Error,
     fmt,
@@ -159,7 +158,7 @@ pub mod oneshot;
 pub mod watch;
 
 /// Error connecting a remote channel.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub enum ConnectError {
     /// The corresponding sender or receiver has been dropped.
     Dropped,
@@ -167,6 +166,16 @@ pub enum ConnectError {
     Connect(chmux::ConnectError),
     /// Error listening for or accepting chmux connection.
     Listen(chmux::ListenerError),
+}
+
+crate::versioned::impl_enum! {
+    ConnectError,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Dropped => "_0",
+        Connect(err: chmux::ConnectError) => "_1",
+        Listen(err: chmux::ListenerError) => "_2",
+    }
 }
 
 impl fmt::Display for ConnectError {
@@ -182,7 +191,7 @@ impl fmt::Display for ConnectError {
 impl Error for ConnectError {}
 
 /// Reason for closure of sender.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ClosedReason {
     /// Channel was closed because receiver has been closed.
     Closed,
@@ -190,6 +199,16 @@ pub enum ClosedReason {
     Dropped,
     /// Channel was closed because connection between sender and receiver failed.
     Failed,
+}
+
+crate::versioned::impl_enum! {
+    ClosedReason,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Closed => "_0",
+        Dropped => "_1",
+        Failed => "_2",
+    }
 }
 
 /// Back channel message that receiver has been closed.
@@ -392,7 +411,7 @@ pub const DEFAULT_BUFFER: usize = 2;
 pub const DEFAULT_MAX_ITEM_SIZE: usize = 16_777_216;
 
 /// Reason for why a value queued for sending failed to send.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub enum SendingErrorKind {
     /// Sending failed.
     Send(base::SendErrorKind),
@@ -400,6 +419,15 @@ pub enum SendingErrorKind {
     /// the result of the sending operation has already been read
     /// using [`Sending::try_result`].    
     Dropped,
+}
+
+crate::versioned::impl_enum! {
+    SendingErrorKind,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Send(err: base::SendErrorKind) => "_0",
+        Dropped => "_1",
+    }
 }
 
 impl fmt::Display for SendingErrorKind {
@@ -412,7 +440,7 @@ impl fmt::Display for SendingErrorKind {
 }
 
 /// A value queued for sending failed to send.
-#[derive(custom_debug::Debug, Clone, Serialize, Deserialize)]
+#[derive(custom_debug::Debug, Clone)]
 pub enum SendingError<T> {
     /// Sending failed.
     Send(base::SendError<T>),
@@ -423,6 +451,16 @@ pub enum SendingError<T> {
     /// This can happen when the channel is closed before the value
     /// is sent.
     Dropped,
+}
+
+crate::versioned::impl_enum! {
+    SendingError<T>,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Send(err: base::SendError<T>) => "_0",
+        Dropped => "_1",
+    }
+    where T: crate::RemoteSend
 }
 
 impl<T> fmt::Display for SendingError<T> {

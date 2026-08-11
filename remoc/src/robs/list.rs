@@ -57,7 +57,6 @@
 //!
 
 use futures::{Future, FutureExt, future};
-use serde::{Deserialize, Serialize};
 use std::{
     fmt,
     marker::PhantomData,
@@ -74,21 +73,28 @@ use super::{ChangeNotifier, ChangeSender, RecvError, SendError, default_on_err};
 use crate::{exec, prelude::*};
 
 /// A list change event.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ListEvent<T> {
     /// An item was pushed at the end of the list.
     Push(T),
     /// The list has reached its final state and
     /// no further events will occur.
     Done,
-
-    // NOTE: All variants with #[serde(skip)] must be at the end of the enum
-    //       to workaround serde issue serde-rs/serde#2224.
-    //
     /// The subscription has reached the value of the observed
     /// list at the time it was subscribed.
-    #[serde(skip)]
     InitialComplete,
+}
+
+crate::versioned::impl_enum! {
+    ListEvent<T>,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Push(value: T) => "_0",
+        Done => "_1",
+        #[skip]
+        InitialComplete,
+    }
+    where T: RemoteSend
 }
 
 /// Observable list task request.
@@ -557,19 +563,28 @@ impl<T> MirroredListInner<T> {
 /// and keep up-to-date a mirror of the observed list.
 ///
 /// The event stream can also be processed event-wise using [recv](Self::recv).
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(bound(serialize = "T: RemoteSend, Codec: crate::codec::Codec"))]
-#[serde(bound(deserialize = "T: RemoteSend, Codec: crate::codec::Codec"))]
+#[derive(Debug)]
 pub struct ListSubscription<T, Codec = crate::codec::Default> {
     /// Length of list at time of subscription.
     initial_len: usize,
     /// Initial value received completely.
-    #[serde(skip, default)]
     complete: bool,
     /// Change events receiver.
     events: Option<rch::mpsc::Receiver<ListEvent<T>, Codec>>,
     /// Number of elements received so far.
     len: usize,
+}
+
+crate::versioned::impl_struct! {
+    ListSubscription<T, Codec>,
+    versioner = crate::versioned::RemocCompact,
+    fields {
+        initial_len: usize => "_0",
+        events: Option<rch::mpsc::Receiver<ListEvent<T>, Codec>> => "_1",
+        len: usize => "_2",
+    }
+    default { complete }
+    where T: RemoteSend, Codec: crate::codec::Codec
 }
 
 impl<T, Codec> ListSubscription<T, Codec>

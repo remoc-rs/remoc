@@ -41,8 +41,11 @@
 //! ```
 //!
 
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use std::{error::Error, fmt};
+use serde::{Serialize, de::DeserializeOwned};
+use std::{
+    error::Error,
+    fmt::{self, Display},
+};
 
 mod io;
 mod receiver;
@@ -51,7 +54,11 @@ mod sender;
 pub use receiver::{ErasedReceiver, PortDeserializer, Receiver, RecvError};
 pub use sender::{Closed, ErasedSender, PortSerializer, SendError, SendErrorKind, Sender};
 
-use crate::{RemoteSend, chmux, codec};
+use crate::{
+    RemoteSend,
+    chmux::{self, AnyStorage},
+    codec,
+};
 
 /// Chunk queue length for big data (de-)serialization.
 const BIG_DATA_CHUNK_QUEUE: usize = 32;
@@ -60,7 +67,7 @@ const BIG_DATA_CHUNK_QUEUE: usize = 32;
 const BIG_DATA_LIMIT: i8 = 16;
 
 /// Creating the remote channel failed.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub enum ConnectError {
     /// The connect request failed.
     Connect(chmux::ConnectError),
@@ -68,6 +75,16 @@ pub enum ConnectError {
     Listen(chmux::ListenerError),
     /// The remote endpoint did not send a connect request.
     NoConnectRequest,
+}
+
+crate::versioned::impl_enum! {
+    ConnectError,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Connect(err: chmux::ConnectError) => "_0",
+        Listen(err: chmux::ListenerError) => "_1",
+        NoConnectRequest => "_2",
+    }
 }
 
 impl fmt::Display for ConnectError {
@@ -138,4 +155,36 @@ where
         rx.set_max_item_size(max_item_size);
         (tx, rx)
     }
+}
+
+/// Accesses the storage.
+pub fn storage() -> Result<AnyStorage, String> {
+    #[derive(Debug)]
+    struct SerdeError;
+    impl Display for SerdeError {
+        fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            Ok(())
+        }
+    }
+    impl serde::ser::Error for SerdeError {
+        fn custom<T>(_msg: T) -> Self
+        where
+            T: Display,
+        {
+            Self
+        }
+    }
+    impl serde::de::Error for SerdeError {
+        fn custom<T>(_msg: T) -> Self
+        where
+            T: Display,
+        {
+            Self
+        }
+    }
+    impl std::error::Error for SerdeError {}
+
+    PortSerializer::storage::<SerdeError>()
+        .or_else(|_| PortDeserializer::storage::<SerdeError>())
+        .map_err(|_| "remoc storage not available".to_string())
 }

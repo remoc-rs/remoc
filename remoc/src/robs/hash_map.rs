@@ -61,7 +61,6 @@
 //! ```
 //!
 
-use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     fmt,
@@ -78,7 +77,7 @@ use super::{ChangeNotifier, ChangeSender, RecvError, SendError, default_on_err, 
 use crate::{exec, prelude::*};
 
 /// A hash map change event.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HashMapEvent<K, V> {
     /// An item was inserted or modified.
     Set(K, V),
@@ -91,14 +90,24 @@ pub enum HashMapEvent<K, V> {
     /// The hash map has reached its final state and
     /// no further events will occur.
     Done,
-
-    // NOTE: All variants with #[serde(skip)] must be at the end of the enum
-    //       to workaround serde issue serde-rs/serde#2224.
-    //
     /// The incremental subscription has reached the value of the observed
     /// hash map at the time it was subscribed.
-    #[serde(skip)]
     InitialComplete,
+}
+
+crate::versioned::impl_enum! {
+    HashMapEvent<K, V>,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Set(key: K, value: V) => "_0",
+        Remove(key: K) => "_1",
+        Clear => "_2",
+        ShrinkToFit => "_3",
+        Done => "_4",
+        #[skip]
+        InitialComplete,
+    }
+    where K: RemoteSend, V: RemoteSend
 }
 
 /// A hash map that emits an event for each change.
@@ -790,9 +799,7 @@ where
 }
 
 /// Initial value of an observable hash map subscription.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(bound(serialize = "K: RemoteSend + Eq + Hash, V: RemoteSend, Codec: crate::codec::Codec"))]
-#[serde(bound(deserialize = "K: RemoteSend + Eq + Hash, V: RemoteSend, Codec: crate::codec::Codec"))]
+#[derive(Debug)]
 enum HashMapInitialValue<K, V, Codec = crate::codec::Default> {
     /// Initial value is present.
     Value(HashMap<K, V>),
@@ -803,6 +810,16 @@ enum HashMapInitialValue<K, V, Codec = crate::codec::Default> {
         /// Receiver.
         rx: rch::mpsc::Receiver<(K, V), Codec>,
     },
+}
+
+crate::versioned::impl_enum! {
+    HashMapInitialValue<K, V, Codec>,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Value(value: HashMap<K, V>) => "_0",
+        Incremental { len: usize, rx: rch::mpsc::Receiver<(K, V), Codec> } => "_1",
+    }
+    where K: RemoteSend + Eq + Hash, V: RemoteSend, Codec: crate::codec::Codec
 }
 
 impl<K, V, Codec> HashMapInitialValue<K, V, Codec>
@@ -850,22 +867,29 @@ where
 /// The event stream can also be processed event-wise using [recv](Self::recv).
 /// If the subscription is not incremental [take_initial](Self::take_initial) must
 /// be called before the first call to [recv](Self::recv).
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(bound(serialize = "K: RemoteSend + Eq + Hash, V: RemoteSend, Codec: crate::codec::Codec"))]
-#[serde(bound(deserialize = "K: RemoteSend + Eq + Hash, V: RemoteSend, Codec: crate::codec::Codec"))]
+#[derive(Debug)]
 pub struct HashMapSubscription<K, V, Codec = crate::codec::Default> {
     /// Value of hash map at time of subscription.
     initial: HashMapInitialValue<K, V, Codec>,
     /// Initial value received completely.
-    #[serde(skip, default)]
     complete: bool,
     /// Change events receiver.
     ///
     /// `None` if [ObservableHashMap::done] has been called before subscribing.
     events: Option<rch::broadcast::Receiver<HashMapEvent<K, V>, Codec>>,
     /// Event stream ended.
-    #[serde(skip, default)]
     done: bool,
+}
+
+crate::versioned::impl_struct! {
+    HashMapSubscription<K, V, Codec>,
+    versioner = crate::versioned::RemocCompact,
+    fields {
+        initial: HashMapInitialValue<K, V, Codec> => "_0",
+        events: Option<rch::broadcast::Receiver<HashMapEvent<K, V>, Codec>> => "_1",
+    }
+    default { complete, done }
+    where K: RemoteSend + Eq + Hash, V: RemoteSend, Codec: crate::codec::Codec
 }
 
 impl<K, V, Codec> HashMapSubscription<K, V, Codec>

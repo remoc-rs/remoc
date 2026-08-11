@@ -5,12 +5,22 @@ use super::super::{ClosedReason, SendErrorExt, Sending, mpsc};
 use crate::{RemoteSend, codec};
 
 /// An error occurred during sending over an mpsc channel.
-#[derive(Clone, custom_debug::Debug, Serialize, Deserialize)]
+#[derive(Clone, custom_debug::Debug)]
 pub enum SendError<T> {
     /// The remote end closed the channel.
     Closed(#[debug(skip)] T),
     /// Communication with the remote endpoint failed.
     Failed,
+}
+
+crate::versioned::impl_enum! {
+    SendError<T>,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Closed(item: T) => "_0",
+        Failed => "_1",
+    }
+    where T: RemoteSend
 }
 
 impl<T> SendError<T> {

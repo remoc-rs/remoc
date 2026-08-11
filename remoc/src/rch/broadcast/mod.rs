@@ -8,9 +8,7 @@
 //! This has similar functionality as [tokio::sync::broadcast] with the additional
 //! ability to work over remote connections.
 
-use serde::{Deserialize, Serialize};
-
-use crate::{RemoteSend, codec};
+use crate::{RemoteSend, codec, versioned::RemocCompact};
 
 mod receiver;
 mod sender;
@@ -19,12 +17,22 @@ pub use receiver::{Receiver, ReceiverStream, RecvError, StreamError, TryRecvErro
 pub use sender::{Broadcasting, SendError, Sender, Sending, WeakSender};
 
 /// Broadcast transport message.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub(crate) enum BroadcastMsg<T> {
     /// Value.
     Value(T),
     /// Lagged notification.
     Lagged,
+}
+
+crate::versioned::impl_enum! {
+    BroadcastMsg<T>,
+    versioner = RemocCompact,
+    variants {
+        Value(value: T) => "_0",
+        Lagged => "_1",
+    }
+    where T: RemoteSend
 }
 
 /// Create a bounded, multi-producer, multi-consumer channel where each sent value is broadcasted to all active receivers.

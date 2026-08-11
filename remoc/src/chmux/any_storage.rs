@@ -8,7 +8,7 @@ use std::{
 };
 use uuid::Uuid;
 
-use super::cfg::Cfg;
+use super::{cfg::Cfg, msg::ExchangedCfg};
 
 /// Box containing any value that is Send, Sync and static.
 pub type AnyBox = Box<dyn Any + Send + Sync + 'static>;
@@ -24,6 +24,7 @@ type AnyMap = HashMap<Uuid, AnyEntry>;
 #[derive(Clone)]
 pub struct AnyStorage {
     cfg: Arc<Cfg>,
+    remote_cfg: Arc<ExchangedCfg>,
     entries: Arc<std::sync::Mutex<AnyMap>>,
 }
 
@@ -36,13 +37,18 @@ impl fmt::Debug for AnyStorage {
 
 impl AnyStorage {
     /// Creates a new storage.
-    pub(crate) fn new(cfg: Arc<Cfg>) -> Self {
-        Self { cfg, entries: Arc::new(std::sync::Mutex::new(AnyMap::new())) }
+    pub(crate) fn new(cfg: Arc<Cfg>, remote_cfg: Arc<ExchangedCfg>) -> Self {
+        Self { cfg, remote_cfg, entries: Arc::new(std::sync::Mutex::new(AnyMap::new())) }
     }
 
     /// Configuration of the channel multiplexer this storage belongs to.
     pub fn cfg(&self) -> &Cfg {
         &self.cfg
+    }
+
+    /// Remote configuration of the channel multiplexer.
+    pub(crate) fn remote_cfg(&self) -> &ExchangedCfg {
+        &self.remote_cfg
     }
 
     /// Insert a new entry into the storage and return its key.

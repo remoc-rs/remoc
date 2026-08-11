@@ -3,7 +3,7 @@ use futures::{
     Future,
     future::{BoxFuture, FutureExt},
 };
-use serde::{Deserialize, Serialize, ser};
+use serde::{Serialize, ser};
 use std::{
     any::Any,
     cell::RefCell,
@@ -30,13 +30,23 @@ use crate::{
 pub use crate::chmux::Closed;
 
 /// An error that occurred during remote sending.
-#[derive(Clone, custom_debug::Debug, Serialize, Deserialize)]
+#[derive(Clone, custom_debug::Debug)]
 pub struct SendError<T> {
     /// Error kind.
     pub kind: SendErrorKind,
     /// Item that could not be sent.
     #[debug(skip)]
     pub item: T,
+}
+
+crate::versioned::impl_struct! {
+    SendError<T>,
+    versioner = crate::versioned::RemocCompact,
+    fields {
+        kind: SendErrorKind => "_0",
+        item: T => "_1",
+    }
+    where T: crate::RemoteSend
 }
 
 impl<T: 'static> SendError<T> {
@@ -48,7 +58,7 @@ impl<T: 'static> SendError<T> {
 }
 
 /// Error kind that occurred during remote sending.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub enum SendErrorKind {
     /// Serialization of the item failed.
     Serialize(SerializationError),
@@ -56,6 +66,16 @@ pub enum SendErrorKind {
     Send(chmux::SendError),
     /// Maximum item size was exceeded.
     MaxItemSizeExceeded,
+}
+
+crate::versioned::impl_enum! {
+    SendErrorKind,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Serialize(err: SerializationError) => "_0",
+        Send(err: chmux::SendError) => "_1",
+        MaxItemSizeExceeded => "_2",
+    }
 }
 
 impl SendErrorKind {

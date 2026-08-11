@@ -1,5 +1,4 @@
 use futures::Future;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use tracing::Instrument;
 
@@ -69,11 +68,17 @@ impl Drop for RFnOnceProvider {
 /// }
 /// # tokio_test::block_on(remoc::doctest::client_server(server, client));
 /// ```
-#[derive(Serialize, Deserialize)]
-#[serde(bound(serialize = "A: RemoteSend, R: RemoteSend, Codec: codec::Codec"))]
-#[serde(bound(deserialize = "A: RemoteSend, R: RemoteSend, Codec: codec::Codec"))]
 pub struct RFnOnce<A, R, Codec = codec::Default> {
     request_tx: oneshot::Sender<RFnRequest<A, R, Codec>, Codec>,
+}
+
+crate::versioned::impl_struct! {
+    RFnOnce<A, R, Codec>,
+    versioner = crate::versioned::RemocCompact,
+    fields {
+        request_tx: oneshot::Sender<RFnRequest<A, R, Codec>, Codec> => "_0",
+    }
+    where A: RemoteSend, R: RemoteSend, Codec: codec::Codec
 }
 
 impl<A, R, Codec> fmt::Debug for RFnOnce<A, R, Codec> {

@@ -60,7 +60,6 @@
 //! ```
 //!
 
-use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fmt, hash::Hash, mem::take, ops::Deref, sync::Arc};
 use tokio::sync::{RwLock, RwLockReadGuard, oneshot, watch};
 use tracing::Instrument;
@@ -69,7 +68,7 @@ use super::{ChangeNotifier, ChangeSender, RecvError, SendError, default_on_err, 
 use crate::{exec, prelude::*};
 
 /// A hash set change event.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HashSetEvent<T> {
     /// An item was inserted or modified.
     Set(T),
@@ -82,14 +81,24 @@ pub enum HashSetEvent<T> {
     /// The hash set has reached its final state and
     /// no further events will occur.
     Done,
-
-    // NOTE: All variants with #[serde(skip)] must be at the end of the enum
-    //       to workaround serde issue serde-rs/serde#2224.
-    //
     /// The incremental subscription has reached the value of the observed
     /// hash set at the time it was subscribed.
-    #[serde(skip)]
     InitialComplete,
+}
+
+crate::versioned::impl_enum! {
+    HashSetEvent<T>,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Set(value: T) => "_0",
+        Remove(value: T) => "_1",
+        Clear => "_2",
+        ShrinkToFit => "_3",
+        Done => "_4",
+        #[skip]
+        InitialComplete,
+    }
+    where T: RemoteSend
 }
 
 /// A hash set that emits an event for each change.
@@ -427,9 +436,7 @@ where
 }
 
 /// Initial value of an observable hash set subscription.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(bound(serialize = "T: RemoteSend + Eq + Hash, Codec: crate::codec::Codec"))]
-#[serde(bound(deserialize = "T: RemoteSend + Eq + Hash, Codec: crate::codec::Codec"))]
+#[derive(Debug)]
 enum HashSetInitialValue<T, Codec = crate::codec::Default> {
     /// Initial value is present.
     Value(HashSet<T>),
@@ -440,6 +447,16 @@ enum HashSetInitialValue<T, Codec = crate::codec::Default> {
         /// Receiver.
         rx: rch::mpsc::Receiver<T, Codec>,
     },
+}
+
+crate::versioned::impl_enum! {
+    HashSetInitialValue<T, Codec>,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Value(value: HashSet<T>) => "_0",
+        Incremental { len: usize, rx: rch::mpsc::Receiver<T, Codec> } => "_1",
+    }
+    where T: RemoteSend + Eq + Hash, Codec: crate::codec::Codec
 }
 
 impl<T, Codec> HashSetInitialValue<T, Codec>
@@ -486,22 +503,29 @@ where
 /// The event stream can also be processed event-wise using [recv](Self::recv).
 /// If the subscription is not incremental [take_initial](Self::take_initial) must
 /// be called before the first call to [recv](Self::recv).
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(bound(serialize = "T: RemoteSend + Eq + Hash, Codec: crate::codec::Codec"))]
-#[serde(bound(deserialize = "T: RemoteSend + Eq + Hash, Codec: crate::codec::Codec"))]
+#[derive(Debug)]
 pub struct HashSetSubscription<T, Codec = crate::codec::Default> {
     /// Value of hash set at time of subscription.
     initial: HashSetInitialValue<T, Codec>,
     /// Initial value received completely.
-    #[serde(skip, default)]
     complete: bool,
     /// Change events receiver.
     ///
     /// `None` if [ObservableHashSet::done] has been called before subscribing.
     events: Option<rch::broadcast::Receiver<HashSetEvent<T>, Codec>>,
     /// Event stream ended.
-    #[serde(skip, default)]
     done: bool,
+}
+
+crate::versioned::impl_struct! {
+    HashSetSubscription<T, Codec>,
+    versioner = crate::versioned::RemocCompact,
+    fields {
+        initial: HashSetInitialValue<T, Codec> => "_0",
+        events: Option<rch::broadcast::Receiver<HashSetEvent<T>, Codec>> => "_1",
+    }
+    default { complete, done }
+    where T: RemoteSend + Eq + Hash, Codec: crate::codec::Codec
 }
 
 impl<T, Codec> HashSetSubscription<T, Codec>

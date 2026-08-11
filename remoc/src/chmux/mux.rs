@@ -260,7 +260,7 @@ pub struct ChMux<TransportSink, TransportStream> {
     /// Our configuration.
     local_cfg: Arc<Cfg>,
     /// Remote configuration.
-    remote_cfg: ExchangedCfg,
+    remote_cfg: Arc<ExchangedCfg>,
     /// Remote protocol version.
     remote_protocol_version: u8,
     /// Channel for connection requests from local client.
@@ -393,6 +393,7 @@ where
 
         // Create user objects.
         let cfg = Arc::new(cfg);
+        let remote_cfg = Arc::new(remote_cfg);
         let remote_listener_dropped = Arc::new(AtomicBool::new(false));
         let multiplexer = ChMux {
             remote_protocol_version,
@@ -415,7 +416,7 @@ where
             goodbye_received: false,
             transport_sink: Some(transport_sink),
             transport_stream: Some(transport_stream),
-            storage: AnyStorage::new(cfg),
+            storage: AnyStorage::new(cfg, remote_cfg),
             send_credit_provider,
             send_credit_user: Arc::new(send_credit_user),
             send_credit_report: None,

@@ -1,5 +1,4 @@
 use futures::{Future, future, pin_mut};
-use serde::{Deserialize, Serialize};
 use std::{fmt, sync::Arc};
 use tokio::sync::Semaphore;
 use tracing::Instrument;
@@ -106,11 +105,17 @@ impl Drop for RFnProvider {
 /// }
 /// # tokio_test::block_on(remoc::doctest::client_server(server, client));
 /// ```
-#[derive(Serialize, Deserialize)]
-#[serde(bound(serialize = "A: RemoteSend, R: RemoteSend, Codec: codec::Codec"))]
-#[serde(bound(deserialize = "A: RemoteSend, R: RemoteSend, Codec: codec::Codec"))]
 pub struct RFn<A, R, Codec = codec::Default> {
     request_tx: mpsc::Sender<RFnRequest<A, R, Codec>, Codec, 1>,
+}
+
+crate::versioned::impl_struct! {
+    RFn<A, R, Codec>,
+    versioner = crate::versioned::RemocCompact,
+    fields {
+        request_tx: mpsc::Sender<RFnRequest<A, R, Codec>, Codec, 1> => "_0",
+    }
+    where A: RemoteSend, R: RemoteSend, Codec: codec::Codec
 }
 
 impl<A, R, Codec> Clone for RFn<A, R, Codec> {

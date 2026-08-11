@@ -11,7 +11,7 @@ use tokio::io::AsyncRead;
 use tokio_util::sync::ReusableBoxFuture;
 
 use super::{SizeInfo, bin, oneshot};
-use crate::{chmux::DataBuf, codec};
+use crate::{chmux::DataBuf, codec, versioned::RemocCompact};
 
 /// An I/O channel receiver that implements [`AsyncRead`].
 ///
@@ -49,14 +49,22 @@ impl<Codec> fmt::Debug for Receiver<Codec> {
 }
 
 /// A receiver in transport.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(bound(serialize = "Codec: codec::Codec"))]
-#[serde(bound(deserialize = "Codec: codec::Codec"))]
-pub(crate) struct TransportedReceiver<Codec> {
+#[derive(Debug)]
+struct TransportedReceiver<Codec> {
     /// The underlying binary receiver.
     bin_receiver: bin::Receiver,
     /// Size info for transport.
     size: SizeInfo<Codec>,
+}
+
+crate::versioned::impl_struct! {
+    TransportedReceiver<Codec>,
+    versioner = RemocCompact,
+    fields {
+        bin_receiver: bin::Receiver => "_0",
+        size: SizeInfo<Codec> => "_1",
+    }
+    where Codec: codec::Codec
 }
 
 impl<Codec> Receiver<Codec> {
@@ -272,7 +280,7 @@ where
     where
         D: serde::Deserializer<'de>,
     {
-        let transported = TransportedReceiver::<Codec>::deserialize(deserializer)?;
+        let transported: TransportedReceiver<Codec> = TransportedReceiver::deserialize(deserializer)?;
         Ok(Self::new(transported.bin_receiver, transported.size))
     }
 }

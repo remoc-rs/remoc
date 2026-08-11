@@ -22,6 +22,7 @@ use super::{
     receiver::RecvError,
     send_req,
 };
+use crate::versioned::RemocCompact;
 use crate::{
     RemoteSend, chmux,
     codec::{self, ErasedDeserializer, ErasedSerializer},
@@ -29,7 +30,7 @@ use crate::{
 };
 
 /// An error occurred during sending over an mpsc channel.
-#[derive(Clone, custom_debug::Debug, Serialize, Deserialize)]
+#[derive(Clone, custom_debug::Debug)]
 pub enum SendError<T> {
     /// The remote end closed the channel.
     Closed(#[debug(skip)] T),
@@ -41,6 +42,19 @@ pub enum SendError<T> {
     RemoteListen(chmux::ListenerError),
     /// Forwarding at a remote endpoint to another remote endpoint failed.
     RemoteForward,
+}
+
+crate::versioned::impl_enum! {
+    SendError<T>,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Closed(item: T) => "_0",
+        RemoteSend(err: base::SendErrorKind) => "_1",
+        RemoteConnect(err: chmux::ConnectError) => "_2",
+        RemoteListen(err: chmux::ListenerError) => "_3",
+        RemoteForward => "_4",
+    }
+    where T: RemoteSend
 }
 
 impl<T> SendError<T> {
@@ -138,7 +152,7 @@ impl<T> SendError<T> {
 }
 
 /// An error occurred during trying to send over an mpsc channel.
-#[derive(Clone, custom_debug::Debug, Serialize, Deserialize)]
+#[derive(Clone, custom_debug::Debug)]
 pub enum TrySendError<T> {
     /// The remote end closed the channel.
     Closed(#[debug(skip)] T),
@@ -153,6 +167,20 @@ pub enum TrySendError<T> {
     RemoteListen(chmux::ListenerError),
     /// Forwarding at a remote endpoint to another remote endpoint failed.
     RemoteForward,
+}
+
+crate::versioned::impl_enum! {
+    TrySendError<T>,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Closed(item: T) => "_0",
+        Full(item: T) => "_1",
+        RemoteSend(err: base::SendErrorKind) => "_2",
+        RemoteConnect(err: chmux::ConnectError) => "_3",
+        RemoteListen(err: chmux::ListenerError) => "_4",
+        RemoteForward => "_5",
+    }
+    where T: RemoteSend
 }
 
 impl<T> TrySendError<T> {
@@ -284,26 +312,33 @@ impl<T, Codec, const BUFFER: usize> Clone for Sender<T, Codec, BUFFER> {
 }
 
 /// Mpsc sender in transport.
-#[derive(Serialize, Deserialize)]
-pub(crate) struct TransportedSender {
+struct TransportedSender {
     /// chmux port number. `None` if closed.
     port: Option<u32>,
-    /// Data type.
-    #[serde(default)]
-    data: PhantomData<()>,
-    /// Data codec.
-    #[serde(default)]
-    codec: PhantomData<()>,
     /// Maximum item size in bytes.
-    #[serde(default = "default_max_item_size")]
     max_item_size: u64,
     /// Additional chmux port numbers for multi base channel operation.
-    #[serde(default)]
     parallel: Vec<u32>,
 }
 
 const fn default_max_item_size() -> u64 {
     u64::MAX
+}
+
+crate::versioned::impl_struct! {
+    TransportedSender,
+    versioner = RemocCompact,
+    fields {
+        port: Option<u32> => "_0",
+        #[serde(default)]
+        data: PhantomData<()> = PhantomData,
+        #[serde(default)]
+        codec: PhantomData<()> = PhantomData,
+        #[serde(default = "default_max_item_size")]
+        max_item_size: u64 => "_1",
+        #[serde(default)]
+        parallel: Vec<u32> => "_2",
+    }
 }
 
 /// Drops the strong reference to `target` when channel is closed or dropped.
@@ -675,14 +710,8 @@ where
         };
 
         // Encode chmux port number in transport type and serialize it.
-        let transported = TransportedSender {
-            port,
-            data: PhantomData,
-            codec: PhantomData,
-            max_item_size: self.max_item_size.try_into().unwrap_or(u64::MAX),
-            parallel,
-        };
-        transported.serialize(serializer)
+        TransportedSender { port, max_item_size: self.max_item_size.try_into().unwrap_or(u64::MAX), parallel }
+            .serialize(serializer)
     }
 }
 
@@ -699,8 +728,7 @@ where
         assert!(BUFFER > 0, "BUFFER must not be zero");
 
         // Get chmux port number from deserialized transport type.
-        let TransportedSender { port, max_item_size, parallel, .. } =
-            TransportedSender::deserialize(deserializer)?;
+        let TransportedSender { port, max_item_size, parallel } = TransportedSender::deserialize(deserializer)?;
         let max_item_size = usize::try_from(max_item_size).unwrap_or(usize::MAX);
 
         let Some(port) = port else {

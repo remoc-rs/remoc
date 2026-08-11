@@ -11,7 +11,7 @@ use super::{
     },
     Interlock, Location,
 };
-use crate::chmux;
+use crate::{chmux, versioned::RemocCompact};
 
 #[derive(Default)]
 pub(super) enum LocalConnect {
@@ -38,10 +38,17 @@ impl fmt::Debug for Sender {
 }
 
 /// A binary channel sender in transport.
-#[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct TransportedSender {
+struct TransportedSender {
     /// chmux port number.
-    pub port: u32,
+    port: u32,
+}
+
+crate::versioned::impl_struct! {
+    TransportedSender,
+    versioner = RemocCompact,
+    fields {
+        port: u32 => "_0",
+    }
 }
 
 impl Sender {

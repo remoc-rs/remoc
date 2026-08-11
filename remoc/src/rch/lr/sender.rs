@@ -14,6 +14,7 @@ use super::{
     },
     Interlock, Location,
 };
+use crate::versioned::RemocCompact;
 use crate::{
     chmux,
     codec::{self, SerializationError},
@@ -22,7 +23,7 @@ use crate::{
 pub use super::super::base::Closed;
 
 /// An error that occurred during remote sending.
-#[derive(Clone, custom_debug::Debug, Serialize, Deserialize)]
+#[derive(Clone, custom_debug::Debug)]
 pub struct SendError<T> {
     /// Error kind.
     pub kind: SendErrorKind,
@@ -31,8 +32,18 @@ pub struct SendError<T> {
     pub item: T,
 }
 
+crate::versioned::impl_struct! {
+    SendError<T>,
+    versioner = crate::versioned::RemocCompact,
+    fields {
+        kind: SendErrorKind => "_0",
+        item: T => "_1",
+    }
+    where T: crate::RemoteSend
+}
+
 /// Error kind that occurred during remote sending.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub enum SendErrorKind {
     /// Serialization of the item failed.
     Serialize(SerializationError),
@@ -42,6 +53,17 @@ pub enum SendErrorKind {
     Connect(ConnectError),
     /// Maximum item size was exceeded.
     MaxItemSizeExceeded,
+}
+
+crate::versioned::impl_enum! {
+    SendErrorKind,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        Serialize(err: SerializationError) => "_0",
+        Send(err: chmux::SendError) => "_1",
+        Connect(err: ConnectError) => "_2",
+        MaxItemSizeExceeded => "_3",
+    }
 }
 
 impl<T> SendError<T> {
@@ -145,21 +167,27 @@ impl<T, Codec> fmt::Debug for Sender<T, Codec> {
 }
 
 /// A local/remote channel sender in transport.
-#[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct TransportedSender<T, Codec> {
+struct TransportedSender {
     /// chmux port number.
-    pub port: u32,
-    /// Data type.
-    data: PhantomData<T>,
-    /// Data codec.
-    codec: PhantomData<Codec>,
+    port: u32,
     /// Maximum item size in bytes.
-    #[serde(default = "default_max_item_size")]
     max_item_size: u64,
 }
 
 const fn default_max_item_size() -> u64 {
     u64::MAX
+}
+
+crate::versioned::impl_struct! {
+    TransportedSender,
+    versioner = RemocCompact,
+    fields {
+        port: u32 => "_0",
+        data: PhantomData<()> = PhantomData,
+        codec: PhantomData<()> = PhantomData,
+        #[serde(default = "default_max_item_size")]
+        max_item_size: u64 => "_1",
+    }
 }
 
 impl<T, Codec> Sender<T, Codec>
@@ -251,13 +279,8 @@ where
             }
         })?;
 
-        TransportedSender::<T, Codec> {
-            port,
-            data: PhantomData,
-            max_item_size: max_item_size.try_into().unwrap_or(u64::MAX),
-            codec: PhantomData,
-        }
-        .serialize(serializer)
+        TransportedSender { port, max_item_size: max_item_size.try_into().unwrap_or(u64::MAX) }
+            .serialize(serializer)
     }
 }
 
@@ -271,8 +294,7 @@ where
     where
         D: serde::Deserializer<'de>,
     {
-        let TransportedSender::<T, Codec> { port, max_item_size, .. } =
-            TransportedSender::deserialize(deserializer)?;
+        let TransportedSender { port, max_item_size } = TransportedSender::deserialize(deserializer)?;
         let max_item_size = usize::try_from(max_item_size).unwrap_or(usize::MAX);
 
         let (sender_tx, sender_rx) = tokio::sync::mpsc::unbounded_channel();

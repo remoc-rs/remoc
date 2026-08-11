@@ -30,7 +30,6 @@ use crate::exec::{self, runtime};
 
 /// An error occurred during sending of a message.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum SendError {
     /// The multiplexer terminated.
     ChMux,
@@ -48,6 +47,19 @@ pub enum SendError {
     LocalPortsExhausted,
     /// Too many pre-connection requests are pending.
     TooManyPendingPreConnectReqs,
+}
+
+#[cfg(feature = "serde")]
+crate::versioned::impl_enum! {
+    SendError,
+    versioner = crate::versioned::RemocCompact,
+    variants {
+        ChMux => "_0",
+        Closed { gracefully: bool } => "_1",
+        Rejected { no_ports: bool } => "_2",
+        LocalPortsExhausted => "_3",
+        TooManyPendingPreConnectReqs => "_4",
+    }
 }
 
 impl SendError {

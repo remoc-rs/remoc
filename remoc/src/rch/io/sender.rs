@@ -12,18 +12,26 @@ use tokio::io::AsyncWrite;
 use tokio_util::sync::ReusableBoxFuture;
 
 use super::{bin, oneshot};
-use crate::codec;
+use crate::{codec, versioned::RemocCompact};
 
 /// Size handling mode for the sender.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(bound(serialize = "Codec: codec::Codec"))]
-#[serde(bound(deserialize = "Codec: codec::Codec"))]
+#[derive(Debug)]
 pub(super) enum SizeMode<Codec> {
     /// Size is known (either upfront or after shutdown).
     Known(u64),
     /// Size is unknown. Will send final byte count via oneshot on shutdown,
     /// then transition to Known.
     Unknown(oneshot::Sender<u64, Codec>),
+}
+
+crate::versioned::impl_enum! {
+    SizeMode<Codec>,
+    versioner = RemocCompact,
+    variants {
+        Known(size: u64) => "_0",
+        Unknown(tx: oneshot::Sender<u64, Codec>) => "_1",
+    }
+    where Codec: codec::Codec
 }
 
 /// An I/O channel sender that implements [`AsyncWrite`].
@@ -55,16 +63,24 @@ impl<Codec> fmt::Debug for Sender<Codec> {
 }
 
 /// A sender in transport.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(bound(serialize = "Codec: codec::Codec"))]
-#[serde(bound(deserialize = "Codec: codec::Codec"))]
-pub(crate) struct TransportedSender<Codec> {
+struct TransportedSender<Codec> {
     /// The underlying binary sender. None if already closed.
     bin_sender: Option<bin::Sender>,
     /// Size handling mode.
     size_mode: SizeMode<Codec>,
     /// Total bytes written so far.
     bytes_written: u64,
+}
+
+crate::versioned::impl_struct! {
+    TransportedSender<Codec>,
+    versioner = RemocCompact,
+    fields {
+        bin_sender: Option<bin::Sender> => "_0",
+        size_mode: SizeMode<Codec> => "_1",
+        bytes_written: u64 => "_2",
+    }
+    where Codec: codec::Codec
 }
 
 impl<Codec> Sender<Codec> {
@@ -256,8 +272,7 @@ where
             SizeMode::Known(0), // Placeholder, sender is consumed anyway
         );
 
-        TransportedSender::<Codec> { bin_sender, size_mode, bytes_written: self.bytes_written }
-            .serialize(serializer)
+        TransportedSender { bin_sender, size_mode, bytes_written: self.bytes_written }.serialize(serializer)
     }
 }
 
@@ -269,7 +284,7 @@ where
     where
         D: serde::Deserializer<'de>,
     {
-        let transported = TransportedSender::<Codec>::deserialize(deserializer)?;
+        let transported: TransportedSender<Codec> = TransportedSender::deserialize(deserializer)?;
 
         Ok(Self {
             bin_sender: Mutex::new(transported.bin_sender),

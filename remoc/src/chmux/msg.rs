@@ -227,7 +227,7 @@ pub const MSG_RECEIVE_FINISH_FLAG_PORT_LOCAL: u8 = 0b0000_0001;
 pub const MAX_MSG_LENGTH: usize = 16;
 
 impl MultiplexMsg {
-    pub(crate) fn write(&self, mut writer: impl io::Write) -> Result<(), io::Error> {
+    pub(crate) fn write(&self, mut writer: impl io::Write, varint: bool) -> Result<(), io::Error> {
         match self {
             MultiplexMsg::Reset => {
                 writer.write_u8(MSG_RESET)?;
@@ -243,7 +243,7 @@ impl MultiplexMsg {
             }
             MultiplexMsg::OpenPort { client_port, wait, id, pre_connect } => {
                 writer.write_u8(MSG_OPEN_PORT)?;
-                writer.write_u32::<LE>(*client_port)?;
+                writer.write_v32(*client_port, varint)?;
                 let mut flags = 0;
                 if *wait {
                     flags |= MSG_OPEN_PORT_FLAG_WAIT
@@ -256,13 +256,13 @@ impl MultiplexMsg {
                 }
                 writer.write_u8(flags)?;
                 if let Some(id) = id {
-                    writer.write_u32::<LE>(*id)?;
+                    writer.write_v32(*id, varint)?;
                 }
             }
             MultiplexMsg::PortOpened { client_port, server_port } => {
                 writer.write_u8(MSG_PORT_OPENED)?;
-                writer.write_u32::<LE>(*client_port)?;
-                writer.write_u32::<LE>(**server_port)?;
+                writer.write_v32(*client_port, varint)?;
+                writer.write_v32(**server_port, varint)?;
                 let mut flags = 0;
                 if let SidePort::Remote(_) = server_port {
                     flags |= MSG_PORT_OPENED_FLAG_SERVER_PORT_REMOTE;
@@ -271,12 +271,12 @@ impl MultiplexMsg {
             }
             MultiplexMsg::Rejected { client_port, no_ports } => {
                 writer.write_u8(MSG_REJECTED)?;
-                writer.write_u32::<LE>(*client_port)?;
+                writer.write_v32(*client_port, varint)?;
                 writer.write_u8(if *no_ports { MSG_REJECTED_FLAG_NO_PORTS } else { 0 })?;
             }
             MultiplexMsg::Data { port, first, last, credits } => {
                 writer.write_u8(MSG_DATA)?;
-                writer.write_u32::<LE>(**port)?;
+                writer.write_v32(**port, varint)?;
                 let mut flags = 0;
                 if *first {
                     flags |= MSG_DATA_FLAG_FIRST;
@@ -294,12 +294,12 @@ impl MultiplexMsg {
                 }
                 writer.write_u8(flags)?;
                 if let DataCredits::GlobalAndPort(global_credits) = credits {
-                    writer.write_u32::<LE>(*global_credits)?;
+                    writer.write_v32(*global_credits, varint)?;
                 }
             }
             MultiplexMsg::PortData { port, first, last, wait, ports } => {
                 writer.write_u8(MSG_PORT_DATA)?;
-                writer.write_u32::<LE>(**port)?;
+                writer.write_v32(**port, varint)?;
                 let mut flags = 0;
                 if *first {
                     flags |= MSG_PORT_DATA_FLAG_FIRST;
@@ -329,9 +329,9 @@ impl MultiplexMsg {
                 }
                 writer.write_u8(flags)?;
                 for port in ports {
-                    writer.write_u32::<LE>(port.port)?;
+                    writer.write_v32(port.port, varint)?;
                     if need_ids {
-                        writer.write_u32::<LE>(port.id)?;
+                        writer.write_v32(port.id, varint)?;
                     }
                     if need_port_flags {
                         let mut port_flags = 0;
@@ -344,7 +344,7 @@ impl MultiplexMsg {
             }
             MultiplexMsg::RequestReceivedReport { port } => {
                 writer.write_u8(MSG_REQUEST_RECEIVED_REPORT)?;
-                writer.write_u32::<LE>(**port)?;
+                writer.write_v32(**port, varint)?;
                 let mut flags = 0;
                 if let SidePort::Local(_) = port {
                     flags |= MSG_REQUEST_RECEIVED_REPORT_FLAG_PORT_LOCAL;
@@ -353,7 +353,7 @@ impl MultiplexMsg {
             }
             MultiplexMsg::ReceivedReport { port } => {
                 writer.write_u8(MSG_RECEIVED_REPORT)?;
-                writer.write_u32::<LE>(**port)?;
+                writer.write_v32(**port, varint)?;
                 let mut flags = 0;
                 if let SidePort::Local(_) = port {
                     flags |= MSG_RECEIVED_REPORT_FLAG_PORT_LOCAL;
@@ -365,26 +365,26 @@ impl MultiplexMsg {
                     SidePort::Remote(_) => writer.write_u8(MSG_PORT_CREDITS)?,
                     SidePort::Local(_) => writer.write_u8(MSG_LOCAL_PORT_CREDITS)?,
                 }
-                writer.write_u32::<LE>(**port)?;
-                writer.write_u32::<LE>(*credits)?;
+                writer.write_v32(**port, varint)?;
+                writer.write_v32(*credits, varint)?;
             }
             MultiplexMsg::InhibitGlobalCreditUsageByPort { port } => {
                 match port {
                     SidePort::Remote(_) => writer.write_u8(MSG_INHIBIT_GLOBAL_CREDIT_USAGE_BY_PORT)?,
                     SidePort::Local(_) => writer.write_u8(MSG_INHIBIT_GLOBAL_CREDIT_USAGE_BY_LOCAL_PORT)?,
                 }
-                writer.write_u32::<LE>(**port)?;
+                writer.write_v32(**port, varint)?;
             }
             MultiplexMsg::AllowGlobalCreditUsageByPort { port } => {
                 match port {
                     SidePort::Remote(_) => writer.write_u8(MSG_ALLOW_GLOBAL_CREDIT_USAGE_BY_PORT)?,
                     SidePort::Local(_) => writer.write_u8(MSG_ALLOW_GLOBAL_CREDIT_USAGE_BY_LOCAL_PORT)?,
                 }
-                writer.write_u32::<LE>(**port)?;
+                writer.write_v32(**port, varint)?;
             }
             MultiplexMsg::SendFinish { port } => {
                 writer.write_u8(MSG_SEND_FINISH)?;
-                writer.write_u32::<LE>(**port)?;
+                writer.write_v32(**port, varint)?;
                 let mut flags = 0;
                 if let SidePort::Local(_) = port {
                     flags |= MSG_SEND_FINISH_FLAG_PORT_LOCAL;
@@ -393,7 +393,7 @@ impl MultiplexMsg {
             }
             MultiplexMsg::ReceiveClose { port } => {
                 writer.write_u8(MSG_RECEIVE_CLOSE)?;
-                writer.write_u32::<LE>(**port)?;
+                writer.write_v32(**port, varint)?;
                 let mut flags = 0;
                 if let SidePort::Local(_) = port {
                     flags |= MSG_RECEIVE_CLOSE_FLAG_PORT_LOCAL;
@@ -402,7 +402,7 @@ impl MultiplexMsg {
             }
             MultiplexMsg::ReceiveFinish { port } => {
                 writer.write_u8(MSG_RECEIVE_FINISH)?;
-                writer.write_u32::<LE>(**port)?;
+                writer.write_v32(**port, varint)?;
                 let mut flags = 0;
                 if let SidePort::Local(_) = port {
                     flags |= MSG_RECEIVE_FINISH_FLAG_PORT_LOCAL;
@@ -411,13 +411,13 @@ impl MultiplexMsg {
             }
             MultiplexMsg::GlobalCredits(GlobalCredits { credits, seq }) => {
                 writer.write_u8(MSG_GLOBAL_CREDITS)?;
-                writer.write_u32::<LE>(*credits)?;
+                writer.write_v32(*credits, varint)?;
                 writer.write_u8(*seq)?;
             }
             MultiplexMsg::GlobalCreditsReport(GlobalCreditsReport { current, min, seq }) => {
                 writer.write_u8(MSG_GLOBAL_CREDITS_REPORT)?;
-                writer.write_u32::<LE>(*current)?;
-                writer.write_u32::<LE>(*min)?;
+                writer.write_v32(*current, varint)?;
+                writer.write_v32(*min, varint)?;
                 writer.write_u8(*seq)?;
             }
             MultiplexMsg::ClientFinish => {
@@ -433,7 +433,7 @@ impl MultiplexMsg {
         Ok(())
     }
 
-    pub(crate) fn read(mut reader: impl io::Read) -> Result<Self, io::Error> {
+    pub(crate) fn read(mut reader: impl io::Read, varint: bool) -> Result<Self, io::Error> {
         let msg = match reader.read_u8()? {
             MSG_RESET => Self::Reset,
             MSG_HELLO => {
@@ -446,19 +446,19 @@ impl MultiplexMsg {
             }
             MSG_PING => Self::Ping,
             MSG_OPEN_PORT => {
-                let client_port = reader.read_u32::<LE>()?;
+                let client_port = reader.read_v32(varint)?;
                 let flags = reader.read_u8()?;
                 let wait = flags & MSG_OPEN_PORT_FLAG_WAIT != 0;
                 let mut id = (flags & MSG_OPEN_PORT_FLAG_ID != 0).then_some(0);
                 let pre_open = flags & MSG_OPEN_PORT_FLAG_PRE_CONNECT != 0;
                 if let Some(id) = &mut id {
-                    *id = reader.read_u32::<LE>()?;
+                    *id = reader.read_v32(varint)?;
                 }
                 Self::OpenPort { client_port, wait, id, pre_connect: pre_open }
             }
             MSG_PORT_OPENED => {
-                let client_port = reader.read_u32::<LE>()?;
-                let server_port = reader.read_u32::<LE>()?;
+                let client_port = reader.read_v32(varint)?;
+                let server_port = reader.read_v32(varint)?;
                 let flags = reader.read_u8().unwrap_or_default();
                 Self::PortOpened {
                     client_port,
@@ -470,16 +470,16 @@ impl MultiplexMsg {
                 }
             }
             MSG_REJECTED => Self::Rejected {
-                client_port: reader.read_u32::<LE>()?,
+                client_port: reader.read_v32(varint)?,
                 no_ports: reader.read_u8()? & MSG_REJECTED_FLAG_NO_PORTS != 0,
             },
             MSG_DATA => {
-                let port = reader.read_u32::<LE>()?;
+                let port = reader.read_v32(varint)?;
                 let flags = reader.read_u8()?;
                 let credits = if flags & MSG_DATA_FLAG_CREDITS_GLOBAL != 0 {
                     DataCredits::GlobalOnly
                 } else if flags & MSG_DATA_FLAG_CREDITS_SPLIT != 0 {
-                    DataCredits::GlobalAndPort(reader.read_u32::<LE>()?)
+                    DataCredits::GlobalAndPort(reader.read_v32(varint)?)
                 } else {
                     DataCredits::PortOnly
                 };
@@ -495,19 +495,19 @@ impl MultiplexMsg {
                 }
             }
             MSG_PORT_DATA => {
-                let port = reader.read_u32::<LE>()?;
+                let port = reader.read_v32(varint)?;
                 let flags = reader.read_u8()?;
                 let first = flags & MSG_PORT_DATA_FLAG_FIRST != 0;
                 let last = flags & MSG_PORT_DATA_FLAG_LAST != 0;
                 let wait = flags & MSG_PORT_DATA_FLAG_WAIT != 0;
                 let mut ports = Vec::with_capacity(16);
                 loop {
-                    let port = match reader.read_u32::<LE>() {
+                    let port = match reader.read_v32(varint) {
                         Ok(port) => port,
                         Err(err) if err.kind() == ErrorKind::UnexpectedEof => break,
                         Err(err) => return Err(err),
                     };
-                    let id = if flags & MSG_PORT_DATA_FLAG_IDS != 0 { reader.read_u32::<LE>()? } else { port };
+                    let id = if flags & MSG_PORT_DATA_FLAG_IDS != 0 { reader.read_v32(varint)? } else { port };
                     let mut pre_connect = false;
                     if flags & MSG_PORT_DATA_FLAG_PORTS_FLAGS != 0 {
                         let port_flags = reader.read_u8()?;
@@ -528,7 +528,7 @@ impl MultiplexMsg {
                 }
             }
             MSG_REQUEST_RECEIVED_REPORT => {
-                let port = reader.read_u32::<LE>()?;
+                let port = reader.read_v32(varint)?;
                 let flags = reader.read_u8().unwrap_or_default();
                 Self::RequestReceivedReport {
                     port: if flags & MSG_REQUEST_RECEIVED_REPORT_FLAG_PORT_LOCAL != 0 {
@@ -539,7 +539,7 @@ impl MultiplexMsg {
                 }
             }
             MSG_RECEIVED_REPORT => {
-                let port = reader.read_u32::<LE>()?;
+                let port = reader.read_v32(varint)?;
                 let flags = reader.read_u8().unwrap_or_default();
                 Self::ReceivedReport {
                     port: if flags & MSG_RECEIVED_REPORT_FLAG_PORT_LOCAL != 0 {
@@ -550,27 +550,27 @@ impl MultiplexMsg {
                 }
             }
             MSG_PORT_CREDITS => Self::PortCredits {
-                port: SidePort::Remote(reader.read_u32::<LE>()?),
-                credits: reader.read_u32::<LE>()?,
+                port: SidePort::Remote(reader.read_v32(varint)?),
+                credits: reader.read_v32(varint)?,
             },
             MSG_LOCAL_PORT_CREDITS => Self::PortCredits {
-                port: SidePort::Local(reader.read_u32::<LE>()?),
-                credits: reader.read_u32::<LE>()?,
+                port: SidePort::Local(reader.read_v32(varint)?),
+                credits: reader.read_v32(varint)?,
             },
             MSG_INHIBIT_GLOBAL_CREDIT_USAGE_BY_PORT => {
-                Self::InhibitGlobalCreditUsageByPort { port: SidePort::Remote(reader.read_u32::<LE>()?) }
+                Self::InhibitGlobalCreditUsageByPort { port: SidePort::Remote(reader.read_v32(varint)?) }
             }
             MSG_INHIBIT_GLOBAL_CREDIT_USAGE_BY_LOCAL_PORT => {
-                Self::InhibitGlobalCreditUsageByPort { port: SidePort::Local(reader.read_u32::<LE>()?) }
+                Self::InhibitGlobalCreditUsageByPort { port: SidePort::Local(reader.read_v32(varint)?) }
             }
             MSG_ALLOW_GLOBAL_CREDIT_USAGE_BY_PORT => {
-                Self::AllowGlobalCreditUsageByPort { port: SidePort::Remote(reader.read_u32::<LE>()?) }
+                Self::AllowGlobalCreditUsageByPort { port: SidePort::Remote(reader.read_v32(varint)?) }
             }
             MSG_ALLOW_GLOBAL_CREDIT_USAGE_BY_LOCAL_PORT => {
-                Self::AllowGlobalCreditUsageByPort { port: SidePort::Local(reader.read_u32::<LE>()?) }
+                Self::AllowGlobalCreditUsageByPort { port: SidePort::Local(reader.read_v32(varint)?) }
             }
             MSG_SEND_FINISH => {
-                let port = reader.read_u32::<LE>()?;
+                let port = reader.read_v32(varint)?;
                 let flags = reader.read_u8().unwrap_or_default();
                 Self::SendFinish {
                     port: if flags & MSG_SEND_FINISH_FLAG_PORT_LOCAL != 0 {
@@ -581,7 +581,7 @@ impl MultiplexMsg {
                 }
             }
             MSG_RECEIVE_CLOSE => {
-                let port = reader.read_u32::<LE>()?;
+                let port = reader.read_v32(varint)?;
                 let flags = reader.read_u8().unwrap_or_default();
                 Self::ReceiveClose {
                     port: if flags & MSG_RECEIVE_CLOSE_FLAG_PORT_LOCAL != 0 {
@@ -592,7 +592,7 @@ impl MultiplexMsg {
                 }
             }
             MSG_RECEIVE_FINISH => {
-                let port = reader.read_u32::<LE>()?;
+                let port = reader.read_v32(varint)?;
                 let flags = reader.read_u8().unwrap_or_default();
                 Self::ReceiveFinish {
                     port: if flags & MSG_RECEIVE_FINISH_FLAG_PORT_LOCAL != 0 {
@@ -603,11 +603,11 @@ impl MultiplexMsg {
                 }
             }
             MSG_GLOBAL_CREDITS => {
-                Self::GlobalCredits(GlobalCredits { credits: reader.read_u32::<LE>()?, seq: reader.read_u8()? })
+                Self::GlobalCredits(GlobalCredits { credits: reader.read_v32(varint)?, seq: reader.read_u8()? })
             }
             MSG_GLOBAL_CREDITS_REPORT => Self::GlobalCreditsReport(GlobalCreditsReport {
-                current: reader.read_u32::<LE>()?,
-                min: reader.read_u32::<LE>()?,
+                current: reader.read_v32(varint)?,
+                min: reader.read_v32(varint)?,
                 seq: reader.read_u8()?,
             }),
             MSG_CLIENT_FINISH => Self::ClientFinish,
@@ -618,16 +618,16 @@ impl MultiplexMsg {
         Ok(msg)
     }
 
-    pub(crate) fn to_vec(&self) -> Vec<u8> {
+    pub(crate) fn to_vec(&self, varint: bool) -> Vec<u8> {
         let mut data = Vec::with_capacity(MAX_MSG_LENGTH);
-        self.write(&mut data).expect("message serialization failed");
+        self.write(&mut data, varint).expect("message serialization failed");
         data
     }
 
     pub(crate) fn from_slice<SinkError, StreamError>(
-        data: &[u8],
+        data: &[u8], varint: bool,
     ) -> Result<Self, ChMuxError<SinkError, StreamError>> {
-        Self::read(data).map_err(|err| ChMuxError::Protocol(err.to_string()))
+        Self::read(data, varint).map_err(|err| ChMuxError::Protocol(err.to_string()))
     }
 }
 
@@ -650,6 +650,8 @@ pub struct ExchangedCfg {
     pub port_side: bool,
     /// Whether pre-connecting ports is supported.
     pub pre_connect: bool,
+    /// Variable integer encoding is supported.
+    pub varint: bool,
 }
 
 impl ExchangedCfg {
@@ -664,6 +666,7 @@ impl ExchangedCfg {
             received_report: true,
             port_side: true,
             pre_connect: true,
+            varint: true,
         }
     }
 
@@ -678,6 +681,7 @@ impl ExchangedCfg {
         writer.write_u8(self.received_report.into())?;
         writer.write_u8(self.port_side.into())?;
         writer.write_u8(self.pre_connect.into())?;
+        writer.write_u8(self.varint.into())?;
 
         Ok(())
     }
@@ -704,6 +708,7 @@ impl ExchangedCfg {
             received_report: false,
             port_side: false,
             pre_connect: false,
+            varint: false,
         };
 
         let Ok(global_credits) = reader.read_u32::<LE>() else { return Ok(this) };
@@ -717,6 +722,9 @@ impl ExchangedCfg {
 
         let Ok(pre_connect) = reader.read_u8() else { return Ok(this) };
         this.pre_connect = pre_connect != 0;
+
+        let Ok(varint) = reader.read_u8() else { return Ok(this) };
+        this.varint = varint != 0;
 
         Ok(this)
     }
@@ -742,4 +750,87 @@ pub struct GlobalCredits {
     pub credits: u32,
     /// Sequence number in [GlobalCreditsStatus::seq] for credit status reporting.
     pub seq: u8,
+}
+
+/// Variable integer writer.
+trait VarintWrite {
+    /// Write u32 in variable integer encoding if `varint` is true.
+    fn write_v32(&mut self, n: u32, varint: bool) -> Result<usize, io::Error>;
+}
+
+impl<T: std::io::Write> VarintWrite for T {
+    fn write_v32(&mut self, n: u32, varint: bool) -> Result<usize, io::Error> {
+        if !varint {
+            return self.write_u32::<LE>(n).map(|_| size_of::<u32>());
+        }
+
+        let mut buf = [0u8; varint_max::<u32>()];
+        let used_buf = varint_u32(n, &mut buf);
+        self.write_all(used_buf)?;
+        Ok(used_buf.len())
+    }
+}
+
+/// Variable integer reader.
+trait VarintRead {
+    /// Read u32 in variable integer encoding if `varint` is true.
+    fn read_v32(&mut self, varint: bool) -> Result<u32, io::Error>;
+}
+
+impl<T: std::io::Read> VarintRead for T {
+    fn read_v32(&mut self, varint: bool) -> Result<u32, io::Error> {
+        if !varint {
+            return self.read_u32::<LE>();
+        }
+
+        let mut out = 0;
+        for i in 0..varint_max::<u32>() {
+            let val = self.read_u8()?;
+            let carry = (val & 0x7F) as u32;
+            out |= carry << (7 * i);
+
+            if (val & 0x80) == 0 {
+                if i == varint_max::<u32>() - 1 && val > max_of_last_byte::<u32>() {
+                    return Err(io::Error::new(ErrorKind::InvalidData, "invalid varint"));
+                } else {
+                    return Ok(out);
+                }
+            }
+        }
+
+        Err(io::Error::new(ErrorKind::InvalidData, "invalid varint"))
+    }
+}
+
+/// Returns the maximum number of bytes required to encode T.
+const fn varint_max<T: Sized>() -> usize {
+    const BITS_PER_BYTE: usize = 8;
+    const BITS_PER_VARINT_BYTE: usize = 7;
+
+    let bits = size_of::<T>() * BITS_PER_BYTE;
+    let roundup_bits = bits + (BITS_PER_VARINT_BYTE - 1);
+    roundup_bits / BITS_PER_VARINT_BYTE
+}
+
+/// Returns the maximum value stored in the last encoded byte.
+const fn max_of_last_byte<T: Sized>() -> u8 {
+    let max_bits = size_of::<T>() * 8;
+    let extra_bits = max_bits % 7;
+    (1 << extra_bits) - 1
+}
+
+/// Encode u32 in variable integer encoding.
+fn varint_u32(n: u32, out: &mut [u8; varint_max::<u32>()]) -> &mut [u8] {
+    let mut value = n;
+    for i in 0..varint_max::<u32>() {
+        out[i] = value.to_le_bytes()[0];
+        if value < 128 {
+            return &mut out[..=i];
+        }
+
+        out[i] |= 0x80;
+        value >>= 7;
+    }
+    debug_assert_eq!(value, 0);
+    &mut out[..]
 }

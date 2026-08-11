@@ -432,9 +432,9 @@ where
     /// Feed transport message to sink and log it.
     #[tracing::instrument(level = "trace", skip_all, fields(?msg))]
     async fn feed_msg(
-        msg: TransportMsg, sink: &mut TransportSink,
+        msg: TransportMsg, sink: &mut TransportSink, varint: bool,
     ) -> Result<(), ChMuxError<TransportSinkError, TransportStreamError>> {
-        sink.feed(msg.msg.to_vec().into()).await.map_err(ChMuxError::SinkError)?;
+        sink.feed(msg.msg.to_vec(varint).into()).await.map_err(ChMuxError::SinkError)?;
 
         if let Some(data) = msg.data {
             sink.feed(data).await.map_err(ChMuxError::SinkError)?;
@@ -452,7 +452,7 @@ where
     /// Receive message and log it.
     #[tracing::instrument(level = "trace", skip_all, fields(msg, data))]
     async fn recv_msg(
-        stream: &mut TransportStream,
+        stream: &mut TransportStream, varint: bool,
     ) -> Result<TransportMsg, ChMuxError<TransportSinkError, TransportStreamError>> {
         let msg_data = match stream.next().await {
             Some(Ok(msg_data)) => msg_data,
@@ -460,7 +460,7 @@ where
             None => return Err(ChMuxError::StreamClosed),
         };
 
-        let msg = MultiplexMsg::from_slice(&msg_data)?;
+        let msg = MultiplexMsg::from_slice(&msg_data, varint)?;
 
         let data = if let MultiplexMsg::Data { .. } = &msg {
             match stream.next().await {
@@ -487,11 +487,12 @@ where
     ) -> Result<(u8, ExchangedCfg), ChMuxError<TransportSinkError, TransportStreamError>> {
         // Say hello to remote endpoint and send our configuration.
         let send_task = async {
-            Self::feed_msg(TransportMsg::new(MultiplexMsg::Reset), sink).await?;
+            Self::feed_msg(TransportMsg::new(MultiplexMsg::Reset), sink, false).await?;
             Self::flush(sink).await?;
             Self::feed_msg(
                 TransportMsg::new(MultiplexMsg::Hello { version: PROTOCOL_VERSION, cfg: exchanged_cfg }),
                 sink,
+                false,
             )
             .await?;
             Self::flush(sink).await?;
@@ -501,7 +502,7 @@ where
         // Receive hello and configuration from remote endpoint.
         let recv_task = async {
             loop {
-                match Self::recv_msg(stream).await {
+                match Self::recv_msg(stream, false).await {
                     Ok(TransportMsg { msg: MultiplexMsg::Hello { version, cfg }, .. }) => {
                         break Ok((version, cfg));
                     }
@@ -661,7 +662,7 @@ where
     /// Automatically sends pings if no data is to be transmitted.
     async fn send_task(
         mut sink: &mut TransportSink, ping_interval: Option<Duration>, flush_interval: Option<Duration>,
-        mut rx: mpsc::Receiver<SendReq>, mut high_priority_rx: mpsc::Receiver<SendReq>,
+        mut rx: mpsc::Receiver<SendReq>, mut high_priority_rx: mpsc::Receiver<SendReq>, varint: bool,
     ) -> Result<(), ChMuxError<TransportSinkError, TransportStreamError>> {
         async fn sleep_opt(duration: Option<Duration>) {
             match duration {
@@ -689,7 +690,7 @@ where
                 msg_opt = rx.recv() => msg_opt,
 
                 () = &mut next_ping => {
-                    Self::feed_msg(TransportMsg::new(MultiplexMsg::Ping), sink).await?;
+                    Self::feed_msg(TransportMsg::new(MultiplexMsg::Ping), sink, varint).await?;
                     next_ping.set(sleep_opt(ping_interval));
                     need_flush = true;
                     continue;
@@ -700,11 +701,11 @@ where
 
             match req_opt {
                 Some(SendReq::Feed(goodbye_msg @ TransportMsg { msg: MultiplexMsg::Goodbye, .. })) => {
-                    Self::feed_msg(goodbye_msg, sink).await?;
+                    Self::feed_msg(goodbye_msg, sink, varint).await?;
                     break;
                 }
                 Some(SendReq::Feed(msg)) => {
-                    Self::feed_msg(msg, sink).await?;
+                    Self::feed_msg(msg, sink, varint).await?;
                     next_ping.set(sleep_opt(ping_interval));
                     if !need_flush {
                         need_flush = true;
@@ -737,6 +738,7 @@ where
     /// Watches the connection timeout.
     async fn recv_task(
         stream: &mut TransportStream, connection_timeout: Option<Duration>, tx: mpsc::Sender<TransportMsg>,
+        varint: bool,
     ) -> Result<(), ChMuxError<TransportSinkError, TransportStreamError>> {
         async fn get_connection_timeout(connection_timeout: Option<Duration>) {
             match connection_timeout {
@@ -751,7 +753,7 @@ where
             tokio::select! {
                 biased;
 
-                msg = Self::recv_msg(stream) => {
+                msg = Self::recv_msg(stream, varint) => {
                     let msg = msg?;
                     let is_goodbye = matches!(&msg, TransportMsg {msg: MultiplexMsg::Goodbye, ..});
                     tx_permit.send(msg);
@@ -787,13 +789,20 @@ where
             self.local_cfg.flush_interval,
             send_rx,
             high_priority_send_rx,
+            self.remote_cfg.varint,
         )
         .fuse();
         pin_mut!(send_task);
 
         // Create receive over transport task.
         let (recv_tx, mut recv_rx) = mpsc::channel(self.local_cfg.transport_receive_queue);
-        let recv_task = Self::recv_task(&mut transport_stream, self.local_cfg.connection_timeout, recv_tx).fuse();
+        let recv_task = Self::recv_task(
+            &mut transport_stream,
+            self.local_cfg.connection_timeout,
+            recv_tx,
+            self.remote_cfg.varint,
+        )
+        .fuse();
         pin_mut!(recv_task);
 
         // Setup channels.

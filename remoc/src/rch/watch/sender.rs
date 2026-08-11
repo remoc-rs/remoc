@@ -414,11 +414,11 @@ where
 
         let port = PortSerializer::connect_port(async move |connect| {
             // Sender has been dropped after sending, so we receive its channels.
-            let SenderInner { tx, remote_send_err_rx, current_err, receiver_rate_limit_rx, .. } =
-                match successor_rx.await {
-                    Ok(inner) => inner,
-                    Err(_) => return,
-                };
+            let Ok(SenderInner { tx, remote_send_err_rx, current_err, receiver_rate_limit_rx, .. }) =
+                successor_rx.await
+            else {
+                return;
+            };
             let remote_send_err_rx = remote_send_err_rx.into_inner().unwrap();
             let current_err = current_err.into_inner().unwrap();
 

@@ -5,7 +5,7 @@ use std::{error::Error, fmt, future::Future};
 use crate::{
     chmux::ChMuxError,
     connect::ConnectError,
-    exec,
+    exec::{self, MaybeSend},
     rch::base::{RecvError, SendError},
 };
 
@@ -132,8 +132,120 @@ where
 
 /// Convenience methods for connection handling.
 ///
-/// This trait is implemented for the return value of any [Connect] method
-/// using the default codec and a transport with `'static` lifetime.
+/// This trait is implemented for the return value of the [Connect::io] and [Connect::framed]
+/// methods, when the default codec is used and the transport has `'static` lifetime.
+///
+/// [provide](Self::provide) and [consume](Self::consume) are a matching pair:
+/// one endpoint provides a single value and the other consumes it.
+/// This is especially convenient together with [remote trait calling](crate::rtc),
+/// where the server provides the client of a remote object and the client consumes it.
+/// Both methods spawn the connection dispatcher, so there is no connection future
+/// left to take care of.
+///
+/// # Example
+///
+/// In the following example the trait `Counter` is made remotely callable.
+/// The server listens on TCP port 9878 and the client connects to it.
+///
+/// The server creates a `CounterObj`, obtains a `CounterServerSharedMut` and a
+/// `CounterClient` for it and *provides* the client to the remote endpoint.
+/// The client *consumes* that client and calls trait methods on it.
+///
+/// A fully worked version of this example, split into separate client and server crates,
+/// is available in the
+/// [examples directory](https://github.com/remoc-rs/remoc/tree/master/examples/rtc).
+#[cfg_attr(
+    feature = "rtc",
+    doc = r##"
+```
+use std::{net::Ipv4Addr, sync::Arc};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::RwLock;
+use remoc::prelude::*;
+use remoc::rtc::CallError;
+
+// Trait defining the remote service.
+#[rtc::remote]
+pub trait Counter {
+    async fn value(&self) -> Result<u32, CallError>;
+    async fn increase(&mut self, by: u32) -> Result<(), CallError>;
+}
+
+// Server implementation object.
+pub struct CounterObj {
+    value: u32,
+}
+
+impl Counter for CounterObj {
+    async fn value(&self) -> Result<u32, CallError> {
+        Ok(self.value)
+    }
+
+    async fn increase(&mut self, by: u32) -> Result<(), CallError> {
+        self.value += by;
+        Ok(())
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    // For demonstration we run both client and server in
+    // the same process. In real life connect_client() and
+    // connect_server() would run on different machines.
+    tokio::join!(connect_client(), connect_server());
+}
+
+// This would be run on the client.
+async fn connect_client() {
+    // Wait for server to be ready.
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+    // Establish TCP connection.
+    let socket = TcpStream::connect((Ipv4Addr::LOCALHOST, 9878)).await.unwrap();
+    let (socket_rx, socket_tx) = socket.into_split();
+
+    // Establish Remoc connection over TCP and consume (i.e. receive)
+    // the counter client from the server.
+    let mut counter: CounterClient =
+        remoc::Connect::io(remoc::Cfg::default(), socket_rx, socket_tx)
+            .consume()
+            .await
+            .unwrap();
+
+    // Call methods on the remote object.
+    assert_eq!(counter.value().await.unwrap(), 0);
+    counter.increase(5).await.unwrap();
+    assert_eq!(counter.value().await.unwrap(), 5);
+}
+
+// This would be run on the server.
+async fn connect_server() {
+    // Listen for incoming TCP connection.
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 9878)).await.unwrap();
+    let (socket, _) = listener.accept().await.unwrap();
+    let (socket_rx, socket_tx) = socket.into_split();
+
+    // Create the server and client for the counter object.
+    //
+    // Current limitations of the Rust compiler require that we explicitly
+    // specify the codec.
+    let counter_obj = Arc::new(RwLock::new(CounterObj { value: 0 }));
+    let (server, client) =
+        CounterServerSharedMut::<_, remoc::codec::Default>::new(counter_obj, 1);
+
+    // Establish Remoc connection over TCP and provide (i.e. send)
+    // the counter client to the client.
+    remoc::Connect::io(remoc::Cfg::default(), socket_rx, socket_tx)
+        .provide(client)
+        .await
+        .unwrap();
+
+    // Serve incoming method calls until the client disconnects.
+    server.serve(true).await.unwrap();
+}
+```
+"##
+)]
 #[cfg_attr(docsrs, doc(cfg(feature = "rch")))]
 pub trait ConnectExt<T, TransportSinkError, TransportStreamError> {
     /// Establishes the connection and provides a single value to the remote endpoint.
@@ -146,7 +258,7 @@ pub trait ConnectExt<T, TransportSinkError, TransportStreamError> {
     /// the remote endpoint.
     fn provide(
         self, value: T,
-    ) -> impl Future<Output = Result<(), ProvideError<TransportSinkError, TransportStreamError>>> + Send;
+    ) -> impl Future<Output = Result<(), ProvideError<TransportSinkError, TransportStreamError>>> + MaybeSend;
 
     /// Establishes the connection and consumes a single value from the remote endpoint.
     ///
@@ -158,25 +270,29 @@ pub trait ConnectExt<T, TransportSinkError, TransportStreamError> {
     /// the remote endpoint.
     fn consume(
         self,
-    ) -> impl Future<Output = Result<T, ConsumeError<TransportSinkError, TransportStreamError>>> + Send;
+    ) -> impl Future<Output = Result<T, ConsumeError<TransportSinkError, TransportStreamError>>> + MaybeSend;
 }
 
-impl<TransportSinkError, TransportStreamError, T, ConnectFuture>
+impl<TransportSinkError, TransportStreamError, T, ConnectFuture, ConnectionFuture>
     ConnectExt<T, TransportSinkError, TransportStreamError> for ConnectFuture
 where
     T: RemoteSend,
     TransportSinkError: Send + Error + 'static,
     TransportStreamError: Send + Error + 'static,
+    ConnectionFuture: Future<Output = Result<(), ChMuxError<TransportSinkError, TransportStreamError>>>
+        + Unpin
+        + MaybeSend
+        + 'static,
     ConnectFuture: Future<
             Output = Result<
                 (
-                    Connect<'static, TransportSinkError, TransportStreamError>,
+                    Connect<ConnectionFuture>,
                     base::Sender<T, crate::codec::Default>,
                     base::Receiver<T, crate::codec::Default>,
                 ),
                 ConnectError<TransportSinkError, TransportStreamError>,
             >,
-        > + Send,
+        > + MaybeSend,
 {
     async fn provide(self, value: T) -> Result<(), ProvideError<TransportSinkError, TransportStreamError>> {
         use tracing::Instrument;

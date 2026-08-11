@@ -331,9 +331,9 @@ impl<TransportSink, TransportStream> fmt::Debug for ChMux<TransportSink, Transpo
 impl<TransportSink, TransportSinkError, TransportStream, TransportStreamError>
     ChMux<TransportSink, TransportStream>
 where
-    TransportSink: Sink<Bytes, Error = TransportSinkError> + Send + Unpin,
+    TransportSink: Sink<Bytes, Error = TransportSinkError> + Unpin,
     TransportSinkError: Error + Send + Sync + 'static,
-    TransportStream: Stream<Item = Result<Bytes, TransportStreamError>> + Send + Unpin,
+    TransportStream: Stream<Item = Result<Bytes, TransportStreamError>> + Unpin,
     TransportStreamError: Error + Send + Sync + 'static,
 {
     /// Creates a new multiplexer.

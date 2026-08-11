@@ -1,7 +1,10 @@
 //! Initial connection functions.
 
 use bytes::Bytes;
-use futures::{Future, FutureExt, Sink, Stream, StreamExt, TryStreamExt, future::BoxFuture};
+use futures::{
+    Future, FutureExt, Sink, Stream, StreamExt, TryStreamExt,
+    future::{BoxFuture, LocalBoxFuture},
+};
 use std::{
     convert::Infallible,
     error::Error,
@@ -75,6 +78,9 @@ impl<TransportSinkError, TransportStreamError> From<base::ConnectError>
 /// Methods for establishing a connection over a physical transport.
 ///
 /// You must poll the returned [Connect] future or spawn it onto a task for the connection to work.
+/// If you only want to exchange a single value, such as an [RTC](crate::rtc) client, the
+/// [provide](crate::ConnectExt::provide) and [consume](crate::ConnectExt::consume) methods
+/// from the [ConnectExt](crate::ConnectExt) trait do this for you.
 ///
 /// # Physical transport
 ///
@@ -114,12 +120,22 @@ impl<TransportSinkError, TransportStreamError> From<base::ConnectError>
 /// They streamline connection handling when a single value, such as a [RTC](crate::rtc) client,
 /// should be exchanged over the connection and the flexibility of a base channel is not necessary.
 ///
+/// [ConnectExt::provide](crate::ConnectExt::provide) sends a single value to the remote endpoint
+/// and [ConnectExt::consume](crate::ConnectExt::consume) receives it there.
+/// Both establish the connection and spawn its dispatcher, so no [Connect] future is left to
+/// take care of.
+/// See the [ConnectExt](crate::ConnectExt) documentation for a worked example using
+/// [remote trait calling](crate::rtc).
+///
 /// # Example
 ///
 /// In the following example the server listens on TCP port 9875 and the client connects to it.
 /// Then both ends establish a Remoc connection using [Connect::io] over the TCP connection.
 /// The connection dispatchers are spawned onto new tasks and the `client` and `server` functions
 /// are called with the established [base channel](crate::rch::base).
+///
+/// See also the [ConnectExt example](crate::ConnectExt#example), especially if you want to
+/// exchange an [remotely callable trait](crate::rtc) client.
 ///
 /// ```
 /// use std::net::Ipv4Addr;
@@ -183,43 +199,58 @@ impl<TransportSinkError, TransportStreamError> From<base::ConnectError>
 /// ```
 #[cfg_attr(docsrs, doc(cfg(feature = "rch")))]
 #[must_use = "You must poll or spawn the Connect future for the connection to work."]
-pub struct Connect<'transport, TransportSinkError, TransportStreamError>(
-    BoxFuture<'transport, Result<(), ChMuxError<TransportSinkError, TransportStreamError>>>,
-);
+pub struct Connect<F>(F);
 
-impl<'transport, TransportSinkError, TransportStreamError>
-    Connect<'transport, TransportSinkError, TransportStreamError>
-{
+/// A [connection](Connect) with a boxed connection future.
+///
+/// Obtain it using [Connect::boxed].
+#[cfg_attr(docsrs, doc(cfg(feature = "rch")))]
+pub type BoxConnect<'transport, TransportSinkError, TransportStreamError> =
+    Connect<BoxFuture<'transport, Result<(), ChMuxError<TransportSinkError, TransportStreamError>>>>;
+
+/// A [connection](Connect) with a boxed connection future that is not [Send].
+///
+/// Obtain it using [Connect::boxed_local].
+#[cfg_attr(docsrs, doc(cfg(feature = "rch")))]
+pub type LocalBoxConnect<'transport, TransportSinkError, TransportStreamError> =
+    Connect<LocalBoxFuture<'transport, Result<(), ChMuxError<TransportSinkError, TransportStreamError>>>>;
+
+impl Connect<()> {
     /// Establishes a connection over a framed transport (a [sink](Sink) and a [stream](Stream) of binary data) and
     /// returns a remote [sender](base::Sender) and [receiver](base::Receiver).
     ///
     /// This establishes a [chmux](crate::chmux) connection over the transport and opens a remote channel.
     ///
     /// You must poll the returned [Connect] future or spawn it for the connection to work.
+    /// Alternatively, use [provide](crate::ConnectExt::provide) or
+    /// [consume](crate::ConnectExt::consume) to exchange a single value over the connection,
+    /// which takes care of this for you.
     ///
     /// # Panics
     /// Panics if the chmux configuration is invalid.
-    pub async fn framed<TransportSink, TransportStream, Tx, Rx, Codec>(
+    pub async fn framed<TransportSink, TransportSinkError, TransportStream, TransportStreamError, Tx, Rx, Codec>(
         cfg: crate::Cfg, transport_sink: TransportSink, transport_stream: TransportStream,
     ) -> Result<
         (
-            Connect<'transport, TransportSinkError, TransportStreamError>,
+            Connect<
+                impl Future<Output = Result<(), ChMuxError<TransportSinkError, TransportStreamError>>> + Unpin,
+            >,
             base::Sender<Tx, Codec>,
             base::Receiver<Rx, Codec>,
         ),
         ConnectError<TransportSinkError, TransportStreamError>,
     >
     where
-        TransportSink: Sink<Bytes, Error = TransportSinkError> + Send + Sync + Unpin + 'transport,
+        TransportSink: Sink<Bytes, Error = TransportSinkError> + Unpin,
         TransportSinkError: Error + Send + Sync + 'static,
-        TransportStream: Stream<Item = Result<Bytes, TransportStreamError>> + Send + Sync + Unpin + 'transport,
+        TransportStream: Stream<Item = Result<Bytes, TransportStreamError>> + Unpin,
         TransportStreamError: Error + Send + Sync + 'static,
         Tx: RemoteSend,
         Rx: RemoteSend,
         Codec: codec::Codec,
     {
         let (mux, client, mut listener) = ChMux::new(cfg, transport_sink, transport_stream).await?;
-        let mut connection = Self(mux.run().boxed());
+        let mut connection = Connect(Box::pin(mux.run()));
 
         tokio::select! {
             biased;
@@ -232,9 +263,7 @@ impl<'transport, TransportSinkError, TransportStreamError>
             }
         }
     }
-}
 
-impl<'transport> Connect<'transport, io::Error, io::Error> {
     /// Establishes a buffered connection over an IO transport (an [AsyncRead] and [AsyncWrite]) and
     /// returns a remote [sender](base::Sender) and [receiver](base::Receiver).
     ///
@@ -245,18 +274,25 @@ impl<'transport> Connect<'transport, io::Error, io::Error> {
     /// by [`Cfg::io_buffer_size`](crate::Cfg::io_buffer_size).
     ///
     /// You must poll the returned [Connect] future or spawn it for the connection to work.
+    /// Alternatively, use [provide](crate::ConnectExt::provide) or
+    /// [consume](crate::ConnectExt::consume) to exchange a single value over the connection,
+    /// which takes care of this for you.
     ///
     /// # Panics
     /// Panics if the chmux configuration is invalid.
     pub async fn io<Read, Write, Tx, Rx, Codec>(
         mut cfg: crate::Cfg, input: Read, output: Write,
     ) -> Result<
-        (Connect<'transport, io::Error, io::Error>, base::Sender<Tx, Codec>, base::Receiver<Rx, Codec>),
+        (
+            Connect<impl Future<Output = Result<(), ChMuxError<io::Error, io::Error>>> + Unpin>,
+            base::Sender<Tx, Codec>,
+            base::Receiver<Rx, Codec>,
+        ),
         ConnectError<io::Error, io::Error>,
     >
     where
-        Read: AsyncRead + Send + Sync + Unpin + 'transport,
-        Write: AsyncWrite + Send + Sync + Unpin + 'transport,
+        Read: AsyncRead + Unpin,
+        Write: AsyncWrite + Unpin,
         Tx: RemoteSend,
         Rx: RemoteSend,
         Codec: codec::Codec,
@@ -276,13 +312,34 @@ impl<'transport> Connect<'transport, io::Error, io::Error> {
 
         cfg.io_frame_len_varint = Some(varint);
 
-        Self::framed(cfg, transport_sink, transport_stream).await
+        Connect::framed(cfg, transport_sink, transport_stream).await
     }
 }
 
-impl<TransportSinkError, TransportStreamError> Future for Connect<'_, TransportSinkError, TransportStreamError> {
+impl<F, TransportSinkError, TransportStreamError> Connect<F>
+where
+    F: Future<Output = Result<(), ChMuxError<TransportSinkError, TransportStreamError>>> + Unpin,
+{
+    /// Boxes the connection future.
+    pub fn boxed<'transport>(self) -> BoxConnect<'transport, TransportSinkError, TransportStreamError>
+    where
+        F: Send + 'transport,
+    {
+        Connect(self.0.boxed())
+    }
+
+    /// Boxes the connection future, without requiring it to be [Send].
+    pub fn boxed_local<'transport>(self) -> LocalBoxConnect<'transport, TransportSinkError, TransportStreamError>
+    where
+        F: 'transport,
+    {
+        Connect(self.0.boxed_local())
+    }
+}
+
+impl<F: Future + Unpin> Future for Connect<F> {
     /// Result of connection after it has been terminated.
-    type Output = Result<(), ChMuxError<TransportSinkError, TransportStreamError>>;
+    type Output = F::Output;
 
     /// This future runs the dispatcher for this connection.
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
@@ -294,7 +351,7 @@ type LoopbackSendError = futures::channel::mpsc::SendError;
 type LoopbackRecvError = Infallible;
 
 /// A loopback connection.
-pub type LoopbackConnect = Connect<'static, LoopbackSendError, LoopbackRecvError>;
+pub type LoopbackConnect = BoxConnect<'static, LoopbackSendError, LoopbackRecvError>;
 
 impl LoopbackConnect {
     /// Establishes a connection over a local loopback transport and
@@ -321,12 +378,12 @@ impl LoopbackConnect {
         let b_transport_rx = b_transport_rx.map(Ok);
 
         let ((a_connect, a_base_tx, _a_base_rx), (b_connect, _b_base_tx, b_base_rx)) = tokio::try_join!(
-            Self::framed::<_, _, _, (), _>(cfg.clone(), a_transport_tx, b_transport_rx),
-            Self::framed::<_, _, (), _, _>(cfg.clone(), b_transport_tx, a_transport_rx),
+            Connect::framed::<_, _, _, _, _, (), _>(cfg.clone(), a_transport_tx, b_transport_rx),
+            Connect::framed::<_, _, _, _, (), _, _>(cfg.clone(), b_transport_tx, a_transport_rx),
         )
         .unwrap();
 
-        let connection = Self(
+        let connection = Connect(
             async move {
                 tokio::try_join!(a_connect, b_connect)?;
                 Ok(())

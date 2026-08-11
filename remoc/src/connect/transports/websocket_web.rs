@@ -2,7 +2,7 @@ use bytes::Bytes;
 use futures::{SinkExt, StreamExt, future};
 use remoc::prelude::*;
 use std::io;
-use threadporter::thread_bound;
+use wasm_bindgen_futures::spawn_local;
 use websocket_web::{Msg, WebSocket};
 
 /// Connects to a Remoc endpoint exposed over WebSocket from within a web browser.
@@ -26,12 +26,11 @@ pub async fn connect(
     });
 
     // The browser WebSocket is a JavaScript object and thus neither `Send` nor `Sync`,
-    // so it is bound to the current thread to satisfy the bounds of `Connect::framed`.
-    let transport_tx = thread_bound(transport_tx);
-    let transport_rx = thread_bound(transport_rx);
-
+    // so the connection future must be spawned onto the current thread.
     let (conn, tx, rx) = remoc::Connect::framed(remoc::Cfg::default(), transport_tx, transport_rx).await?;
-    remoc::exec::spawn(conn);
+    spawn_local(async move {
+        let _ = conn.await;
+    });
 
     Ok((tx, rx))
 }

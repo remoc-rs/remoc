@@ -17,6 +17,32 @@ pub use js::*;
 
 pub use task::spawn;
 
+/// The [Send] bound required to [spawn] a task on this platform.
+///
+/// On native platforms tasks may be moved between threads, thus this requires [Send].
+///
+/// In a JavaScript runtime environment (crate feature `js`) tasks are spawned onto the
+/// current thread, thus this imposes no requirement and is implemented for every type.
+/// This allows working with values that are not [Send], such as JavaScript objects.
+#[cfg(not(feature = "js"))]
+pub trait MaybeSend: Send {}
+
+#[cfg(not(feature = "js"))]
+impl<T: Send + ?Sized> MaybeSend for T {}
+
+/// The [Send] bound required to [spawn] a task on this platform.
+///
+/// On native platforms tasks may be moved between threads, thus this requires [Send].
+///
+/// In a JavaScript runtime environment (crate feature `js`) tasks are spawned onto the
+/// current thread, thus this imposes no requirement and is implemented for every type.
+/// This allows working with values that are not [Send], such as JavaScript objects.
+#[cfg(feature = "js")]
+pub trait MaybeSend {}
+
+#[cfg(feature = "js")]
+impl<T: ?Sized> MaybeSend for T {}
+
 /// Whether threads are available and working on this platform.
 pub async fn are_threads_available() -> bool {
     use tokio::sync::{OnceCell, oneshot};

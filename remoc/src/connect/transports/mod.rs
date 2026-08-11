@@ -93,9 +93,8 @@ pub mod tls {}
 ///
 /// Within a web browser the WebSocket of the browser itself is used, via
 /// [websocket-web](https://docs.rs/websocket-web).
-/// Since it is a JavaScript object it is neither [Send] nor [Sync], so it is wrapped
-/// using [threadporter::thread_bound](https://docs.rs/threadporter/latest/threadporter/fn.thread_bound.html)
-/// to satisfy the bounds of [Connect::framed](super::Connect::framed).
+/// The connection is spawned onto the browser's event loop
+/// using [wasm_bindgen_futures::spawn_local](https://docs.rs/wasm-bindgen-futures/latest/wasm_bindgen_futures/fn.spawn_local.html).
 #[doc = "```ignore"]
 #[doc = include_str!("websocket_web.rs")]
 #[doc = "```"]

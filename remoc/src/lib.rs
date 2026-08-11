@@ -79,6 +79,10 @@
 //! Both hand you a [base channel](rch::base), over which all further channels and
 //! remote objects are exchanged.
 //!
+//! If a single value is all you need to exchange, for example an [RTC](rtc) client,
+//! [ConnectExt::provide] and [ConnectExt::consume] establish the connection, transfer that
+//! value and spawn the connection dispatcher for you.
+//!
 //! The [transports] module contains worked examples for TCP, TLS, WebSocket,
 //! pipes to a child process and aggregated, failure-resilient links.
 //!
@@ -270,7 +274,7 @@ pub use connect::transports;
 #[cfg(feature = "rch")]
 #[cfg_attr(docsrs, doc(cfg(feature = "rch")))]
 pub use connect::{
-    Connect, ConnectError, LoopbackConnect,
+    BoxConnect, Connect, ConnectError, LocalBoxConnect, LoopbackConnect,
     ext::{ConnectExt, ConsumeError, ProvideError},
 };
 

@@ -18,5 +18,5 @@ remoc = { path = "../../remoc", features = ["js"] }
 
 bytes = "1"
 futures = "0.3"
-threadporter = "0.1"
+wasm-bindgen-futures = "0.4"
 websocket-web = "0.1"

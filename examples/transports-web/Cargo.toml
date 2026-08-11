@@ -1,0 +1,22 @@
+[package]
+name = "remoc-transports-web-example"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# This crate exists solely to compile-check the transport snippets that are
+# embedded into the documentation of `remoc::connect::transports` and that
+# target a JavaScript runtime environment, i.e. a web browser.
+# It is excluded from the Remoc workspace so that its dependencies never
+# affect the Remoc crate itself.
+#
+# Check it using:
+#   cargo check --manifest-path examples/transports-web/Cargo.toml --target wasm32-unknown-unknown
+
+[dependencies]
+remoc = { path = "../../remoc", features = ["js"] }
+
+bytes = "1"
+futures = "0.3"
+threadporter = "0.1"
+websocket-web = "0.1"

@@ -75,8 +75,8 @@ pub mod tcp {}
 #[doc = "```"]
 pub mod tls {}
 
-/// WebSocket, using [tokio-tungstenite](https://docs.rs/tokio-tungstenite) or
-/// [axum](https://docs.rs/axum).
+/// WebSocket, using [tokio-tungstenite](https://docs.rs/tokio-tungstenite),
+/// [axum](https://docs.rs/axum) or [websocket-web](https://docs.rs/websocket-web).
 ///
 /// A WebSocket is message-oriented rather than byte-oriented, so it is used with
 /// [Connect::framed](super::Connect::framed) and each chmux packet is carried as one
@@ -87,6 +87,17 @@ pub mod tls {}
 /// # Client
 #[doc = "```ignore"]
 #[doc = include_str!("websocket_client.rs")]
+#[doc = "```"]
+///
+/// # Web client
+///
+/// Within a web browser the WebSocket of the browser itself is used, via
+/// [websocket-web](https://docs.rs/websocket-web).
+/// Since it is a JavaScript object it is neither [Send] nor [Sync], so it is wrapped
+/// using [threadporter::thread_bound](https://docs.rs/threadporter/latest/threadporter/fn.thread_bound.html)
+/// to satisfy the bounds of [Connect::framed](super::Connect::framed).
+#[doc = "```ignore"]
+#[doc = include_str!("websocket_web.rs")]
 #[doc = "```"]
 ///
 /// # Server

@@ -77,6 +77,27 @@ jobs:
           cargo check --manifest-path examples/rtc/counter-server/Cargo.toml
           cargo check --manifest-path examples/transports/Cargo.toml
 
+  check-examples-web:
+    name: Check web examples
+    needs: [msrv]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v7
+
+      - name: Install nightly Rust
+        run: |
+          rustup install nightly
+          rustup target add --toolchain nightly wasm32-unknown-unknown
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check web examples
+        run: |
+          cargo +nightly check --manifest-path examples/transports-web/Cargo.toml --target wasm32-unknown-unknown
+
   clippy:
     name: Clippy
     needs: [msrv]

@@ -111,24 +111,21 @@ The following features are available:
   * `rtc` enables remote trait calling provided by the `rtc` module.
 
 The meta-feature `full` enables all features from above but no codecs.
+By default the `full` feature is enabled.
 
-The following features enable data formats for transmission:
+### Data formats for transmission (codecs)
 
-  * `codec-bincode` provides the Bincode 1 and 2 formats (use `default-codec-bincode` 
-    or `default-codec-bincode2` for selecting a default codec).
-  * `codec-ciborium` provides the CBOR format.
-  * `codec-json` provides the JSON format.
-  * `codec-message-pack` provides the MessagePack format.
-  * `codec-postbag` provides the Postbag formats.
-  * `codec-postcard` provides the Postcard format.
+The following features enable additional data formats (codecs) for transmission:
 
-The feature `default-codec-*` selects the respective codec as default.
-At most one of this must be selected and this should only be used by
-applications, not libraries.
+  * `codec-bincode` provides the Bincode 1 and 2 formats 
+  * `codec-ciborium` provides the CBOR format
+  * `codec-json` provides the JSON format
+  * `codec-message-pack` provides the MessagePack format
+  * `codec-postcard` provides the Postcard format
 
-The feature `full-codecs` enables all codecs.
+The feature `full-codecs` enables all data formats.
 
-By default all features are enabled and the Postbag codec is used as default.
+The [Postbag codec](https://crates.io/crates/postbag) is always available and used by default.
 
 ### JavaScript and web support
 

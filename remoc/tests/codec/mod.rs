@@ -85,14 +85,12 @@ where
     assert_eq!(deser, data);
 }
 
-#[cfg(feature = "codec-postbag")]
 #[cfg_attr(not(feature = "js"), test)]
 #[cfg_attr(feature = "js", wasm_bindgen_test)]
 fn postbag() {
     roundtrip::<TestStruct, codec::Postbag>()
 }
 
-#[cfg(feature = "codec-postbag")]
 #[cfg_attr(not(feature = "js"), test)]
 #[cfg_attr(feature = "js", wasm_bindgen_test)]
 fn postbag_slim() {
@@ -140,4 +138,46 @@ fn message_pack() {
 #[cfg_attr(feature = "js", wasm_bindgen_test)]
 fn postcard() {
     roundtrip::<TestStruct, codec::Postcard>()
+}
+
+#[cfg_attr(not(feature = "js"), test)]
+#[cfg_attr(feature = "js", wasm_bindgen_test)]
+fn postbag_depth_limit() {
+    use remoc::codec::{Codec, Postbag, PostbagSlim, PostbagWith};
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Serialize, Deserialize, Debug, PartialEq)]
+    enum Tree {
+        Leaf,
+        Node(Box<Tree>),
+    }
+
+    fn nested(depth: usize) -> Tree {
+        let mut tree = Tree::Leaf;
+        for _ in 0..depth {
+            tree = Tree::Node(Box::new(tree));
+        }
+        tree
+    }
+
+    fn roundtrip<C: Codec>(value: &Tree) -> Result<Tree, String> {
+        let mut buf = Vec::new();
+        <C as Codec>::serialize(&mut buf, value).map_err(|err| err.to_string())?;
+        <C as Codec>::deserialize(buf.as_slice()).map_err(|err| err.to_string())
+    }
+
+    // Default limit rejects deeply nested data.
+    let deep = nested(200);
+    assert!(roundtrip::<Postbag>(&deep).is_err());
+    assert!(roundtrip::<PostbagSlim>(&deep).is_err());
+
+    // Raised limit accepts it, through both the alias and the explicit form.
+    assert_eq!(roundtrip::<Postbag<4096>>(&deep).unwrap(), deep);
+    assert_eq!(roundtrip::<PostbagSlim<4096>>(&deep).unwrap(), deep);
+    assert_eq!(roundtrip::<PostbagWith<true, 4096>>(&deep).unwrap(), deep);
+
+    // Shallow data still works with the default codecs.
+    let shallow = nested(4);
+    assert_eq!(roundtrip::<Postbag>(&shallow).unwrap(), shallow);
+    assert_eq!(roundtrip::<PostbagSlim>(&shallow).unwrap(), shallow);
 }

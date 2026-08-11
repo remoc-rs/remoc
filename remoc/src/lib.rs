@@ -301,7 +301,7 @@ mod provider;
 pub use provider::Provider;
 
 #[doc(hidden)]
-#[cfg(all(feature = "rch", feature = "default-codec-set"))]
+#[cfg(feature = "rch")]
 pub mod doctest;
 
 mod util;

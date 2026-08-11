@@ -16,31 +16,16 @@
 //! the JSON codec is only available if the crate features `codec-json` is enabled.
 //! The crate feature `full-codecs` enables all codecs.
 //!
-//! The default codec, named [Default](struct@Default), can be selected by enabling the
-//! appropriate `default-codec-*` crate feature.
-//! For example, if you want to use the JSON codec by default, enable the crate feature
-//! `default-codec-json`.
-//! Only one default codec feature must be enabled, otherwise a compile error will occur.
-//! The default codec should only be selected by an application and not a library crate
-//! that uses Remoc.
-//! Otherwise a conflict between multiple libraries that depend upon different default
-//! codecs will occur.
+//! The following features enable additional codecs:
 //!
-//! The following features select the default codec.
+//!   * `codec-bincode` -- enables the Bincode 1 codec
+//!   * `codec-bincode2` -- enables the Bincode 2 codec
+//!   * `codec-ciborium` -- enables the CBOR codec
+//!   * `codec-json` -- enables the JSON codec
+//!   * `codec-message-pack` -- enables the MessagePack codec
+//!   * `codec-postcard` -- enables the Postcard codec
 //!
-//!   * `default-codec-bincode` -- enables and selects Bincode 1 as the default codec
-//!   * `default-codec-bincode2` -- enables and selects Bincode 2 as the default codec
-//!   * `default-codec-ciborium` -- enables and selects CBOR as the default codec
-//!   * `default-codec-json` -- enables and selects JSON as the default codec
-//!   * `default-codec-message-pack` -- enables and selects MessagePack as the default codec
-//!   * `default-codec-postbag` -- enables and selects Postbag with full configuration as the default codec
-//!   * `default-codec-postbag-slim` -- enables and selects Postbag with slim configuration as the default codec
-//!   * `default-codec-postcard` -- enables and selects Postcard as the default codec
-//!
-//! By default the Postbag codec is enabled and the default, i.e. the `default-codec-postbag`
-//! crate feature is enabled.
-//! Thus to change the default codec, you must specify `default-features = false` when
-//! referencing Remoc in your `Cargo.toml`.
+//! The [Postbag codecs](Postbag) are always available.
 //!
 //! # Transferring binary data efficiently
 //!
@@ -395,25 +380,11 @@ where
 // Codecs
 // ============================================================================
 
-#[cfg(feature = "codec-postbag")]
 mod postbag;
-#[cfg(feature = "default-codec-postbag")]
-#[doc(no_inline)]
-pub use postbag::Postbag as Default;
-#[cfg(feature = "default-codec-postbag-slim")]
-#[doc(no_inline)]
-pub use postbag::PostbagSlim as Default;
-#[cfg(feature = "codec-postbag")]
-pub use postbag::{Postbag, PostbagSlim};
+pub use postbag::{Postbag, PostbagSlim, PostbagWith};
 
 #[cfg(feature = "codec-bincode")]
 mod bincode;
-#[cfg(feature = "default-codec-bincode")]
-#[doc(no_inline)]
-pub use self::bincode::Bincode as Default;
-#[cfg(feature = "default-codec-bincode2")]
-#[doc(no_inline)]
-pub use self::bincode::Bincode2 as Default;
 #[cfg(feature = "codec-bincode")]
 pub use self::bincode::{Bincode, Bincode2};
 
@@ -421,38 +392,63 @@ pub use self::bincode::{Bincode, Bincode2};
 mod ciborium;
 #[cfg(feature = "codec-ciborium")]
 pub use self::ciborium::Ciborium;
-#[cfg(feature = "default-codec-ciborium")]
-#[doc(no_inline)]
-pub use self::ciborium::Ciborium as Default;
 
 #[cfg(feature = "codec-json")]
 mod json;
 #[cfg(feature = "codec-json")]
 pub use json::Json;
-#[cfg(feature = "default-codec-json")]
-#[doc(no_inline)]
-pub use json::Json as Default;
 
 #[cfg(feature = "codec-message-pack")]
 mod message_pack;
 #[cfg(feature = "codec-message-pack")]
 pub use message_pack::MessagePack;
-#[cfg(feature = "default-codec-message-pack")]
-#[doc(no_inline)]
-pub use message_pack::MessagePack as Default;
 
 #[cfg(feature = "codec-postcard")]
 mod postcard;
 #[cfg(feature = "codec-postcard")]
 pub use postcard::Postcard;
-#[cfg(feature = "default-codec-postcard")]
-#[doc(no_inline)]
-pub use postcard::Postcard as Default;
 
-/// Default codec is not set and cannot be used.
-///
-/// Set one of the crate features `default-codec-*` to define the default codec.
-///
-/// This will cause a compile error when you attempt to use it.
-#[cfg(not(feature = "default-codec-set"))]
-pub struct Default;
+// Select the default codec.
+//
+// Changing the default codec via Cargo features is deprecated.
+cfg_select! {
+    feature = "default-codec-postbag-slim" => {
+        /// Default codec is [PostbagSlim].
+        #[deprecated = "changing the default codec via the default-codec-* feature is deprecated"]
+        pub type Default = postbag::PostbagSlim;
+    }
+    feature = "default-codec-bincode" => {
+        /// Default codec is [Bincode].
+        #[deprecated = "changing the default codec via the default-codec-* feature is deprecated"]
+        pub type Default = Bincode;
+    }
+    feature = "default-codec-bincode2" => {
+        /// Default codec is [Bincode2].
+        #[deprecated = "changing the default codec via the default-codec-* feature is deprecated"]
+        pub type Default = Bincode2;
+    }
+    feature = "default-codec-ciborium" => {
+        /// Default codec is [Ciborium].
+        #[deprecated = "changing the default codec via the default-codec-* feature is deprecated"]
+        pub type Default = Ciborium;
+    }
+    feature = "default-codec-json" => {
+        /// Default codec is [Json].
+        #[deprecated = "changing the default codec via the default-codec-* feature is deprecated"]
+        pub type Default = Json;
+    }
+    feature = "default-codec-message-pack" => {
+        /// Default codec is [MessagePack].
+        #[deprecated = "changing the default codec via the default-codec-* feature is deprecated"]
+        pub type Default = MessagePack;
+    }
+    feature = "default-codec-postcard" => {
+        /// Default codec is [Postcard].
+        #[deprecated = "changing the default codec via the default-codec-* feature is deprecated"]
+        pub type Default = Postcard;
+    }
+    _ => {
+        #[doc(no_inline)]
+        pub use postbag::Postbag as Default;
+    }
+}

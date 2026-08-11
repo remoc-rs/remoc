@@ -9,7 +9,6 @@ use crate::{
     rch::base::{RecvError, SendError},
 };
 
-#[cfg(feature = "default-codec-set")]
 use crate::{RemoteSend, connect::Connect, rch::base};
 
 /// Error occurred during establishing a providing connection.
@@ -162,7 +161,6 @@ pub trait ConnectExt<T, TransportSinkError, TransportStreamError> {
     ) -> impl Future<Output = Result<T, ConsumeError<TransportSinkError, TransportStreamError>>> + Send;
 }
 
-#[cfg(feature = "default-codec-set")]
 impl<TransportSinkError, TransportStreamError, T, ConnectFuture>
     ConnectExt<T, TransportSinkError, TransportStreamError> for ConnectFuture
 where

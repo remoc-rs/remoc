@@ -4,6 +4,15 @@ All notable changes to Remoc will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+- codec: `PostbagWith` codec, which allows the Postbag configuration to be specified
+  as const generic parameters; `Postbag` and `PostbagSlim` are now type aliases for it
+- codec: the maximum nesting depth of Postbag-encoded data can be specified,
+  for example `Postbag<1024>` or `PostbagSlim<1024>`, defaulting to
+  `postbag::cfg::DEFAULT_DEPTH_LIMIT`
+
 ## 0.19.1 - 2026-08-05
 This release considerably reduces the compile time and code size of crates using
 Remoc and makes the type-erased base channel available for use by custom channel

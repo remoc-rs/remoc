@@ -25,3 +25,6 @@ exclude = ["examples", "bench"]
 # wasm-bindgen = { git = "https://github.com/rust-wasi-web/wasm-bindgen.git" }
 # wasm-bindgen-futures = { git = "https://github.com/rust-wasi-web/wasm-bindgen.git" }
 # wasm-bindgen-test = { git = "https://github.com/rust-wasi-web/wasm-bindgen.git" }
+
+#### postbag master branch
+# postbag = { git = "https://github.com/remoc-rs/postbag.git" }

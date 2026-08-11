@@ -13,8 +13,9 @@ authors = { workspace = true }
 
 
 [features]
-default = ["full", "default-codec-postbag"]
+default = ["full"]
 full = ["serde", "rch", "rfn", "robj", "robs", "rtc"]
+serde = ["dep:serde", "dep:postbag"]
 rch = ["serde", "tokio-util/codec", "tokio/io-util"]
 rfn = ["rch"]
 robj = ["rch"]
@@ -30,23 +31,19 @@ js = [
 ]
 
 # Codecs
-default-codec-set = []
-codec-postbag = ["postbag"]
-default-codec-postbag = ["codec-postbag", "default-codec-set"]
-default-codec-postbag-slim = ["codec-postbag", "default-codec-set"]
+default-codec-postbag-slim = []
 codec-bincode = ["bincode"]
-default-codec-bincode = ["codec-bincode", "default-codec-set"]
-default-codec-bincode2 = ["codec-bincode", "default-codec-set"]
+default-codec-bincode = ["codec-bincode"]
+default-codec-bincode2 = ["codec-bincode"]
 codec-ciborium = ["ciborium"]
-default-codec-ciborium = ["codec-ciborium", "default-codec-set"]
+default-codec-ciborium = ["codec-ciborium"]
 codec-json = ["serde_json"]
-default-codec-json = ["codec-json", "default-codec-set"]
+default-codec-json = ["codec-json"]
 codec-message-pack = ["rmp-serde"]
-default-codec-message-pack = ["codec-message-pack", "default-codec-set"]
+default-codec-message-pack = ["codec-message-pack"]
 codec-postcard = ["postcard"]
-default-codec-postcard = ["codec-postcard", "default-codec-set"]
+default-codec-postcard = ["codec-postcard"]
 full-codecs = [
-    "codec-postbag",
     "codec-bincode",
     "codec-ciborium",
     "codec-json",
@@ -69,7 +66,8 @@ uuid = { version = "1.15", features = ["serde", "v4"] }
 serde = { version = "1.0", features = ["derive"], optional = true }
 
 # Codecs
-postbag = { version = "0.4", optional = true }
+postbag = { version = "=1.0.0-pre1", optional = true }
+
 serde_json = { version = "1.0", optional = true }
 bincode = { version = "2.0", default-features = false, features = ["std", "serde"], optional = true }
 ciborium = { version = "0.2", optional = true }
@@ -97,7 +95,7 @@ tokio-test = "0.4"
 
 
 [package.metadata.docs.rs]
-features = ["full", "full-codecs", "default-codec-postbag"]
+features = ["full", "full-codecs"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 

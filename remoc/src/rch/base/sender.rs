@@ -20,6 +20,7 @@ use super::{
     super::{DEFAULT_MAX_ITEM_SIZE, SendErrorExt},
     BIG_DATA_CHUNK_QUEUE, BIG_DATA_LIMIT,
     io::{ChannelBytesWriter, LimitedBytesWriter},
+    register_storage,
 };
 use crate::{
     chmux::{self, AllReceived, AnyStorage, ConnectReq},
@@ -173,7 +174,6 @@ pub struct PortSerializer {
     #[allow(clippy::type_complexity)]
     requests:
         Vec<(chmux::ConnectReq, Box<dyn FnOnce(chmux::Connect) -> BoxFuture<'static, ()> + Send + 'static>)>,
-    storage: AnyStorage,
     tasks: Vec<BoxFuture<'static, ()>>,
 }
 
@@ -183,8 +183,8 @@ impl PortSerializer {
     }
 
     /// Create a new port serializer and register it as active.
-    fn start(allocator: chmux::PortAllocator, storage: AnyStorage) -> Rc<RefCell<Self>> {
-        let this = Rc::new(RefCell::new(Self { allocator, requests: Vec::new(), storage, tasks: Vec::new() }));
+    fn start(allocator: chmux::PortAllocator) -> Rc<RefCell<Self>> {
+        let this = Rc::new(RefCell::new(Self { allocator, requests: Vec::new(), tasks: Vec::new() }));
         let weak = Rc::downgrade(&this);
         Self::INSTANCE.with(move |i| i.replace(weak));
         this
@@ -256,17 +256,6 @@ impl PortSerializer {
         Ok(port)
     }
 
-    /// Returns the data storage of the channel multiplexer.
-    pub fn storage<E>() -> Result<AnyStorage, E>
-    where
-        E: serde::ser::Error,
-    {
-        let this = Self::instance()?;
-        let this = this.borrow();
-
-        Ok(this.storage.clone())
-    }
-
     /// Spawn a task.
     pub fn spawn<E>(task: impl Future<Output = ()> + Send + 'static) -> Result<(), E>
     where
@@ -277,6 +266,23 @@ impl PortSerializer {
 
         this.tasks.push(task.boxed());
         Ok(())
+    }
+
+    /// Returns the data storage of the channel multiplexer that performs the current serialization.    
+    pub fn storage<E>() -> Result<chmux::AnyStorage, E>
+    where
+        E: serde::ser::Error,
+    {
+        super::storage().ok_or_else(|| ser::Error::custom("storage is only available during serialization"))
+    }
+
+    /// Calls the provided function with storage of the channel multiplexer that performs the
+    /// current serialization and returns the result.
+    pub fn with_storage<T, E>(f: impl FnOnce(&chmux::AnyStorage) -> T) -> Result<T, E>
+    where
+        E: serde::ser::Error,
+    {
+        super::with_storage(f).ok_or_else(|| ser::Error::custom("storage is only available during serialization"))
     }
 }
 
@@ -329,6 +335,11 @@ where
     /// Consumes this base remote sender and returns the underlying [chmux] sender.
     pub fn into_inner(self) -> chmux::Sender {
         self.erased.into_inner()
+    }
+
+    /// Returns the arbitrary data storage of the channel multiplexer.
+    pub fn storage(&self) -> chmux::AnyStorage {
+        self.erased.storage()
     }
 
     /// Sends an item over the channel.
@@ -385,7 +396,8 @@ impl ErasedSender {
         limit: usize, capacity: usize,
     ) -> Result<Option<(BytesMut, PortSerializer)>, SerializationError> {
         let mut lw = LimitedBytesWriter::new(limit, capacity);
-        let ps_ref = PortSerializer::start(allocator, storage);
+        let _storage_ref = register_storage(storage);
+        let ps_ref = PortSerializer::start(allocator);
 
         match serializer.serialize(&mut lw, item, capacity.clamp(512, 8_192)) {
             _ if lw.overflow() => return Ok(None),
@@ -411,7 +423,8 @@ impl ErasedSender {
         let item_arc_task = item_arc.clone();
 
         let result = task::spawn_blocking(move || {
-            let ps_ref = PortSerializer::start(allocator, storage);
+            let _storage_ref = register_storage(storage);
+            let ps_ref = PortSerializer::start(allocator);
 
             let item = item_arc_task.lock().unwrap();
             serializer.serialize(&mut cbw, &**item, chunk_size)?;
@@ -594,6 +607,11 @@ impl ErasedSender {
     /// Returns a future that will resolve when the remote endpoint closes its receiver.
     pub fn closed(&self) -> Closed {
         self.sender.closed()
+    }
+
+    /// Returns the arbitrary data storage of the channel multiplexer.
+    pub fn storage(&self) -> chmux::AnyStorage {
+        self.sender.storage()
     }
 
     /// The maximum allowed size in bytes of an item to be sent.

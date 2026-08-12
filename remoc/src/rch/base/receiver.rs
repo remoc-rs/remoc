@@ -16,9 +16,9 @@ use std::{
 };
 use tracing::Instrument;
 
-use super::{super::DEFAULT_MAX_ITEM_SIZE, BIG_DATA_CHUNK_QUEUE, io::ChannelBytesReader};
+use super::{super::DEFAULT_MAX_ITEM_SIZE, BIG_DATA_CHUNK_QUEUE, io::ChannelBytesReader, register_storage};
 use crate::{
-    chmux::{self, AnyStorage, Received, RecvChunkError},
+    chmux::{self, Received, RecvChunkError},
     codec::{self, AnySend, DeserializationError, ErasedDeserializer, StreamingUnavailable},
     exec::{
         self,
@@ -94,18 +94,17 @@ pub struct PortDeserializer {
     /// Callbacks by remote port.
     #[allow(clippy::type_complexity)]
     expected: HashMap<u32, Box<dyn FnOnce(chmux::Request) -> BoxFuture<'static, ()> + Send + 'static>>,
-    storage: AnyStorage,
     tasks: Vec<BoxFuture<'static, ()>>,
 }
 
 impl PortDeserializer {
     thread_local! {
-        static INSTANCE: RefCell<Weak<RefCell<PortDeserializer>>> = const { RefCell::new(Weak::new()) };
+        pub(super) static INSTANCE: RefCell<Weak<RefCell<PortDeserializer>>> = const { RefCell::new(Weak::new()) };
     }
 
     /// Create a new port deserializer and register it as active.
-    fn start(storage: AnyStorage) -> Rc<RefCell<PortDeserializer>> {
-        let this = Rc::new(RefCell::new(Self { expected: HashMap::new(), storage, tasks: Vec::new() }));
+    fn start() -> Rc<RefCell<PortDeserializer>> {
+        let this = Rc::new(RefCell::new(Self { expected: HashMap::new(), tasks: Vec::new() }));
         let weak = Rc::downgrade(&this);
         Self::INSTANCE.with(move |i| i.replace(weak));
         this
@@ -146,17 +145,6 @@ impl PortDeserializer {
         Ok(())
     }
 
-    /// Returns the data storage of the channel multiplexer.
-    pub fn storage<E>() -> Result<AnyStorage, E>
-    where
-        E: serde::de::Error,
-    {
-        let this = Self::instance()?;
-        let this = this.borrow();
-
-        Ok(this.storage.clone())
-    }
-
     /// Spawn a task.
     pub fn spawn<E>(task: impl Future<Output = ()> + Send + 'static) -> Result<(), E>
     where
@@ -167,6 +155,25 @@ impl PortDeserializer {
 
         this.tasks.push(task.boxed());
         Ok(())
+    }
+
+    /// Returns the data storage of the channel multiplexer that performs the current deserialization.    
+    pub fn storage<E>() -> Result<chmux::AnyStorage, E>
+    where
+        E: serde::de::Error,
+    {
+        super::storage()
+            .ok_or_else(|| serde::de::Error::custom("storage is only available during deserialization"))
+    }
+
+    /// Calls the provided function with storage of the channel multiplexer that performs the
+    /// current deserialization and returns the result.
+    pub fn with_storage<T, E>(f: impl FnOnce(&chmux::AnyStorage) -> T) -> Result<T, E>
+    where
+        E: serde::de::Error,
+    {
+        super::with_storage(f)
+            .ok_or_else(|| serde::de::Error::custom("storage is only available during deserialization"))
     }
 }
 
@@ -219,6 +226,11 @@ where
     /// Consumes this base remote receiver and returns the underlying [chmux] receiver.
     pub fn into_inner(self) -> chmux::Receiver {
         self.erased.into_inner()
+    }
+
+    /// Returns the arbitrary data storage of the channel multiplexer.
+    pub fn storage(&self) -> chmux::AnyStorage {
+        self.erased.storage()
     }
 
     fn from_any(any_item: AnySend) -> T {
@@ -322,13 +334,14 @@ impl ErasedReceiver {
                         Some(Received::Chunks) => {
                             // Start deserialization thread.
                             let deserializer = self.deserializer.clone();
-                            let handle_storage = self.receiver.storage();
+                            let storage = self.receiver.storage();
                             let (tx, rx) = tokio::sync::mpsc::channel(BIG_DATA_CHUNK_QUEUE);
 
                             let task = task::spawn_blocking(move || {
                                 let mut cbr = ChannelBytesReader::new(rx);
 
-                                let pds_ref = PortDeserializer::start(handle_storage);
+                                let _storage_ref = register_storage(storage);
+                                let pds_ref = PortDeserializer::start();
                                 let item = deserializer.deserialize(&mut cbr)?;
                                 let pds = PortDeserializer::finish(pds_ref);
 
@@ -357,7 +370,8 @@ impl ErasedReceiver {
                             return Err(RecvError::MaxItemSizeExceeded);
                         }
 
-                        let pdf_ref = PortDeserializer::start(self.receiver.storage());
+                        let _storage_ref = register_storage(self.receiver.storage());
+                        let pdf_ref = PortDeserializer::start();
                         let item_res = self.deserializer.deserialize(&mut data.reader());
                         self.data = DataSource::None;
                         self.item = Some(item_res?);
@@ -491,6 +505,11 @@ impl ErasedReceiver {
     /// to be received.
     pub async fn close(&mut self) {
         self.receiver.close().await
+    }
+
+    /// Returns the arbitrary data storage of the channel multiplexer.
+    pub fn storage(&self) -> chmux::AnyStorage {
+        self.receiver.storage()
     }
 
     /// The maximum allowed size in bytes of an item to be received.

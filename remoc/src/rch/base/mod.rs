@@ -43,16 +43,20 @@
 
 use serde::{Serialize, de::DeserializeOwned};
 use std::{
+    cell::RefCell,
     error::Error,
-    fmt::{self, Display},
+    fmt,
+    rc::{Rc, Weak},
 };
 
 mod io;
 mod receiver;
 mod sender;
+mod storage_ref;
 
 pub use receiver::{ErasedReceiver, PortDeserializer, Receiver, RecvError};
 pub use sender::{Closed, ErasedSender, PortSerializer, SendError, SendErrorKind, Sender};
+pub use storage_ref::{StorageRef, StorageRefHandle, storage_ref};
 
 use crate::{
     RemoteSend,
@@ -157,34 +161,34 @@ where
     }
 }
 
-/// Accesses the storage.
-pub fn storage() -> Result<AnyStorage, String> {
-    #[derive(Debug)]
-    struct SerdeError;
-    impl Display for SerdeError {
-        fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            Ok(())
-        }
-    }
-    impl serde::ser::Error for SerdeError {
-        fn custom<T>(_msg: T) -> Self
-        where
-            T: Display,
-        {
-            Self
-        }
-    }
-    impl serde::de::Error for SerdeError {
-        fn custom<T>(_msg: T) -> Self
-        where
-            T: Display,
-        {
-            Self
-        }
-    }
-    impl std::error::Error for SerdeError {}
+thread_local! {
+    /// Storage of channel multiplexer for currently active serialization or deserialization.
+    static ANY_STORAGE: RefCell<Weak<chmux::AnyStorage>> = const { RefCell::new(Weak::new()) };
+}
 
-    PortSerializer::storage::<SerdeError>()
-        .or_else(|_| PortDeserializer::storage::<SerdeError>())
-        .map_err(|_| "remoc storage not available".to_string())
+/// Register storage as active.
+///
+/// Returned reference must be held as long as storage should stay registered.
+#[must_use]
+fn register_storage(storage: AnyStorage) -> Rc<AnyStorage> {
+    let storage = Rc::new(storage);
+    let weak = Rc::downgrade(&storage);
+    ANY_STORAGE.with(move |i| i.replace(weak));
+    storage
+}
+
+/// Returns the data storage of the channel multiplexer that performs the
+/// current serialization or deserialization.
+///
+/// `None` is returned if currently no serialization or deserialization takes place.
+pub fn storage() -> Option<chmux::AnyStorage> {
+    ANY_STORAGE.with(|i| i.borrow().upgrade().map(|s| (*s).clone()))
+}
+
+/// Calls the provided function with storage of the channel multiplexer that performs the
+/// current serialization or deserialization and returns the result.
+///
+/// `None` is returned if currently no serialization or deserialization takes place.
+pub fn with_storage<T>(f: impl FnOnce(&chmux::AnyStorage) -> T) -> Option<T> {
+    ANY_STORAGE.with(|i| i.borrow().upgrade().map(|s| f(&s)))
 }

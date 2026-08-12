@@ -648,8 +648,6 @@ where
     where
         S: serde::Serializer,
     {
-        let storage = PortSerializer::storage()?;
-
         let mut parallel = Vec::new();
 
         let port = match self.tx.upgrade() {
@@ -662,7 +660,8 @@ where
 
                 // Request additional paralllel chmux channels.
                 let mut parallel_rxs = Vec::new();
-                for _ in 0..self.parallel.unwrap_or(storage.cfg().mpsc_parallel) {
+                let mpsc_parallel = PortSerializer::with_storage(|storage| storage.cfg().mpsc_parallel)?;
+                for _ in 0..self.parallel.unwrap_or(mpsc_parallel) {
                     let (parallel_tx, parallel_rx) = tokio::sync::oneshot::channel();
                     let Ok(parallel_port) =
                         PortSerializer::connect_port::<S::Error, _, _>(async move |connect| {

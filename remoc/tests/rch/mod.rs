@@ -5,6 +5,7 @@ mod lr;
 mod mpsc;
 mod oneshot;
 mod remote;
+mod storage_ref;
 mod watch;
 
 /// Assert fmt::Debug impls for error types containing non-Debug data.

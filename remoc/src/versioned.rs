@@ -26,8 +26,10 @@ pub struct RemocCompact;
 impl Versioner for RemocCompact {
     fn use_old() -> Result<bool, String> {
         #[cfg(feature = "rch")]
-        if let Ok(storage) = crate::rch::base::storage() {
-            return Ok(!storage.remote_cfg().compact_transported);
+        if let Some(compact_transported) =
+            crate::rch::base::with_storage(|storage| storage.remote_cfg().compact_transported)
+        {
+            return Ok(!compact_transported);
         }
 
         Ok(false)

@@ -8,6 +8,7 @@ use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio_util::sync::ReusableBoxFuture;
 
 use super::{
+    any_storage::AnyStorage,
     mux::PortEvt,
     port_allocator::{
         AllocatedSidePort, PortAllocator, PortsExhausted, RemotePortAlreadyAllocated, ReservedPort,
@@ -246,6 +247,7 @@ pub struct Listener {
     terminate_tx: mpsc::UnboundedSender<()>,
     wait_closed: bool,
     no_wait_closed: bool,
+    storage: AnyStorage,
 }
 
 impl fmt::Debug for Listener {
@@ -257,14 +259,27 @@ impl fmt::Debug for Listener {
 impl Listener {
     pub(crate) fn new(
         wait_rx: mpsc::Receiver<RemoteConnectMsg>, no_wait_rx: mpsc::Receiver<RemoteConnectMsg>,
-        port_allocator: PortAllocator, terminate_tx: mpsc::UnboundedSender<()>,
+        port_allocator: PortAllocator, terminate_tx: mpsc::UnboundedSender<()>, storage: AnyStorage,
     ) -> Self {
-        Self { wait_rx, no_wait_rx, port_allocator, terminate_tx, wait_closed: false, no_wait_closed: false }
+        Self {
+            wait_rx,
+            no_wait_rx,
+            port_allocator,
+            terminate_tx,
+            wait_closed: false,
+            no_wait_closed: false,
+            storage,
+        }
     }
 
     /// Obtains the port allocator.
     pub fn port_allocator(&self) -> PortAllocator {
         self.port_allocator.clone()
+    }
+
+    /// Returns the arbitrary data storage of the channel multiplexer.
+    pub fn storage(&self) -> AnyStorage {
+        self.storage.clone()
     }
 
     /// Accept a connection returning the sender and receiver for the opened port.

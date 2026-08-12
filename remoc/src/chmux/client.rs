@@ -13,6 +13,7 @@ use std::{
 use tokio::sync::{mpsc, oneshot};
 
 use super::{
+    any_storage::AnyStorage,
     port_allocator::{ConnectReq, PortAllocator, PortReq, PortsExhausted},
     receiver::Receiver,
     sender::Sender,
@@ -176,6 +177,7 @@ pub struct Client {
     port_allocator: PortAllocator,
     listener_dropped: Arc<AtomicBool>,
     terminate_tx: mpsc::UnboundedSender<()>,
+    storage: AnyStorage,
 }
 
 impl fmt::Debug for Client {
@@ -187,9 +189,14 @@ impl fmt::Debug for Client {
 impl Client {
     pub(super) fn new(
         tx: mpsc::UnboundedSender<ClientReq>, port_allocator: PortAllocator, listener_dropped: Arc<AtomicBool>,
-        terminate_tx: mpsc::UnboundedSender<()>,
+        terminate_tx: mpsc::UnboundedSender<()>, storage: AnyStorage,
     ) -> Client {
-        Client { tx, port_allocator, listener_dropped, terminate_tx }
+        Client { tx, port_allocator, listener_dropped, terminate_tx, storage }
+    }
+
+    /// Returns the arbitrary data storage of the channel multiplexer.
+    pub fn storage(&self) -> AnyStorage {
+        self.storage.clone()
     }
 
     /// Obtains the port allocator.

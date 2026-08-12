@@ -395,6 +395,7 @@ where
         let cfg = Arc::new(cfg);
         let remote_cfg = Arc::new(remote_cfg);
         let remote_listener_dropped = Arc::new(AtomicBool::new(false));
+        let storage = AnyStorage::new(cfg.clone(), remote_cfg.clone());
         let multiplexer = ChMux {
             remote_protocol_version,
             local_cfg: cfg.clone(),
@@ -416,7 +417,7 @@ where
             goodbye_received: false,
             transport_sink: Some(transport_sink),
             transport_stream: Some(transport_stream),
-            storage: AnyStorage::new(cfg, remote_cfg),
+            storage: storage.clone(),
             send_credit_provider,
             send_credit_user: Arc::new(send_credit_user),
             send_credit_report: None,
@@ -427,10 +428,15 @@ where
             pre_connect_port_pool,
         };
 
-        let client =
-            Client::new(connect_tx, port_allocator.clone(), remote_listener_dropped, terminate_tx.clone());
+        let client = Client::new(
+            connect_tx,
+            port_allocator.clone(),
+            remote_listener_dropped,
+            terminate_tx.clone(),
+            storage.clone(),
+        );
 
-        let listener = Listener::new(listen_wait_rx, listen_no_wait_rx, port_allocator, terminate_tx);
+        let listener = Listener::new(listen_wait_rx, listen_no_wait_rx, port_allocator, terminate_tx, storage);
 
         Ok((multiplexer, client, listener))
     }

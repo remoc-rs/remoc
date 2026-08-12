@@ -376,8 +376,8 @@ where
     {
         let (id, dropped_tx) = match self.state.clone() {
             State::LocalCreated { entry, mut keep_rx, .. } => {
-                let handle_storage = PortSerializer::storage()?;
-                let id = handle_storage.insert(entry.clone());
+                let storage = PortSerializer::storage()?;
+                let id = storage.insert_entry(entry.clone());
 
                 let (dropped_tx, dropped_rx) = mpsc::channel(1);
                 let dropped_tx = dropped_tx.set_buffer::<1>();
@@ -402,7 +402,7 @@ where
                             }
                         }
 
-                        handle_storage.remove(id);
+                        storage.remove_entry(id);
                     }
                     .in_current_span(),
                 );
@@ -428,8 +428,7 @@ where
     {
         let TransportedHandle { id, dropped_tx } = TransportedHandle::deserialize(deserializer)?;
 
-        let handle_storage = PortDeserializer::storage()?;
-        let state = match handle_storage.remove(id) {
+        let state = match PortDeserializer::with_storage(|storage| storage.remove_entry(id))? {
             Some(entry) => State::LocalReceived { entry, id, dropped_tx },
             None => State::Remote { id, dropped_tx },
         };

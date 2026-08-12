@@ -56,7 +56,6 @@ use crate::{
         base::{self},
         mpsc, oneshot,
     },
-    versioned::RemocCompact,
 };
 
 /// An error occurred during fetching a lazily transmitted value.
@@ -72,9 +71,8 @@ pub enum FetchError {
     RemoteListen(chmux::ListenerError),
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     FetchError,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Dropped => "_0",
         RemoteReceive(err: base::RecvError) => "_1",
@@ -157,9 +155,8 @@ pub struct Lazy<T, Codec = codec::Default> {
     fetch_task: Arc<Mutex<Option<Pin<Box<MaybeDone<BoxFuture<'static, Result<Arc<T>, FetchError>>>>>>>>,
 }
 
-crate::versioned::impl_struct! {
+crate::versioned::compact::impl_struct! {
     Lazy<T, Codec>,
-    versioner = RemocCompact,
     fields {
         request_tx: mpsc::Sender<oneshot::Sender<T, Codec>, Codec, 1> => "_0",
     }

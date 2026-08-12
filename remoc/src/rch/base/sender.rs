@@ -40,9 +40,8 @@ pub struct SendError<T> {
     pub item: T,
 }
 
-crate::versioned::impl_struct! {
+crate::versioned::compact::impl_struct! {
     SendError<T>,
-    versioner = crate::versioned::RemocCompact,
     fields {
         kind: SendErrorKind => "_0",
         item: T => "_1",
@@ -69,9 +68,8 @@ pub enum SendErrorKind {
     MaxItemSizeExceeded,
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     SendErrorKind,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Serialize(err: SerializationError) => "_0",
         Send(err: chmux::SendError) => "_1",

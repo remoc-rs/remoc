@@ -11,7 +11,7 @@ use tokio::io::AsyncRead;
 use tokio_util::sync::ReusableBoxFuture;
 
 use super::{SizeInfo, bin, oneshot};
-use crate::{chmux::DataBuf, codec, versioned::RemocCompact};
+use crate::{chmux::DataBuf, codec};
 
 /// An I/O channel receiver that implements [`AsyncRead`].
 ///
@@ -57,9 +57,8 @@ struct TransportedReceiver<Codec> {
     size: SizeInfo<Codec>,
 }
 
-crate::versioned::impl_struct! {
+crate::versioned::compact::impl_struct! {
     TransportedReceiver<Codec>,
-    versioner = RemocCompact,
     fields {
         bin_receiver: bin::Receiver => "_0",
         size: SizeInfo<Codec> => "_1",

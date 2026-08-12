@@ -100,7 +100,6 @@ use crate::{
         time::{Instant, sleep},
     },
     rch::{BACKCHANNEL_MSG_ERROR, BACKCHANNEL_MSG_RATE_LIMIT},
-    versioned::RemocCompact,
 };
 
 mod receiver;
@@ -283,9 +282,8 @@ pub enum TransferStrategy {
     ChannelBuffered,
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     TransferStrategy,
-    versioner = RemocCompact,
     variants {
         Single => "_0",
         GlobalBuffered => "_1",

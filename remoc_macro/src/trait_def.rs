@@ -1550,9 +1550,8 @@ impl TraitDef {
                 monitor: ::std::sync::Arc<dyn ::remoc::rtc::ClientMonitor<#req_params>>,
             }
 
-            ::remoc::versioned::impl_struct! {
+            ::remoc::versioned::compact::impl_struct! {
                 #client_ident #versioned_generics,
-                versioner = ::remoc::versioned::RemocCompact,
                 fields {
                     req_tx: ::remoc::rch::mpsc::Sender<
                         ::remoc::rtc::Req<#req_value #req_generics, #req_ref #req_generics, #req_ref_mut #req_generics>,

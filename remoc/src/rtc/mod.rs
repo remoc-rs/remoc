@@ -387,9 +387,8 @@ pub enum CallError {
     RemoteForward,
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     CallError,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Dropped => "_0",
         RemoteSend(err: base::SendErrorKind) => "_1",
@@ -465,9 +464,8 @@ pub enum Req<Value, Ref, RefMut> {
     RefMut(RefMut),
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     Req<Value, Ref, RefMut>,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Value(req: Value) => "_0",
         Ref(req: Ref) => "_1",

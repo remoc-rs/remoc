@@ -86,9 +86,8 @@ pub enum HashSetEvent<T> {
     InitialComplete,
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     HashSetEvent<T>,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Set(value: T) => "_0",
         Remove(value: T) => "_1",
@@ -449,9 +448,8 @@ enum HashSetInitialValue<T, Codec = crate::codec::Default> {
     },
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     HashSetInitialValue<T, Codec>,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Value(value: HashSet<T>) => "_0",
         Incremental { len: usize, rx: rch::mpsc::Receiver<T, Codec> } => "_1",
@@ -517,9 +515,8 @@ pub struct HashSetSubscription<T, Codec = crate::codec::Default> {
     done: bool,
 }
 
-crate::versioned::impl_struct! {
+crate::versioned::compact::impl_struct! {
     HashSetSubscription<T, Codec>,
-    versioner = crate::versioned::RemocCompact,
     fields {
         initial: HashSetInitialValue<T, Codec> => "_0",
         events: Option<rch::broadcast::Receiver<HashSetEvent<T>, Codec>> => "_1",

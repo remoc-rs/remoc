@@ -16,7 +16,6 @@ use super::{
 use crate::{
     chmux,
     codec::{self, DeserializationError},
-    versioned::RemocCompact,
 };
 
 /// An error that occurred during receiving from a remote endpoint.
@@ -34,9 +33,8 @@ pub enum RecvError {
     MaxItemSizeExceeded,
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     RecvError,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Receive(err: chmux::RecvError) => "_0",
         Deserialize(err: DeserializationError) => "_1",
@@ -120,9 +118,8 @@ const fn default_max_item_size() -> u64 {
     u64::MAX
 }
 
-crate::versioned::impl_struct! {
+crate::versioned::compact::impl_struct! {
     TransportedReceiver,
-    versioner = RemocCompact,
     fields {
         port: u32 => "_0",
         data: PhantomData<()> = PhantomData,

@@ -8,7 +8,7 @@
 //! This has similar functionality as [tokio::sync::broadcast] with the additional
 //! ability to work over remote connections.
 
-use crate::{RemoteSend, codec, versioned::RemocCompact};
+use crate::{RemoteSend, codec};
 
 mod receiver;
 mod sender;
@@ -25,9 +25,8 @@ pub(crate) enum BroadcastMsg<T> {
     Lagged,
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     BroadcastMsg<T>,
-    versioner = RemocCompact,
     variants {
         Value(value: T) => "_0",
         Lagged => "_1",

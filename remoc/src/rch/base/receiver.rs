@@ -39,9 +39,8 @@ pub enum RecvError {
     MaxItemSizeExceeded,
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     RecvError,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Receive(err: chmux::RecvError) => "_0",
         Deserialize(err: DeserializationError) => "_1",

@@ -36,9 +36,8 @@ pub enum ConnectError {
 }
 
 #[cfg(feature = "serde")]
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     ConnectError,
-    versioner = crate::versioned::RemocCompact,
     variants {
         LocalPortsExhausted => "_0",
         RemotePortsExhausted => "_1",

@@ -31,9 +31,8 @@ pub enum SendError<T> {
     RemoteForward,
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     SendError<T>,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Closed(item: T) => "_0",
         RemoteSend(err: base::SendErrorKind) => "_1",

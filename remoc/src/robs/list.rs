@@ -85,9 +85,8 @@ pub enum ListEvent<T> {
     InitialComplete,
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     ListEvent<T>,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Push(value: T) => "_0",
         Done => "_1",
@@ -575,9 +574,8 @@ pub struct ListSubscription<T, Codec = crate::codec::Default> {
     len: usize,
 }
 
-crate::versioned::impl_struct! {
+crate::versioned::compact::impl_struct! {
     ListSubscription<T, Codec>,
-    versioner = crate::versioned::RemocCompact,
     fields {
         initial_len: usize => "_0",
         events: Option<rch::mpsc::Receiver<ListEvent<T>, Codec>> => "_1",

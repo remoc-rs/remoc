@@ -21,7 +21,6 @@ use super::{
 use crate::{
     RemoteSend, chmux,
     codec::{self, ErasedDeserializer, ErasedSerializer},
-    versioned::RemocCompact,
 };
 
 /// An error occurred during receiving over a watch channel.
@@ -35,9 +34,8 @@ pub enum RecvError {
     RemoteListen(chmux::ListenerError),
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     RecvError,
-    versioner = crate::versioned::RemocCompact,
     variants {
         RemoteReceive(err: base::RecvError) => "_0",
         RemoteConnect(err: chmux::ConnectError) => "_1",
@@ -76,9 +74,8 @@ pub enum ChangedError {
     Recv(RecvError),
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     ChangedError,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Closed => "_0",
         Recv(err: RecvError) => "_1",
@@ -147,9 +144,8 @@ struct TransportedReceiver<T> {
     transfer_strategy: TransferStrategy,
 }
 
-crate::versioned::impl_struct! {
+crate::versioned::compact::impl_struct! {
     TransportedReceiver<T>,
-    versioner = RemocCompact,
     fields {
         port: u32 => "_0",
         #[compact]

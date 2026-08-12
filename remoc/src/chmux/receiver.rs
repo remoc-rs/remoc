@@ -35,9 +35,8 @@ pub enum RecvError {
 }
 
 #[cfg(feature = "serde")]
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     RecvError,
-    versioner = crate::versioned::RemocCompact,
     variants {
         ChMux => "_0",
         ExceedsMaxDataSize(max_size: usize) => "_1",
@@ -100,9 +99,8 @@ pub enum RecvAnyError {
 }
 
 #[cfg(feature = "serde")]
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     RecvAnyError,
-    versioner = crate::versioned::RemocCompact,
     variants {
         ChMux => "_0",
         Rejected { no_ports: bool } => "_1",
@@ -137,9 +135,8 @@ pub enum RecvChunkError {
 }
 
 #[cfg(feature = "serde")]
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     RecvChunkError,
-    versioner = crate::versioned::RemocCompact,
     variants {
         ChMux => "_0",
         Cancelled => "_1",

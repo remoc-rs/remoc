@@ -12,7 +12,7 @@ use tokio::io::AsyncWrite;
 use tokio_util::sync::ReusableBoxFuture;
 
 use super::{bin, oneshot};
-use crate::{codec, versioned::RemocCompact};
+use crate::codec;
 
 /// Size handling mode for the sender.
 #[derive(Debug)]
@@ -24,9 +24,8 @@ pub(super) enum SizeMode<Codec> {
     Unknown(oneshot::Sender<u64, Codec>),
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     SizeMode<Codec>,
-    versioner = RemocCompact,
     variants {
         Known(size: u64) => "_0",
         Unknown(tx: oneshot::Sender<u64, Codec>) => "_1",
@@ -72,9 +71,8 @@ struct TransportedSender<Codec> {
     bytes_written: u64,
 }
 
-crate::versioned::impl_struct! {
+crate::versioned::compact::impl_struct! {
     TransportedSender<Codec>,
-    versioner = RemocCompact,
     fields {
         bin_sender: Option<bin::Sender> => "_0",
         size_mode: SizeMode<Codec> => "_1",

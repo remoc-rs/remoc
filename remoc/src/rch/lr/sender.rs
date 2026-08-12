@@ -17,7 +17,6 @@ use super::{
 use crate::{
     chmux,
     codec::{self, SerializationError},
-    versioned::RemocCompact,
 };
 
 pub use super::super::base::Closed;
@@ -32,9 +31,8 @@ pub struct SendError<T> {
     pub item: T,
 }
 
-crate::versioned::impl_struct! {
+crate::versioned::compact::impl_struct! {
     SendError<T>,
-    versioner = crate::versioned::RemocCompact,
     fields {
         kind: SendErrorKind => "_0",
         item: T => "_1",
@@ -55,9 +53,8 @@ pub enum SendErrorKind {
     MaxItemSizeExceeded,
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     SendErrorKind,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Serialize(err: SerializationError) => "_0",
         Send(err: chmux::SendError) => "_1",
@@ -178,9 +175,8 @@ const fn default_max_item_size() -> u64 {
     u64::MAX
 }
 
-crate::versioned::impl_struct! {
+crate::versioned::compact::impl_struct! {
     TransportedSender,
-    versioner = RemocCompact,
     fields {
         port: u32 => "_0",
         data: PhantomData<()> = PhantomData,

@@ -116,9 +116,8 @@ pub enum VecEvent<T> {
     InitialComplete,
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     VecEvent<T>,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Push(value: T) => "_0",
         Pop => "_1",
@@ -773,9 +772,8 @@ enum VecInitialValue<T, Codec = crate::codec::Default> {
     },
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     VecInitialValue<T, Codec>,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Value(value: Vec<T>) => "_0",
         Incremental { len: usize, rx: rch::mpsc::Receiver<T, Codec> } => "_1",
@@ -841,9 +839,8 @@ pub struct VecSubscription<T, Codec = crate::codec::Default> {
     done: bool,
 }
 
-crate::versioned::impl_struct! {
+crate::versioned::compact::impl_struct! {
     VecSubscription<T, Codec>,
-    versioner = crate::versioned::RemocCompact,
     fields {
         initial: VecInitialValue<T, Codec> => "_0",
         events: Option<rch::broadcast::Receiver<VecEvent<T>, Codec>> => "_1",

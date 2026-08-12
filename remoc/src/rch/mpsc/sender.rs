@@ -26,7 +26,6 @@ use crate::{
     RemoteSend, chmux,
     codec::{self, ErasedDeserializer, ErasedSerializer},
     exec,
-    versioned::RemocCompact,
 };
 
 /// An error occurred during sending over an mpsc channel.
@@ -44,9 +43,8 @@ pub enum SendError<T> {
     RemoteForward,
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     SendError<T>,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Closed(item: T) => "_0",
         RemoteSend(err: base::SendErrorKind) => "_1",
@@ -169,9 +167,8 @@ pub enum TrySendError<T> {
     RemoteForward,
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     TrySendError<T>,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Closed(item: T) => "_0",
         Full(item: T) => "_1",
@@ -325,9 +322,8 @@ const fn default_max_item_size() -> u64 {
     u64::MAX
 }
 
-crate::versioned::impl_struct! {
+crate::versioned::compact::impl_struct! {
     TransportedSender,
-    versioner = RemocCompact,
     fields {
         port: Option<u32> => "_0",
         #[serde(default)]

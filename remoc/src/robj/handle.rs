@@ -88,7 +88,6 @@ use crate::{
         base::{PortDeserializer, PortSerializer},
         mpsc,
     },
-    versioned::RemocCompact,
 };
 
 /// An error during getting the value of a handle.
@@ -101,9 +100,8 @@ pub enum HandleError {
     MismatchedType(String),
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     HandleError,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Unknown => "_0",
         MismatchedType(ty: String) => "_1",
@@ -351,9 +349,8 @@ struct TransportedHandle<Codec> {
     dropped_tx: mpsc::Sender<(), Codec, 1>,
 }
 
-crate::versioned::impl_struct! {
+crate::versioned::compact::impl_struct! {
     TransportedHandle<Codec>,
-    versioner = RemocCompact,
     fields {
         id: Uuid => "_0",
         dropped_tx: mpsc::Sender<(), Codec, 1> => "_1",

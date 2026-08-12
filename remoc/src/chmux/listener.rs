@@ -30,9 +30,8 @@ pub enum ListenerError {
 }
 
 #[cfg(feature = "serde")]
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     ListenerError,
-    versioner = crate::versioned::RemocCompact,
     variants {
         LocalPortsExhausted => "_0",
         RemotePortAlreadyAllocated(port: u32) => "_1",

@@ -88,9 +88,8 @@ pub enum SendError {
     RemoteForward,
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     SendError,
-    versioner = crate::versioned::RemocCompact,
     variants {
         RemoteSend(err: rch::base::SendErrorKind) => "_0",
         RemoteConnect(err: chmux::ConnectError) => "_1",
@@ -162,9 +161,8 @@ pub enum RecvError {
     InvalidIndex(usize),
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     RecvError,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Closed => "_0",
         Lagged => "_1",

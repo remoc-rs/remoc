@@ -24,9 +24,8 @@ pub enum RecvError {
     RemoteListen(chmux::ListenerError),
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     RecvError,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Closed => "_0",
         RemoteReceive(err: base::RecvError) => "_1",
@@ -97,9 +96,8 @@ pub enum TryRecvError {
     RemoteListen(chmux::ListenerError),
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     TryRecvError,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Empty => "_0",
         Closed => "_1",

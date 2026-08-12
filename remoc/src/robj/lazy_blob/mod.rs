@@ -72,7 +72,6 @@ use crate::{
     chmux::{self, DataBuf},
     codec, exec,
     rch::{ConnectError, mpsc},
-    versioned::RemocCompact,
 };
 
 mod fw_bin;
@@ -174,9 +173,8 @@ impl<Codec> fmt::Debug for LazyBlob<Codec> {
     }
 }
 
-crate::versioned::impl_struct! {
+crate::versioned::compact::impl_struct! {
     LazyBlob<Codec>,
-    versioner = RemocCompact,
     fields {
         req_tx: mpsc::Sender<fw_bin::Sender, Codec, 1> => "_0",
         len: u64 => "_1",

@@ -33,6 +33,8 @@ mod robs;
 #[cfg(feature = "rtc")]
 mod rtc;
 
+mod versioned;
+
 static INIT: Once = Once::new();
 
 pub fn init() {

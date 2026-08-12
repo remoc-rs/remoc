@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize, ser};
 use std::sync::Mutex;
 use tracing::Instrument;
 
-use crate::{exec, rch::bin, versioned::RemocCompact};
+use crate::{exec, rch::bin};
 
 /// A chmux sender that can be remotely sent and forwarded.
 pub(crate) struct Sender {
@@ -40,9 +40,8 @@ struct TransportedSender {
     bin_tx: bin::Sender,
 }
 
-crate::versioned::impl_struct! {
+crate::versioned::compact::impl_struct! {
     TransportedSender,
-    versioner = RemocCompact,
     fields {
         bin_tx: bin::Sender => "_0",
     }

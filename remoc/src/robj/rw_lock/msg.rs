@@ -3,7 +3,6 @@
 use crate::{
     RemoteSend, codec,
     rch::{mpsc, oneshot, watch},
-    versioned::RemocCompact,
 };
 
 /// A read request from a lock to the owner.
@@ -13,9 +12,8 @@ pub(super) struct ReadRequest<T, Codec> {
     pub(crate) value_tx: oneshot::Sender<Value<T, Codec>, Codec>,
 }
 
-crate::versioned::impl_struct! {
+crate::versioned::compact::impl_struct! {
     ReadRequest<T, Codec>,
-    versioner = RemocCompact,
     fields {
         value_tx: oneshot::Sender<Value<T, Codec>, Codec> => "_0",
     }
@@ -33,9 +31,8 @@ pub(super) struct WriteRequest<T, Codec> {
     pub(super) confirm_tx: oneshot::Sender<(), Codec>,
 }
 
-crate::versioned::impl_struct! {
+crate::versioned::compact::impl_struct! {
     WriteRequest<T, Codec>,
-    versioner = RemocCompact,
     fields {
         value_tx: oneshot::Sender<T, Codec> => "_0",
         new_value_rx: oneshot::Receiver<T, Codec> => "_1",
@@ -55,9 +52,8 @@ pub(super) struct Value<T, Codec> {
     pub(super) invalid_rx: watch::Receiver<bool, Codec>,
 }
 
-crate::versioned::impl_struct! {
+crate::versioned::compact::impl_struct! {
     Value<T, Codec>,
-    versioner = RemocCompact,
     fields {
         value: T => "_0",
         dropped_tx: mpsc::Sender<(), Codec, 1> => "_1",

@@ -19,9 +19,8 @@ pub enum ForwardError {
 }
 
 #[cfg(feature = "serde")]
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     ForwardError,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Send(err: SendError) => "_0",
         Recv(err: RecvError) => "_1",

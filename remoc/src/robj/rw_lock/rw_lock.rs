@@ -13,7 +13,6 @@ use crate::{
         base::{self},
         mpsc, oneshot,
     },
-    versioned::RemocCompact,
 };
 
 /// An error occurred during locking of an RwLock value for reading or writing.
@@ -29,9 +28,8 @@ pub enum LockError {
     RemoteListen(chmux::ListenerError),
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     LockError,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Dropped => "_0",
         RemoteReceive(err: base::RecvError) => "_1",
@@ -73,9 +71,8 @@ pub enum CommitError {
     Failed,
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     CommitError,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Dropped => "_0",
         Failed => "_1",
@@ -130,9 +127,8 @@ impl<T, Codec> fmt::Debug for ReadLock<T, Codec> {
     }
 }
 
-crate::versioned::impl_struct! {
+crate::versioned::compact::impl_struct! {
     ReadLock<T, Codec>,
-    versioner = RemocCompact,
     fields {
         req_tx: mpsc::Sender<ReadRequest<T, Codec>, Codec, 1> => "_0",
     }
@@ -287,9 +283,8 @@ pub struct RwLock<T, Codec = codec::Default> {
     req_tx: mpsc::Sender<WriteRequest<T, Codec>, Codec, 1>,
 }
 
-crate::versioned::impl_struct! {
+crate::versioned::compact::impl_struct! {
     RwLock<T, Codec>,
-    versioner = RemocCompact,
     fields {
         read: ReadLock<T, Codec> => "_0",
         req_tx: mpsc::Sender<WriteRequest<T, Codec>, Codec, 1> => "_1",

@@ -50,9 +50,8 @@ pub enum SendError {
 }
 
 #[cfg(feature = "serde")]
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     SendError,
-    versioner = crate::versioned::RemocCompact,
     variants {
         ChMux => "_0",
         Closed { gracefully: bool } => "_1",

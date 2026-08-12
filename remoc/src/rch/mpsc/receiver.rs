@@ -21,7 +21,6 @@ use crate::{
     RemoteSend, chmux,
     codec::{self, ErasedDeserializer, ErasedSerializer},
     exec,
-    versioned::RemocCompact,
 };
 
 /// An error occurred during receiving over an mpsc channel.
@@ -35,9 +34,8 @@ pub enum RecvError {
     RemoteListen(chmux::ListenerError),
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     RecvError,
-    versioner = crate::versioned::RemocCompact,
     variants {
         RemoteReceive(err: base::RecvError) => "_0",
         RemoteConnect(err: chmux::ConnectError) => "_1",
@@ -97,9 +95,8 @@ pub enum TryRecvError {
     RemoteListen(chmux::ListenerError),
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     TryRecvError,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Closed => "_0",
         Empty => "_1",
@@ -190,9 +187,8 @@ struct TransportedReceiver {
     parallel: Vec<u32>,
 }
 
-crate::versioned::impl_struct! {
+crate::versioned::compact::impl_struct! {
     TransportedReceiver,
-    versioner = RemocCompact,
     fields {
         port: u32 => "_0",
         #[serde(default)]

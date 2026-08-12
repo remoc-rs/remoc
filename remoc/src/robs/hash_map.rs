@@ -95,9 +95,8 @@ pub enum HashMapEvent<K, V> {
     InitialComplete,
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     HashMapEvent<K, V>,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Set(key: K, value: V) => "_0",
         Remove(key: K) => "_1",
@@ -812,9 +811,8 @@ enum HashMapInitialValue<K, V, Codec = crate::codec::Default> {
     },
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     HashMapInitialValue<K, V, Codec>,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Value(value: HashMap<K, V>) => "_0",
         Incremental { len: usize, rx: rch::mpsc::Receiver<(K, V), Codec> } => "_1",
@@ -881,9 +879,8 @@ pub struct HashMapSubscription<K, V, Codec = crate::codec::Default> {
     done: bool,
 }
 
-crate::versioned::impl_struct! {
+crate::versioned::compact::impl_struct! {
     HashMapSubscription<K, V, Codec>,
-    versioner = crate::versioned::RemocCompact,
     fields {
         initial: HashMapInitialValue<K, V, Codec> => "_0",
         events: Option<rch::broadcast::Receiver<HashMapEvent<K, V>, Codec>> => "_1",

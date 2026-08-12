@@ -13,9 +13,8 @@ pub enum SendError<T> {
     Failed,
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     SendError<T>,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Closed(item: T) => "_0",
         Failed => "_1",

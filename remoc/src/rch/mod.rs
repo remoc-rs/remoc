@@ -168,9 +168,8 @@ pub enum ConnectError {
     Listen(chmux::ListenerError),
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     ConnectError,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Dropped => "_0",
         Connect(err: chmux::ConnectError) => "_1",
@@ -201,9 +200,8 @@ pub enum ClosedReason {
     Failed,
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     ClosedReason,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Closed => "_0",
         Dropped => "_1",
@@ -421,9 +419,8 @@ pub enum SendingErrorKind {
     Dropped,
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     SendingErrorKind,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Send(err: base::SendErrorKind) => "_0",
         Dropped => "_1",
@@ -453,9 +450,8 @@ pub enum SendingError<T> {
     Dropped,
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     SendingError<T>,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Send(err: base::SendError<T>) => "_0",
         Dropped => "_1",

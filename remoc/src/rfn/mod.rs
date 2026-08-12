@@ -84,9 +84,8 @@ pub enum CallError {
     RemoteListen(chmux::ListenerError),
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     CallError,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Dropped => "_0",
         RemoteReceive(err: base::RecvError) => "_1",

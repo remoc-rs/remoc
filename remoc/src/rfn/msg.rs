@@ -10,9 +10,8 @@ pub struct RFnRequest<A, R, Codec> {
     pub result_tx: oneshot::Sender<R, Codec>,
 }
 
-crate::versioned::impl_struct! {
+crate::versioned::compact::impl_struct! {
     RFnRequest<A, R, Codec>,
-    versioner = crate::versioned::RemocCompact,
     fields {
         argument: A => "_0",
         result_tx: oneshot::Sender<R, Codec> => "_1",

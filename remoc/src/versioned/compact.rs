@@ -1,10 +1,34 @@
-//! Macros for implementing versioned serialized representations.
+//! Compaction of the serialized representation of Remoc's own types.
+
+use super::{Error, Versioner};
+
+#[doc(inline)]
+pub use crate::{impl_enum, impl_struct};
+
+/// Decides whether to use the old representation based on the capabilities of
+/// the remote endpoint of the current connection.
+///
+/// If no remoc connection is active, the current representation is used.
+pub struct CompactVersioner;
+
+impl Versioner for CompactVersioner {
+    fn use_old() -> Result<bool, Error> {
+        #[cfg(feature = "rch")]
+        if let Some(compact_transported) =
+            crate::rch::base::with_storage(|storage| storage.remote_cfg().compact_transported)
+        {
+            return Ok(!compact_transported);
+        }
+
+        Ok(false)
+    }
+}
 
 /// Implements a versioned serialized representation for a struct.
 ///
 /// This generates the transported (serialized) representations of a struct
 /// for the current and old version, implements
-/// [Versioned](super::Versioned) for it and implements
+/// [Versioned](crate::versioned::Versioned) for it and implements
 /// [Serialize](serde::Serialize) and [Deserialize](serde::Deserialize)
 /// for it using these representations.
 ///
@@ -60,7 +84,6 @@
 ///
 /// impl_struct! {
 ///     LazyBlob<Codec>,
-///     versioner = RemocCompact,
 ///     fields {
 ///         req_tx: mpsc::Sender<fw_bin::Sender, Codec, 1> => "_0",
 ///         len: u64 => "_1",
@@ -79,7 +102,6 @@ macro_rules! impl_struct {
 
     (
         $name:ident $(< $( $gen:ident ),* $(,)? $(; $( const $cgen:ident : $cty:ty ),* $(,)? )? >)?,
-        versioner = $versioner:ty,
         fields { $($fields:tt)* }
         $( default { $( $dfield:ident $(= $dinit:expr)? ),* $(,)? } )?
         $( where $($wc:tt)* )?
@@ -88,7 +110,6 @@ macro_rules! impl_struct {
             name = [$name]
             generic_decls = [$( $($gen ,)* $( $(const $cgen : $cty ,)* )? )?]
             generic_args = [$( $($gen ,)* $( $($cgen ,)* )? )?]
-            versioner = [$versioner]
             where_clause = [ $( where $($wc)* )? ]
             defaults = [ $( $( $dfield = $crate::impl_struct!(@default $($dinit)?) , )* )? ]
             rest = [ $($fields)* ]
@@ -106,7 +127,6 @@ macro_rules! impl_struct {
         name = [$name:ident]
         generic_decls = [$($generic_decls:tt)*]
         generic_args = [$($generic_args:tt)*]
-        versioner = [$versioner:ty]
         where_clause = [$($wc:tt)*]
         defaults = [$($dfield:ident = $dinit:expr),* $(,)?]
         rest = []
@@ -165,7 +185,7 @@ macro_rules! impl_struct {
         impl<$($generic_decls)*> $crate::versioned::Versioned for $name<$($generic_args)*>
         $($wc)*
         {
-            type Versioner = $versioner;
+            type Versioner = $crate::versioned::compact::CompactVersioner;
 
             type CurrentRef<'transport>
                 = CurrentRef<'transport, $($generic_args)*>
@@ -174,7 +194,7 @@ macro_rules! impl_struct {
 
             fn as_current<'transport>(
                 &'transport self,
-            ) -> ::core::result::Result<Self::CurrentRef<'transport>, ::std::string::String> {
+            ) -> ::core::result::Result<Self::CurrentRef<'transport>, $crate::versioned::Error> {
                 ::core::result::Result::Ok(CurrentRef {
                     $( $mapped: &self.$mapped, )*
                     _phantom: ::core::marker::PhantomData,
@@ -185,7 +205,7 @@ macro_rules! impl_struct {
 
             fn from_current(
                 current: Self::Current,
-            ) -> ::core::result::Result<Self, ::std::string::String> {
+            ) -> ::core::result::Result<Self, $crate::versioned::Error> {
                 ::core::result::Result::Ok(Self {
                     $( $mapped: current.$mapped, )*
                     $( $dfield: $dinit, )*
@@ -199,7 +219,7 @@ macro_rules! impl_struct {
 
             fn as_old<'transport>(
                 &'transport self,
-            ) -> ::core::result::Result<Self::OldRef<'transport>, ::std::string::String> {
+            ) -> ::core::result::Result<Self::OldRef<'transport>, $crate::versioned::Error> {
                 ::core::result::Result::Ok(OldRef {
                     $( $mapped: &self.$mapped, )*
                     $($old_extra_init)*
@@ -209,7 +229,7 @@ macro_rules! impl_struct {
 
             type Old = Old<$($generic_args)*>;
 
-            fn from_old(old: Self::Old) -> ::core::result::Result<Self, ::std::string::String> {
+            fn from_old(old: Self::Old) -> ::core::result::Result<Self, $crate::versioned::Error> {
                 ::core::result::Result::Ok(Self {
                     $( $mapped: old.$mapped, )*
                     $( $dfield: $dinit, )*
@@ -217,26 +237,11 @@ macro_rules! impl_struct {
             }
         }
 
-        impl<$($generic_decls)*> ::serde::Serialize for $name<$($generic_args)*>
-        $($wc)*
-        {
-            fn serialize<Ser>(&self, serializer: Ser) -> ::core::result::Result<Ser::Ok, Ser::Error>
-            where
-                Ser: ::serde::Serializer,
-            {
-                $crate::versioned::serialize(self, serializer)
-            }
-        }
-
-        impl<'de, $($generic_decls)*> ::serde::Deserialize<'de> for $name<$($generic_args)*>
-        $($wc)*
-        {
-            fn deserialize<De>(deserializer: De) -> ::core::result::Result<Self, De::Error>
-            where
-                De: ::serde::Deserializer<'de>,
-            {
-                $crate::versioned::deserialize(deserializer)
-            }
+        $crate::impl_serde! { @raw
+            name = [$name]
+            generic_decls = [$($generic_decls)*]
+            generic_args = [$($generic_args)*]
+            where_clause = [$($wc)*]
         }
         };
     };
@@ -247,7 +252,6 @@ macro_rules! impl_struct {
         name = [$name:ident]
         generic_decls = [$($generic_decls:tt)*]
         generic_args = [$($generic_args:tt)*]
-        versioner = [$versioner:ty]
         where_clause = [$($wc:tt)*]
         defaults = [$($dfield:ident = $dinit:expr),* $(,)?]
         rest = [ #[compact] $(#[$fattr:meta])* $field:ident : $fty:ty => $rename:literal, $($rest:tt)* ]
@@ -262,7 +266,6 @@ macro_rules! impl_struct {
             name = [$name]
             generic_decls = [$($generic_decls)*]
             generic_args = [$($generic_args)*]
-            versioner = [$versioner]
             where_clause = [$($wc)*]
             defaults = [$($dfield = $dinit,)*]
             rest = [ $($rest)* ]
@@ -292,7 +295,6 @@ macro_rules! impl_struct {
         name = [$name:ident]
         generic_decls = [$($generic_decls:tt)*]
         generic_args = [$($generic_args:tt)*]
-        versioner = [$versioner:ty]
         where_clause = [$($wc:tt)*]
         defaults = [$($dfield:ident = $dinit:expr),* $(,)?]
         rest = [ $(#[$fattr:meta])* $field:ident : $fty:ty = $init:expr, $($rest:tt)* ]
@@ -307,7 +309,6 @@ macro_rules! impl_struct {
             name = [$name]
             generic_decls = [$($generic_decls)*]
             generic_args = [$($generic_args)*]
-            versioner = [$versioner]
             where_clause = [$($wc)*]
             defaults = [$($dfield = $dinit,)*]
             rest = [ $($rest)* ]
@@ -325,7 +326,6 @@ macro_rules! impl_struct {
         name = [$name:ident]
         generic_decls = [$($generic_decls:tt)*]
         generic_args = [$($generic_args:tt)*]
-        versioner = [$versioner:ty]
         where_clause = [$($wc:tt)*]
         defaults = [$($dfield:ident = $dinit:expr),* $(,)?]
         rest = [ $(#[$fattr:meta])* $field:ident : $fty:ty => $rename:literal, $($rest:tt)* ]
@@ -340,7 +340,6 @@ macro_rules! impl_struct {
             name = [$name]
             generic_decls = [$($generic_decls)*]
             generic_args = [$($generic_args)*]
-            versioner = [$versioner]
             where_clause = [$($wc)*]
             defaults = [$($dfield = $dinit,)*]
             rest = [ $($rest)* ]
@@ -368,7 +367,7 @@ macro_rules! impl_struct {
 ///
 /// This generates the transported (serialized) representations of an enum
 /// for the current and old version, implements
-/// [Versioned](super::Versioned) for it and implements
+/// [Versioned](crate::versioned::Versioned) for it and implements
 /// [Serialize](serde::Serialize) and [Deserialize](serde::Deserialize)
 /// for it using these representations.
 ///
@@ -414,7 +413,6 @@ macro_rules! impl_struct {
 ///
 /// impl_enum! {
 ///     ListEvent<T>,
-///     versioner = RemocCompact,
 ///     variants {
 ///         Push(value: T) => "_0",
 ///         Done => "_1",
@@ -430,7 +428,6 @@ macro_rules! impl_enum {
     // All variants are unit variants: no references and thus no lifetime are required.
     (
         $name:ident $(< $( $gen:ident ),* $(,)? $(; $( const $cgen:ident : $cty:ty ),* $(,)? )? >)?,
-        versioner = $versioner:ty,
         variants {
             $( $(#[$vattr:meta])* $variant:ident => $rename:literal ),* $(,)?
         }
@@ -470,7 +467,7 @@ macro_rules! impl_enum {
             for $name<$( $($gen ,)* $( $($cgen ,)* )? )?>
         $( where $($wc)* )?
         {
-            type Versioner = $versioner;
+            type Versioner = $crate::versioned::compact::CompactVersioner;
 
             type CurrentRef<'transport>
                 = Current<$( $($gen ,)* $( $($cgen ,)* )? )?>
@@ -479,7 +476,7 @@ macro_rules! impl_enum {
 
             fn as_current<'transport>(
                 &'transport self,
-            ) -> ::core::result::Result<Self::CurrentRef<'transport>, ::std::string::String> {
+            ) -> ::core::result::Result<Self::CurrentRef<'transport>, $crate::versioned::Error> {
                 ::core::result::Result::Ok(match self {
                     $( Self::$variant => Current::$variant, )*
                 })
@@ -489,7 +486,7 @@ macro_rules! impl_enum {
 
             fn from_current(
                 current: Self::Current,
-            ) -> ::core::result::Result<Self, ::std::string::String> {
+            ) -> ::core::result::Result<Self, $crate::versioned::Error> {
                 ::core::result::Result::Ok(match current {
                     $( Current::$variant => Self::$variant, )*
                 })
@@ -502,7 +499,7 @@ macro_rules! impl_enum {
 
             fn as_old<'transport>(
                 &'transport self,
-            ) -> ::core::result::Result<Self::OldRef<'transport>, ::std::string::String> {
+            ) -> ::core::result::Result<Self::OldRef<'transport>, $crate::versioned::Error> {
                 ::core::result::Result::Ok(match self {
                     $( Self::$variant => Old::$variant, )*
                 })
@@ -510,35 +507,18 @@ macro_rules! impl_enum {
 
             type Old = Old<$( $($gen ,)* $( $($cgen ,)* )? )?>;
 
-            fn from_old(old: Self::Old) -> ::core::result::Result<Self, ::std::string::String> {
+            fn from_old(old: Self::Old) -> ::core::result::Result<Self, $crate::versioned::Error> {
                 ::core::result::Result::Ok(match old {
                     $( Old::$variant => Self::$variant, )*
                 })
             }
         }
 
-        impl<$( $($gen ,)* $( $(const $cgen : $cty ,)* )? )?> ::serde::Serialize
-            for $name<$( $($gen ,)* $( $($cgen ,)* )? )?>
-        $( where $($wc)* )?
-        {
-            fn serialize<Ser>(&self, serializer: Ser) -> ::core::result::Result<Ser::Ok, Ser::Error>
-            where
-                Ser: ::serde::Serializer,
-            {
-                $crate::versioned::serialize(self, serializer)
-            }
-        }
-
-        impl<'de, $( $($gen ,)* $( $(const $cgen : $cty ,)* )? )?> ::serde::Deserialize<'de>
-            for $name<$( $($gen ,)* $( $($cgen ,)* )? )?>
-        $( where $($wc)* )?
-        {
-            fn deserialize<De>(deserializer: De) -> ::core::result::Result<Self, De::Error>
-            where
-                De: ::serde::Deserializer<'de>,
-            {
-                $crate::versioned::deserialize(deserializer)
-            }
+        $crate::impl_serde! { @raw
+            name = [$name]
+            generic_decls = [$( $($gen ,)* $( $(const $cgen : $cty ,)* )? )?]
+            generic_args = [$( $($gen ,)* $( $($cgen ,)* )? )?]
+            where_clause = [ $( where $($wc)* )? ]
         }
         };
     };
@@ -546,7 +526,6 @@ macro_rules! impl_enum {
     // General case: at least one variant carries data.
     (
         $name:ident $(< $( $gen:ident ),* $(,)? $(; $( const $cgen:ident : $cty:ty ),* $(,)? )? >)?,
-        versioner = $versioner:ty,
         variants { $($variants:tt)* }
         $( where $($wc:tt)* )?
     ) => {
@@ -554,7 +533,6 @@ macro_rules! impl_enum {
             name = [$name]
             generic_decls = [$( $($gen ,)* $( $(const $cgen : $cty ,)* )? )?]
             generic_args = [$( $($gen ,)* $( $($cgen ,)* )? )?]
-            versioner = [$versioner]
             where_clause = [ $( where $($wc)* )? ]
             rest = [ $($variants)* ]
             current_ref_variants = []
@@ -573,7 +551,6 @@ macro_rules! impl_enum {
         name = [$name:ident]
         generic_decls = [$($generic_decls:tt)*]
         generic_args = [$($generic_args:tt)*]
-        versioner = [$versioner:ty]
         where_clause = [$($wc:tt)*]
         rest = []
         current_ref_variants = [$($current_ref_variants:tt)*]
@@ -633,7 +610,7 @@ macro_rules! impl_enum {
         impl<$($generic_decls)*> $crate::versioned::Versioned for $name<$($generic_args)*>
         $($wc)*
         {
-            type Versioner = $versioner;
+            type Versioner = $crate::versioned::compact::CompactVersioner;
 
             type CurrentRef<'transport>
                 = CurrentRef<'transport, $($generic_args)*>
@@ -642,7 +619,7 @@ macro_rules! impl_enum {
 
             fn as_current<'transport>(
                 &'transport self,
-            ) -> ::core::result::Result<Self::CurrentRef<'transport>, ::std::string::String> {
+            ) -> ::core::result::Result<Self::CurrentRef<'transport>, $crate::versioned::Error> {
                 ::core::result::Result::Ok(match self { $($as_current_arms)* })
             }
 
@@ -650,7 +627,7 @@ macro_rules! impl_enum {
 
             fn from_current(
                 current: Self::Current,
-            ) -> ::core::result::Result<Self, ::std::string::String> {
+            ) -> ::core::result::Result<Self, $crate::versioned::Error> {
                 ::core::result::Result::Ok(match current { $($from_current_arms)* })
             }
 
@@ -661,37 +638,22 @@ macro_rules! impl_enum {
 
             fn as_old<'transport>(
                 &'transport self,
-            ) -> ::core::result::Result<Self::OldRef<'transport>, ::std::string::String> {
+            ) -> ::core::result::Result<Self::OldRef<'transport>, $crate::versioned::Error> {
                 ::core::result::Result::Ok(match self { $($as_old_arms)* })
             }
 
             type Old = Old<$($generic_args)*>;
 
-            fn from_old(old: Self::Old) -> ::core::result::Result<Self, ::std::string::String> {
+            fn from_old(old: Self::Old) -> ::core::result::Result<Self, $crate::versioned::Error> {
                 ::core::result::Result::Ok(match old { $($from_old_arms)* })
             }
         }
 
-        impl<$($generic_decls)*> ::serde::Serialize for $name<$($generic_args)*>
-        $($wc)*
-        {
-            fn serialize<Ser>(&self, serializer: Ser) -> ::core::result::Result<Ser::Ok, Ser::Error>
-            where
-                Ser: ::serde::Serializer,
-            {
-                $crate::versioned::serialize(self, serializer)
-            }
-        }
-
-        impl<'de, $($generic_decls)*> ::serde::Deserialize<'de> for $name<$($generic_args)*>
-        $($wc)*
-        {
-            fn deserialize<De>(deserializer: De) -> ::core::result::Result<Self, De::Error>
-            where
-                De: ::serde::Deserializer<'de>,
-            {
-                $crate::versioned::deserialize(deserializer)
-            }
+        $crate::impl_serde! { @raw
+            name = [$name]
+            generic_decls = [$($generic_decls)*]
+            generic_args = [$($generic_args)*]
+            where_clause = [$($wc)*]
         }
         };
     };
@@ -701,7 +663,6 @@ macro_rules! impl_enum {
         name = [$name:ident]
         generic_decls = [$($generic_decls:tt)*]
         generic_args = [$($generic_args:tt)*]
-        versioner = [$versioner:ty]
         where_clause = [$($wc:tt)*]
         rest = [ #[skip] $(#[$vattr:meta])* $variant:ident, $($rest:tt)* ]
         current_ref_variants = [$($current_ref_variants:tt)*]
@@ -717,7 +678,6 @@ macro_rules! impl_enum {
             name = [$name]
             generic_decls = [$($generic_decls)*]
             generic_args = [$($generic_args)*]
-            versioner = [$versioner]
             where_clause = [$($wc)*]
             rest = [ $($rest)* ]
             current_ref_variants = [ $($current_ref_variants)* ]
@@ -727,20 +687,20 @@ macro_rules! impl_enum {
             as_current_arms = [
                 $($as_current_arms)*
                 Self::$variant { .. } => {
-                    return ::core::result::Result::Err(::std::format!(
+                    return ::core::result::Result::Err(::std::convert::Into::into(::std::format!(
                         "the enum variant {}::{} cannot be serialized",
                         ::core::stringify!($name), ::core::stringify!($variant)
-                    ))
+                    )))
                 }
             ]
             from_current_arms = [ $($from_current_arms)* ]
             as_old_arms = [
                 $($as_old_arms)*
                 Self::$variant { .. } => {
-                    return ::core::result::Result::Err(::std::format!(
+                    return ::core::result::Result::Err(::std::convert::Into::into(::std::format!(
                         "the enum variant {}::{} cannot be serialized",
                         ::core::stringify!($name), ::core::stringify!($variant)
-                    ))
+                    )))
                 }
             ]
             from_old_arms = [ $($from_old_arms)* ]
@@ -752,7 +712,6 @@ macro_rules! impl_enum {
         name = [$name:ident]
         generic_decls = [$($generic_decls:tt)*]
         generic_args = [$($generic_args:tt)*]
-        versioner = [$versioner:ty]
         where_clause = [$($wc:tt)*]
         rest = [
             $(#[$vattr:meta])*
@@ -771,7 +730,6 @@ macro_rules! impl_enum {
             name = [$name]
             generic_decls = [$($generic_decls)*]
             generic_args = [$($generic_args)*]
-            versioner = [$versioner]
             where_clause = [$($wc)*]
             rest = [ $($rest)* ]
             current_ref_variants = [
@@ -820,7 +778,6 @@ macro_rules! impl_enum {
         name = [$name:ident]
         generic_decls = [$($generic_decls:tt)*]
         generic_args = [$($generic_args:tt)*]
-        versioner = [$versioner:ty]
         where_clause = [$($wc:tt)*]
         rest = [
             $(#[$vattr:meta])*
@@ -839,7 +796,6 @@ macro_rules! impl_enum {
             name = [$name]
             generic_decls = [$($generic_decls)*]
             generic_args = [$($generic_args)*]
-            versioner = [$versioner]
             where_clause = [$($wc)*]
             rest = [ $($rest)* ]
             current_ref_variants = [
@@ -888,7 +844,6 @@ macro_rules! impl_enum {
         name = [$name:ident]
         generic_decls = [$($generic_decls:tt)*]
         generic_args = [$($generic_args:tt)*]
-        versioner = [$versioner:ty]
         where_clause = [$($wc:tt)*]
         rest = [ $(#[$vattr:meta])* $variant:ident => $rename:literal, $($rest:tt)* ]
         current_ref_variants = [$($current_ref_variants:tt)*]
@@ -904,7 +859,6 @@ macro_rules! impl_enum {
             name = [$name]
             generic_decls = [$($generic_decls)*]
             generic_args = [$($generic_args)*]
-            versioner = [$versioner]
             where_clause = [$($wc)*]
             rest = [ $($rest)* ]
             current_ref_variants = [

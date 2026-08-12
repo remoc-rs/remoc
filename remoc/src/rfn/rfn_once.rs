@@ -72,9 +72,8 @@ pub struct RFnOnce<A, R, Codec = codec::Default> {
     request_tx: oneshot::Sender<RFnRequest<A, R, Codec>, Codec>,
 }
 
-crate::versioned::impl_struct! {
+crate::versioned::compact::impl_struct! {
     RFnOnce<A, R, Codec>,
-    versioner = crate::versioned::RemocCompact,
     fields {
         request_tx: oneshot::Sender<RFnRequest<A, R, Codec>, Codec> => "_0",
     }

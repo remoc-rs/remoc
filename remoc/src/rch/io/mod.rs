@@ -124,7 +124,7 @@
 //! ```
 
 use super::{bin, oneshot};
-use crate::{codec, versioned::RemocCompact};
+use crate::codec;
 
 mod receiver;
 mod sender;
@@ -143,9 +143,8 @@ pub(super) enum SizeInfo<Codec> {
     Undetermined(oneshot::Receiver<u64, Codec>),
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     SizeInfo<Codec>,
-    versioner = RemocCompact,
     variants {
         Determined(size: u64) => "_0",
         Undetermined(rx: oneshot::Receiver<u64, Codec>) => "_1",

@@ -12,7 +12,7 @@ use super::{
     super::{DEFAULT_BUFFER, DEFAULT_MAX_ITEM_SIZE, base, mpsc},
     BroadcastMsg,
 };
-use crate::{RemoteSend, chmux, codec, versioned::RemocCompact};
+use crate::{RemoteSend, chmux, codec};
 
 /// An error occurred during receiving over a broadcast channel.
 #[derive(Clone, Debug)]
@@ -31,9 +31,8 @@ pub enum RecvError {
     RemoteListen(chmux::ListenerError),
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     RecvError,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Closed => "_0",
         Lagged => "_1",
@@ -122,9 +121,8 @@ pub enum TryRecvError {
     RemoteListen(chmux::ListenerError),
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     TryRecvError,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Empty => "_0",
         Closed => "_1",
@@ -225,9 +223,8 @@ pub struct Receiver<
     rx: mpsc::Receiver<BroadcastMsg<T>, Codec, BUFFER, MAX_ITEM_SIZE>,
 }
 
-crate::versioned::impl_struct! {
+crate::versioned::compact::impl_struct! {
     Receiver<T, Codec; const BUFFER: usize, const MAX_ITEM_SIZE: usize>,
-    versioner = RemocCompact,
     fields {
         rx: mpsc::Receiver<BroadcastMsg<T>, Codec, BUFFER, MAX_ITEM_SIZE> => "_0",
     }
@@ -307,9 +304,8 @@ pub enum StreamError {
     RemoteListen(chmux::ListenerError),
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     StreamError,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Lagged => "_0",
         RemoteReceive(err: base::RecvError) => "_1",

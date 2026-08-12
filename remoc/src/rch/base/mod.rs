@@ -81,9 +81,8 @@ pub enum ConnectError {
     NoConnectRequest,
 }
 
-crate::versioned::impl_enum! {
+crate::versioned::compact::impl_enum! {
     ConnectError,
-    versioner = crate::versioned::RemocCompact,
     variants {
         Connect(err: chmux::ConnectError) => "_0",
         Listen(err: chmux::ListenerError) => "_1",

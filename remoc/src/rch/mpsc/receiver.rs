@@ -601,7 +601,9 @@ where
 
             // Establish additional parallel chmux channels.
             let mut raw_txs = vec![raw_tx];
-            raw_txs.extend(future::join_all(parallel_rxs).await.into_iter().filter_map(|res| res.ok()));
+            for raw_tx in future::join_all(parallel_rxs).await.into_iter().flatten() {
+                raw_txs.push(raw_tx);
+            }
 
             super::send_impl(
                 ErasedSerializer::new::<Result<T, RecvError>, Codec>(),
@@ -657,19 +659,19 @@ where
         let (remote_send_err_tx, remote_send_err_rx) = tokio::sync::watch::channel(None);
 
         // Accept additional paralllel chmux channels.
-        let parallel_txs: Vec<_> = parallel
-            .into_iter()
-            .filter_map(|parallel_port| {
-                let (parallel_tx, parallel_rx) = tokio::sync::oneshot::channel();
-                PortDeserializer::accept::<D::Error, _, _>(parallel_port, async move |request| {
-                    if let Ok((_raw_tx, raw_rx)) = request.accept().await {
-                        let _ = parallel_tx.send(raw_rx);
-                    }
-                })
-                .ok()?;
-                Some(parallel_rx)
+        let mut parallel_txs = Vec::with_capacity(parallel.len());
+        for parallel_port in parallel {
+            let (parallel_tx, parallel_rx) = tokio::sync::oneshot::channel();
+            if PortDeserializer::accept::<D::Error, _, _>(parallel_port, async move |request| {
+                if let Ok((_raw_tx, raw_rx)) = request.accept().await {
+                    let _ = parallel_tx.send(raw_rx);
+                }
             })
-            .collect();
+            .is_ok()
+            {
+                parallel_txs.push(parallel_rx);
+            }
+        }
         let parallel = parallel_txs.len();
 
         PortDeserializer::accept(port, async move |request| {
@@ -684,7 +686,9 @@ where
 
             // Establish additional parallel chmux channels.
             let mut raw_rxs = vec![raw_rx];
-            raw_rxs.extend(future::join_all(parallel_txs).await.into_iter().filter_map(|res| res.ok()));
+            for raw_rx in future::join_all(parallel_txs).await.into_iter().flatten() {
+                raw_rxs.push(raw_rx);
+            }
 
             super::recv_impl(
                 ErasedDeserializer::new::<Result<T, RecvError>, Codec>(),

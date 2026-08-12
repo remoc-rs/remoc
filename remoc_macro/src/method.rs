@@ -53,7 +53,11 @@ impl NamedArg {
 /// A method in a trait.
 #[derive(Debug)]
 pub struct TraitMethod {
-    /// Attributes.
+    /// Documentation attributes, applied to the trait method and the request enum variant.
+    pub doc_attrs: Vec<Attribute>,
+    /// Serde attributes, applied to the request enum variant.
+    pub serde_attrs: Vec<Attribute>,
+    /// Other attributes, applied to the trait method.
     pub attrs: Vec<Attribute>,
     /// Name.
     pub ident: Ident,
@@ -133,6 +137,21 @@ impl TraitMethod {
                 return false;
             }
             true
+        });
+
+        // Split remaining attributes by how they are applied to the generated items.
+        let mut doc_attrs = Vec::new();
+        let mut serde_attrs = Vec::new();
+        attrs.retain(|attr| {
+            if attr.path().is_ident("doc") {
+                doc_attrs.push(attr.clone());
+                false
+            } else if attr.path().is_ident("serde") {
+                serde_attrs.push(attr.clone());
+                false
+            } else {
+                true
+            }
         });
 
         // Parse generics.
@@ -223,14 +242,15 @@ impl TraitMethod {
             None
         };
 
-        Ok(Self { attrs, ident, self_ref, args, ret_ty, bounds, cancel, body })
+        Ok(Self { doc_attrs, serde_attrs, attrs, ident, self_ref, args, ret_ty, bounds, cancel, body })
     }
 }
 
 impl TraitMethod {
     /// Method definition within trait (without argument attributes).
     pub fn trait_method(&self, impl_future: bool) -> TokenStream {
-        let Self { attrs, ident, ret_ty, .. } = self;
+        let Self { doc_attrs, attrs, ident, ret_ty, .. } = self;
+        let doc_attrs = attribute_tokens(doc_attrs);
         let attrs = attribute_tokens(attrs);
 
         // Build argument list.
@@ -270,9 +290,9 @@ impl TraitMethod {
                 let bounds = &self.bounds;
                 quote! { + #bounds }
             };
-            quote! { #attrs fn #ident ( #args ) -> impl ::std::future::Future<Output = #ret_ty> + ::std::marker::Send #bounds }
+            quote! { #doc_attrs #attrs fn #ident ( #args ) -> impl ::std::future::Future<Output = #ret_ty> + ::std::marker::Send #bounds }
         } else {
-            quote! { #attrs async fn #ident ( #args ) -> #ret_ty }
+            quote! { #doc_attrs #attrs async fn #ident ( #args ) -> #ret_ty }
         };
 
         quote! {
@@ -308,15 +328,9 @@ impl TraitMethod {
             });
         }
 
-        let docs_attrs = attribute_tokens(
-            &self
-                .attrs
-                .iter()
-                .filter(|attr| matches!(attr.path().get_ident(), Some(ident) if *ident == "doc"))
-                .cloned()
-                .collect::<Vec<_>>(),
-        );
-        quote! { #docs_attrs #ident {#entries} , }
+        let doc_attrs = attribute_tokens(&self.doc_attrs);
+        let serde_attrs = attribute_tokens(&self.serde_attrs);
+        quote! { #doc_attrs #serde_attrs #ident {#entries} , }
     }
 
     /// Enum match discriminator and dispatch code.

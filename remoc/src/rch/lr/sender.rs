@@ -78,11 +78,6 @@ impl<T> SendError<T> {
         matches!(&self.kind, SendErrorKind::Send(_) | SendErrorKind::Connect(_))
     }
 
-    /// Returns whether the error is final, i.e. no further send operation can succeed.
-    pub fn is_final(&self) -> bool {
-        self.is_disconnected()
-    }
-
     /// Whether the error is caused by the item to be sent.
     pub fn is_item_specific(&self) -> bool {
         matches!(&self.kind, SendErrorKind::Serialize(_) | SendErrorKind::MaxItemSizeExceeded)
@@ -101,10 +96,6 @@ impl<T> SendErrorExt for SendError<T> {
 
     fn is_disconnected(&self) -> bool {
         self.is_disconnected()
-    }
-
-    fn is_final(&self) -> bool {
-        self.is_final()
     }
 
     fn is_item_specific(&self) -> bool {

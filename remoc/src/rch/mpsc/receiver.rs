@@ -70,10 +70,10 @@ impl TryFrom<TryRecvError> for RecvError {
 impl Error for RecvError {}
 
 impl RecvError {
-    /// Returns whether the error is final, i.e. no further receive operation can succeed.
-    pub fn is_final(&self) -> bool {
+    /// Returns whether the connection was rejected or failed.
+    pub fn is_disconnected(&self) -> bool {
         match self {
-            Self::RemoteReceive(err) => err.is_final(),
+            Self::RemoteReceive(err) => err.is_disconnected(),
             Self::RemoteConnect(_) | Self::RemoteListen(_) => true,
         }
     }
@@ -131,11 +131,11 @@ impl From<RecvError> for TryRecvError {
 impl Error for TryRecvError {}
 
 impl TryRecvError {
-    /// Returns whether the error is final, i.e. no further receive operation can succeed.
-    pub fn is_final(&self) -> bool {
+    /// Returns whether the connection was rejected or failed.
+    pub fn is_disconnected(&self) -> bool {
         match self {
             Self::Empty => false,
-            Self::RemoteReceive(err) => err.is_final(),
+            Self::RemoteReceive(err) => err.is_disconnected(),
             Self::Closed | Self::RemoteConnect(_) | Self::RemoteListen(_) => true,
         }
     }
@@ -254,7 +254,7 @@ impl<T, Codec, const BUFFER: usize, const MAX_ITEM_SIZE: usize> Receiver<T, Code
                 Some(send_req) => match send_req.ack() {
                     Ok(value_opt) => return Ok(Some(value_opt)),
                     Err(err) => {
-                        if err.is_final() {
+                        if err.is_disconnected() {
                             if self.final_err.is_none() {
                                 self.final_err = Some(err);
                             }
@@ -285,7 +285,7 @@ impl<T, Codec, const BUFFER: usize, const MAX_ITEM_SIZE: usize> Receiver<T, Code
                 Some(send_req) => match send_req.ack() {
                     Ok(value_opt) => return Poll::Ready(Ok(Some(value_opt))),
                     Err(err) => {
-                        if err.is_final() {
+                        if err.is_disconnected() {
                             if self.final_err.is_none() {
                                 self.final_err = Some(err);
                             }
@@ -317,7 +317,7 @@ impl<T, Codec, const BUFFER: usize, const MAX_ITEM_SIZE: usize> Receiver<T, Code
                 Ok(send_req) => match send_req.ack() {
                     Ok(value_opt) => return Ok(value_opt),
                     Err(err) => {
-                        if err.is_final() {
+                        if err.is_disconnected() {
                             if self.final_err.is_none() {
                                 self.final_err = Some(err);
                             }
@@ -390,7 +390,7 @@ impl<T, Codec, const BUFFER: usize, const MAX_ITEM_SIZE: usize> Receiver<T, Code
                     p += 1;
                 }
                 Err(err) => {
-                    if err.is_final() {
+                    if err.is_disconnected() {
                         if self.final_err.is_none() {
                             self.final_err = Some(err);
                         }

@@ -717,8 +717,8 @@ async fn try_reserve_closed() {
     match tx.try_reserve() {
         Err(err) => {
             println!("Got expected error: {err}");
-            assert!(err.is_closed() || err.is_disconnected(), "error should indicate closed/disconnected");
-            assert!(err.is_final(), "error after close should be final");
+            assert!(err.is_closed(), "error should indicate closed");
+            assert!(err.is_disconnected(), "error after close should be disconnected");
         }
         Ok(_) => panic!("try_reserve should fail after channel is closed"),
     }

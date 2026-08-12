@@ -80,10 +80,10 @@ impl fmt::Display for RecvError {
 impl Error for RecvError {}
 
 impl RecvError {
-    /// Returns whether the error is final, i.e. no further receive operation can succeed.
-    pub fn is_final(&self) -> bool {
+    /// Returns whether the connection failed.
+    pub fn is_disconnected(&self) -> bool {
         match self {
-            Self::Receive(err) => err.is_final(),
+            Self::Receive(err) => err.is_disconnected(),
             Self::Connect(_) => true,
             Self::Deserialize(_) | Self::MissingPorts(_) | Self::MaxItemSizeExceeded => false,
         }

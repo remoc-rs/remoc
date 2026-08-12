@@ -51,9 +51,9 @@ impl RecvError {
         matches!(self, Self::ChMux)
     }
 
-    /// Returns whether the error is final, i.e. no further receive operation can succeed.
-    pub fn is_final(&self) -> bool {
-        self.is_terminated()
+    /// Returns whether the remote endpoint rejected the channel or the connection failed.
+    pub fn is_disconnected(&self) -> bool {
+        matches!(self, Self::ChMux | Self::Rejected { .. })
     }
 }
 

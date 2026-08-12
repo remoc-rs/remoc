@@ -50,7 +50,6 @@ async fn close() {
 
     match tx.send(0) {
         Ok(_) => panic!("send after close succeeded"),
-        #[allow(deprecated)]
         Err(err) if err.is_closed() => (),
         Err(err) => panic!("wrong error after close: {err}"),
     }

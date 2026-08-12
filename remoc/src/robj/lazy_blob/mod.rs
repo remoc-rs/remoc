@@ -213,7 +213,7 @@ where
                         let fw_tx: fw_bin::Sender = match req_rx.recv().await {
                             Ok(Some(fw_tx)) => fw_tx,
                             Ok(None) => break,
-                            Err(err) if err.is_final() => break,
+                            Err(err) if err.is_disconnected() => break,
                             Err(_) => continue,
                         };
 

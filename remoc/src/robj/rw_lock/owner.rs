@@ -81,7 +81,7 @@ where
                     let WriteRequest {value_tx, new_value_rx, confirm_tx} = match res {
                         Ok(Some(req)) => req,
                         Ok(None) => break,
-                        Err(err) if err.is_final() => break,
+                        Err(err) if err.is_disconnected() => break,
                         Err(_) => continue,
                     };
 
@@ -125,7 +125,7 @@ where
                     let ReadRequest {value_tx} = match res {
                         Ok(Some(req)) => req,
                         Ok(None) => break,
-                        Err(err) if err.is_final() => break,
+                        Err(err) if err.is_disconnected() => break,
                         Err(_) => continue,
                     };
 

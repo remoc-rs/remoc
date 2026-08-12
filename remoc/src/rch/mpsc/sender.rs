@@ -78,13 +78,10 @@ impl<T> SendError<T> {
 
     /// True, if the remote endpoint closed the channel, was dropped or the connection failed.
     pub fn is_disconnected(&self) -> bool {
-        !matches!(self, Self::RemoteSend(base::SendErrorKind::Serialize(_)))
-    }
-
-    /// Returns whether the error is final, i.e. no further send operation can succeed.
-    #[deprecated = "a remoc::rch::mpsc::SendError is always final"]
-    pub fn is_final(&self) -> bool {
-        true
+        match self {
+            Self::RemoteSend(err) => err.is_disconnected(),
+            Self::Closed(_) | Self::RemoteConnect(_) | Self::RemoteListen(_) | Self::RemoteForward => true,
+        }
     }
 
     /// Whether the error is caused by the item to be sent.
@@ -111,11 +108,6 @@ impl<T> SendErrorExt for SendError<T> {
 
     fn is_disconnected(&self) -> bool {
         self.is_disconnected()
-    }
-
-    fn is_final(&self) -> bool {
-        #[allow(deprecated)]
-        self.is_final()
     }
 
     fn is_item_specific(&self) -> bool {
@@ -188,12 +180,11 @@ impl<T> TrySendError<T> {
 
     /// True, if the remote endpoint closed the channel, was dropped or the connection failed.
     pub fn is_disconnected(&self) -> bool {
-        !matches!(self, Self::RemoteSend(base::SendErrorKind::Serialize(_)) | Self::Full(_))
-    }
-
-    /// Returns whether the error is final, i.e. no further send operation can succeed.
-    pub fn is_final(&self) -> bool {
-        !matches!(self, Self::Full(_))
+        match self {
+            Self::RemoteSend(err) => err.is_disconnected(),
+            Self::Closed(_) | Self::RemoteConnect(_) | Self::RemoteListen(_) | Self::RemoteForward => true,
+            Self::Full(_) => false,
+        }
     }
 
     /// Whether the error is caused by the item to be sent.
@@ -209,10 +200,6 @@ impl<T> SendErrorExt for TrySendError<T> {
 
     fn is_disconnected(&self) -> bool {
         self.is_disconnected()
-    }
-
-    fn is_final(&self) -> bool {
-        self.is_final()
     }
 
     fn is_item_specific(&self) -> bool {

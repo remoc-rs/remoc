@@ -403,7 +403,7 @@ where
         &mut self, req: &'a Result<Option<Req<V, R, M>>, remoc::rch::mpsc::RecvError>,
     ) -> BoxFuture<'a, DispatchDecision> {
         let decision = match req {
-            Err(err) if !err.is_final() => {
+            Err(err) if !err.is_disconnected() => {
                 self.count.fetch_add(1, Ordering::SeqCst);
                 DispatchDecision::Drop
             }

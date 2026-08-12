@@ -176,7 +176,7 @@ where
         &mut self, req: &'a Result<Option<Req<Value, Ref, RefMut>>, mpsc::RecvError>,
     ) -> BoxFuture<'a, DispatchDecision> {
         let decision = match req {
-            Err(err) if !err.is_final() => self.on_non_final_recv_error(err),
+            Err(err) if !err.is_disconnected() => self.on_non_final_recv_error(err),
             _ => DispatchDecision::Pass,
         };
         future::ready(decision).boxed()
@@ -193,7 +193,7 @@ where
         &mut self, req: &'a Result<Option<Req<Value, Ref, RefMut>>, mpsc::RecvError>,
     ) -> BoxFuture<'a, RecvDecision> {
         let decision = match req {
-            Err(err) if !err.is_final() => self.on_non_final_req_recv_error(err),
+            Err(err) if !err.is_disconnected() => self.on_non_final_req_recv_error(err),
             _ => RecvDecision::Pass,
         };
         future::ready(decision).boxed()

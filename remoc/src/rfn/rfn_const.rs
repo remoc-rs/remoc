@@ -195,7 +195,7 @@ where
                                     }.in_current_span());
                                 }
                                 Ok(None) => break,
-                                Err(err) if err.is_final() => break,
+                                Err(err) if err.is_disconnected() => break,
                                 Err(_) => (),
                             }
                         }

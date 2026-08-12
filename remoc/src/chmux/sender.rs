@@ -63,20 +63,15 @@ crate::versioned::compact::impl_enum! {
 
 impl SendError {
     /// Returns true, if error it due to channel being closed.
+    /// 
+    /// The close may be gracefully or not.
     pub fn is_closed(&self) -> bool {
-        matches!(self, Self::Closed { gracefully: true })
+        matches!(self, Self::Closed { .. })
     }
 
-    /// True, if the remote endpoint closed the channel, was dropped or the connection failed.
-    #[deprecated = "a chmux::SendError is always due to disconnection"]
+    /// True, if the remote endpoint closed or rejected the channel, was dropped or the connection failed.
     pub fn is_disconnected(&self) -> bool {
-        true
-    }
-
-    /// Returns whether the error is final, i.e. no further send operation can succeed.
-    #[deprecated = "a remoc::chmux::SendError is always final"]
-    pub fn is_final(&self) -> bool {
-        true
+        matches!(self, Self::ChMux | Self::Closed { .. } | Self::Rejected { .. })
     }
 }
 
@@ -143,14 +138,6 @@ impl TrySendError {
         match self {
             Self::Full => false,
             Self::Send(err) => err.is_closed(),
-        }
-    }
-
-    /// Returns whether the error is final, i.e. no further send operation can succeed.
-    pub fn is_final(&self) -> bool {
-        match self {
-            Self::Full => false,
-            Self::Send(_) => true,
         }
     }
 }

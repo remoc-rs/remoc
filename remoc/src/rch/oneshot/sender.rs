@@ -37,12 +37,6 @@ impl<T> SendError<T> {
         true
     }
 
-    /// Returns whether the error is final, i.e. no further send operation can succeed.
-    #[deprecated = "a remoc::rch::oneshot::SendError is always final"]
-    pub fn is_final(&self) -> bool {
-        true
-    }
-
     /// Returns the error without the contained item.
     pub fn without_item(self) -> SendError<()> {
         match self {
@@ -58,13 +52,8 @@ impl<T> SendErrorExt for SendError<T> {
     }
 
     fn is_disconnected(&self) -> bool {
-        #[allow(deprecated)]
+        #[expect(deprecated)]
         self.is_disconnected()
-    }
-
-    fn is_final(&self) -> bool {
-        #[allow(deprecated)]
-        self.is_final()
     }
 
     fn is_item_specific(&self) -> bool {

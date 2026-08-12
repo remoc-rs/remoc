@@ -85,12 +85,7 @@ impl SendErrorKind {
 
     /// True, if the remote endpoint closed the channel, was dropped or the connection failed.
     pub fn is_disconnected(&self) -> bool {
-        matches!(self, Self::Send(_))
-    }
-
-    /// Returns whether the error is final, i.e. no further send operation can succeed.
-    pub fn is_final(&self) -> bool {
-        matches!(self, Self::Send(_))
+        matches!(self, Self::Send(err) if err.is_disconnected())
     }
 
     /// Returns whether the error is caused by the item to be sent.
@@ -114,11 +109,6 @@ impl<T> SendError<T> {
         self.kind.is_disconnected()
     }
 
-    /// Returns whether the error is final, i.e. no further send operation can succeed.
-    pub fn is_final(&self) -> bool {
-        self.kind.is_final()
-    }
-
     /// Returns whether the error is caused by the item to be sent.
     pub fn is_item_specific(&self) -> bool {
         self.kind.is_item_specific()
@@ -137,10 +127,6 @@ impl<T> SendErrorExt for SendError<T> {
 
     fn is_disconnected(&self) -> bool {
         self.is_disconnected()
-    }
-
-    fn is_final(&self) -> bool {
-        self.is_final()
     }
 
     fn is_item_specific(&self) -> bool {

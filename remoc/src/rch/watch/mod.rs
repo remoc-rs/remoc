@@ -531,11 +531,11 @@ async fn recv_impl(
                     },
                     Ok(None) => break,
                     Err(err) => {
-                        let is_final_err = err.is_final();
+                        let is_disconnected_err = err.is_disconnected();
                         if tx.send_err(RecvError::RemoteReceive(err)).is_err() {
                             break
                         }
-                        if is_final_err {
+                        if is_disconnected_err {
                             break;
                         }
                     },

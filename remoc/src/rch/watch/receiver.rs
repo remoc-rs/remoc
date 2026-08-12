@@ -56,10 +56,10 @@ impl fmt::Display for RecvError {
 impl Error for RecvError {}
 
 impl RecvError {
-    /// Returns whether the error is final, i.e. no further receive operation can succeed.
-    pub fn is_final(&self) -> bool {
+    /// Returns whether the connection was rejected or failed.
+    pub fn is_disconnected(&self) -> bool {
         match self {
-            Self::RemoteReceive(err) => err.is_final(),
+            Self::RemoteReceive(err) => err.is_disconnected(),
             Self::RemoteConnect(_) | Self::RemoteListen(_) => true,
         }
     }
@@ -219,7 +219,7 @@ impl<T, Codec, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, MAX_ITEM_SIZE> {
     /// The current value will not be marked as seen.
     pub fn has_changed(&self) -> Result<bool, ChangedError> {
         if let Err(err) = &*self.rx.borrow()
-            && err.is_final()
+            && err.is_disconnected()
         {
             return Err(ChangedError::Recv(err.clone()));
         }
@@ -229,13 +229,13 @@ impl<T, Codec, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, MAX_ITEM_SIZE> {
     /// Wait for a change notification, then mark the newest value as seen.
     pub async fn changed(&mut self) -> Result<(), ChangedError> {
         if let Err(err) = &*self.rx.borrow()
-            && err.is_final()
+            && err.is_disconnected()
         {
             return Err(ChangedError::Recv(err.clone()));
         }
         self.rx.changed().await.map_err(|_| ChangedError::Closed)?;
         if let Err(err) = &*self.rx.borrow()
-            && err.is_final()
+            && err.is_disconnected()
         {
             return Err(ChangedError::Recv(err.clone()));
         }

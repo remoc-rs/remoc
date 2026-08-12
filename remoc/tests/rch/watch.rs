@@ -767,7 +767,7 @@ async fn conn_failure_receiver_changed() {
         Err(ChangedError::Recv(err)) => err,
         other => panic!("expected ChangedError::RecvError, got: {other:?}"),
     };
-    assert!(err.is_final(), "RecvError reported by changed() must be final");
+    assert!(err.is_disconnected(), "RecvError reported by changed() must be disconnected");
 
     // `borrow()` still surfaces the underlying RecvError.
     let borrow_res = rx.borrow().map(|v| *v);
@@ -778,10 +778,10 @@ async fn conn_failure_receiver_changed() {
     // (idempotent terminal state) rather than degrading to `Closed`.
     let res2 = rx.changed().await;
     println!("Second changed() result: {res2:?}");
-    assert!(matches!(res2, Err(ChangedError::Recv(ref e)) if e.is_final()));
+    assert!(matches!(res2, Err(ChangedError::Recv(ref e)) if e.is_disconnected()));
 
     // `has_changed()` also surfaces the final RecvError.
-    assert!(matches!(rx.has_changed(), Err(ChangedError::Recv(ref e)) if e.is_final()));
+    assert!(matches!(rx.has_changed(), Err(ChangedError::Recv(ref e)) if e.is_disconnected()));
 }
 
 #[cfg_attr(not(feature = "js"), tokio::test)]

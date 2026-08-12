@@ -53,10 +53,10 @@ impl RecvError {
         matches!(self, Self::Lagged)
     }
 
-    /// Returns whether the error is final, i.e. no further receive operation can succeed.
-    pub fn is_final(&self) -> bool {
+    /// Returns whether the connection was closed or failed.
+    pub fn is_disconnected(&self) -> bool {
         match self {
-            Self::RemoteReceive(err) => err.is_final(),
+            Self::RemoteReceive(err) => err.is_disconnected(),
             Self::Closed | Self::RemoteConnect(_) | Self::RemoteListen(_) => true,
             Self::Lagged => false,
         }
@@ -149,10 +149,10 @@ impl TryRecvError {
         matches!(self, Self::Lagged)
     }
 
-    /// Returns whether the error is final, i.e. no further receive operation can succeed.
-    pub fn is_final(&self) -> bool {
+    /// Returns whether the connection was closed or failed.
+    pub fn is_disconnected(&self) -> bool {
         match self {
-            Self::RemoteReceive(err) => err.is_final(),
+            Self::RemoteReceive(err) => err.is_disconnected(),
             Self::Closed | Self::RemoteConnect(_) | Self::RemoteListen(_) => true,
             Self::Empty | Self::Lagged => false,
         }
@@ -320,10 +320,10 @@ impl StreamError {
         matches!(self, Self::Lagged)
     }
 
-    /// Returns whether the error is final, i.e. no further receive operation can succeed.
-    pub fn is_final(&self) -> bool {
+    /// Returns whether the connection failed.
+    pub fn is_disconnected(&self) -> bool {
         match self {
-            Self::RemoteReceive(err) => err.is_final(),
+            Self::RemoteReceive(err) => err.is_disconnected(),
             Self::RemoteConnect(_) | Self::RemoteListen(_) => true,
             Self::Lagged => false,
         }

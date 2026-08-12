@@ -146,7 +146,7 @@ where
                                     let _ = result_tx.send(result);
                                 }
                                 Ok(None) => break,
-                                Err(err) if err.is_final() => break,
+                                Err(err) if err.is_disconnected() => break,
                                 Err(_) => (),
                             }
                         }

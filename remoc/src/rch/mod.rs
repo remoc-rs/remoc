@@ -244,11 +244,8 @@ pub trait SendErrorExt {
     /// Whether the remote endpoint closed the channel.
     fn is_closed(&self) -> bool;
 
-    /// Whether the remote endpoint closed the channel, was dropped or the connection failed.
+    /// Whether the remote endpoint closed or rejected the channel, was dropped or the connection failed.
     fn is_disconnected(&self) -> bool;
-
-    /// Whether the error is final, i.e. no further send operation can succeed.
-    fn is_final(&self) -> bool;
 
     /// Whether the error is caused by the item to be sent.
     fn is_item_specific(&self) -> bool;

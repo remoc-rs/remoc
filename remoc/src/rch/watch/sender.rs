@@ -49,13 +49,8 @@ impl SendError {
 
     /// True, if the remote endpoint was dropped or the connection failed.
     pub fn is_disconnected(&self) -> bool {
-        !matches!(self, Self::RemoteSend(base::SendErrorKind::Serialize(_)))
-    }
-
-    /// Returns whether the error is final, i.e. no further send operation can succeed.
-    pub fn is_final(&self) -> bool {
         match self {
-            Self::RemoteSend(err) => err.is_final(),
+            Self::RemoteSend(err) => err.is_disconnected(),
             Self::Closed | Self::RemoteConnect(_) | Self::RemoteListen(_) | Self::RemoteForward => true,
         }
     }
@@ -73,10 +68,6 @@ impl SendErrorExt for SendError {
 
     fn is_disconnected(&self) -> bool {
         self.is_disconnected()
-    }
-
-    fn is_final(&self) -> bool {
-        self.is_final()
     }
 
     fn is_item_specific(&self) -> bool {

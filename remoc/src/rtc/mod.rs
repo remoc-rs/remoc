@@ -1114,7 +1114,7 @@ macro_rules! server_monitor_pre_dispatch {
             ::remoc::rtc::DispatchDecision::Drop => {
                 match &$req {
                     Ok(None) => (),
-                    Err(err) if err.is_final() => (),
+                    Err(err) if err.is_disconnected() => (),
                     _ => continue,
                 }
                 ::std::boxed::Box::new(::remoc::rtc::DefaultGuard)
@@ -1129,7 +1129,7 @@ macro_rules! server_monitor_pre_dispatch {
             ::remoc::rtc::DispatchDecision::Drop => {
                 match &$req {
                     Ok(None) => (),
-                    Err(err) if err.is_final() => (),
+                    Err(err) if err.is_disconnected() => (),
                     _ => continue,
                 }
                 ::std::boxed::Box::new(::remoc::rtc::DefaultGuard)
@@ -1151,7 +1151,7 @@ macro_rules! req_receiver_monitor_pre_recv {
             ::remoc::rtc::RecvDecision::Pass => (),
             ::remoc::rtc::RecvDecision::Drop => match &$req {
                 Ok(None) => (),
-                Err(err) if err.is_final() => (),
+                Err(err) if err.is_disconnected() => (),
                 _ => continue,
             },
         }

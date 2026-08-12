@@ -72,10 +72,10 @@ impl TryFrom<TryRecvError> for RecvError {
 impl Error for RecvError {}
 
 impl RecvError {
-    /// Returns whether the error is final, i.e. no further receive operation can succeed.
-    pub fn is_final(&self) -> bool {
+    /// Returns whether the connection was rejected or failed.
+    pub fn is_disconnected(&self) -> bool {
         match self {
-            Self::RemoteReceive(err) => err.is_final(),
+            Self::RemoteReceive(err) => err.is_disconnected(),
             Self::Closed | Self::RemoteConnect(_) | Self::RemoteListen(_) => true,
         }
     }

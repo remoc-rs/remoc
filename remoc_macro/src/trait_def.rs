@@ -785,7 +785,7 @@ impl TraitDef {
                                         #dispatch_ref_mut
                                     },
                                     Ok(None) => break Some(target),
-                                    Err(err) if err.is_final() => break Some(target),
+                                    Err(err) if err.is_disconnected() => break Some(target),
                                     Err(err) => return (Some(target), Err(err.into())),
                                 }
                             }
@@ -899,7 +899,7 @@ impl TraitDef {
                                     },
                                     Ok(Some(_)) => (),
                                     Ok(None) => break,
-                                    Err(err) if err.is_final() => break,
+                                    Err(err) if err.is_disconnected() => break,
                                     Err(err) => return Err(err.into()),
                                 }
                             }
@@ -1021,7 +1021,7 @@ impl TraitDef {
                                     },
                                     Ok(Some(_)) => (),
                                     Ok(None) => break,
-                                    Err(err) if err.is_final() => break,
+                                    Err(err) if err.is_disconnected() => break,
                                     Err(err) => return Err(err.into()),
                                 }
                             }
@@ -1140,7 +1140,7 @@ impl TraitDef {
                                     },
                                     Ok(Some(_)) => (),
                                     Ok(None) => break,
-                                    Err(err) if err.is_final() => break,
+                                    Err(err) if err.is_disconnected() => break,
                                     Err(err) => return Err(err.into()),
                                 }
                             }
@@ -1270,7 +1270,7 @@ impl TraitDef {
                                     },
                                     Ok(Some(_)) => (),
                                     Ok(None) => break,
-                                    Err(err) if err.is_final() => break,
+                                    Err(err) if err.is_disconnected() => break,
                                     Err(err) => return Err(err.into()),
                                 }
                             }

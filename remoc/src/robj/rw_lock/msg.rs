@@ -1,9 +1,9 @@
 //! Messages exchanged between read/write locks and the owner.
 
-use crate::versioned::RemocCompact;
 use crate::{
     RemoteSend, codec,
     rch::{mpsc, oneshot, watch},
+    versioned::RemocCompact,
 };
 
 /// A read request from a lock to the owner.

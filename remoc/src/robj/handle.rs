@@ -81,7 +81,6 @@ use tokio::sync::{OwnedRwLockMappedWriteGuard, OwnedRwLockReadGuard, OwnedRwLock
 use tracing::Instrument;
 use uuid::Uuid;
 
-use crate::versioned::RemocCompact;
 use crate::{
     chmux::{AnyBox, AnyEntry},
     codec, exec,
@@ -89,6 +88,7 @@ use crate::{
         base::{PortDeserializer, PortSerializer},
         mpsc,
     },
+    versioned::RemocCompact,
 };
 
 /// An error during getting the value of a handle.

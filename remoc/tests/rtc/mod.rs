@@ -22,3 +22,4 @@ mod variants;
 
 // Must result in compile error:
 // mod lifetime;
+// mod reserved;

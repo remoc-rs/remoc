@@ -17,11 +17,11 @@ use super::{
     },
     Distributor, SendReq,
 };
-use crate::versioned::RemocCompact;
 use crate::{
     RemoteSend, chmux,
     codec::{self, ErasedDeserializer, ErasedSerializer},
     exec,
+    versioned::RemocCompact,
 };
 
 /// An error occurred during receiving over an mpsc channel.

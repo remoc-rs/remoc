@@ -14,10 +14,10 @@ use super::{
     },
     Interlock, Location,
 };
-use crate::versioned::RemocCompact;
 use crate::{
     chmux,
     codec::{self, SerializationError},
+    versioned::RemocCompact,
 };
 
 pub use super::super::base::Closed;

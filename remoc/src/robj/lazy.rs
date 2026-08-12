@@ -50,13 +50,13 @@ use futures::{
 use std::{error::Error, fmt, marker::PhantomData, ops::Deref, pin::Pin, sync::Arc};
 use tokio::sync::Mutex;
 
-use crate::versioned::RemocCompact;
 use crate::{
     RemoteSend, chmux, codec, exec,
     rch::{
         base::{self},
         mpsc, oneshot,
     },
+    versioned::RemocCompact,
 };
 
 /// An error occurred during fetching a lazily transmitted value.

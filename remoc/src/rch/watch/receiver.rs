@@ -18,10 +18,10 @@ use super::{
     },
     RateLimitSender, Ref, TransferStrategy, default_max_item_size, default_rate_limit, rate_limit_channel,
 };
-use crate::versioned::RemocCompact;
 use crate::{
     RemoteSend, chmux,
     codec::{self, ErasedDeserializer, ErasedSerializer},
+    versioned::RemocCompact,
 };
 
 /// An error occurred during receiving over a watch channel.

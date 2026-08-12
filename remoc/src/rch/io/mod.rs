@@ -124,8 +124,7 @@
 //! ```
 
 use super::{bin, oneshot};
-use crate::codec;
-use crate::versioned::RemocCompact;
+use crate::{codec, versioned::RemocCompact};
 
 mod receiver;
 mod sender;

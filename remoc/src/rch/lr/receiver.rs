@@ -13,10 +13,10 @@ use super::{
     },
     Interlock, Location,
 };
-use crate::versioned::RemocCompact;
 use crate::{
     chmux,
     codec::{self, DeserializationError},
+    versioned::RemocCompact,
 };
 
 /// An error that occurred during receiving from a remote endpoint.

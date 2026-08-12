@@ -119,6 +119,38 @@
 //! result in a error, but the server will continue serving.
 //! It is thus safe to just attempt to call a server function to see if it is available.
 //!
+//! # Compact representation
+//!
+//! Serde attributes applied to a trait method are applied to its request enum case
+//! and serde attributes applied to a method argument are applied to the corresponding
+//! field of that case.
+//!
+//! Since the [Postbag codec](crate::codec::Postbag) encodes a case or field named
+//! `_0` through `_58` using a single byte, the size of a request can be reduced
+//! considerably by renaming them:
+//!
+//! ```
+//! # use remoc::prelude::*;
+//! # use remoc::rtc::CallError;
+//! #[rtc::remote]
+//! pub trait Counter {
+//!     #[serde(rename = "_0")]
+//!     async fn value(&self) -> Result<u32, CallError>;
+//!
+//!     #[serde(rename = "_1")]
+//!     async fn increase(&mut self, #[serde(rename = "_0")] by: u32) -> Result<(), CallError>;
+//! }
+//! ```
+//!
+//! This changes the serialized representation of the affected methods, thus both
+//! endpoints must agree on it.
+//! Since renaming is applied per method, methods can be migrated individually and
+//! new methods using the compact representation can be added to an existing trait
+//! without affecting its other methods.
+//!
+//! The name `_59` is reserved for the reply channel of a request and cannot be used.
+//! It is only used when the corresponding method is renamed.
+//!
 //! # Alternatives
 //!
 //! If you just need to expose a function remotely using [remote functions](crate::rfn) is simpler.

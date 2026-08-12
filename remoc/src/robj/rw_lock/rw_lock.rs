@@ -7,13 +7,13 @@ use std::{
 use tracing::Instrument;
 
 use super::msg::{ReadRequest, Value, WriteRequest};
-use crate::versioned::RemocCompact;
 use crate::{
     RemoteSend, chmux, codec, exec,
     rch::{
         base::{self},
         mpsc, oneshot,
     },
+    versioned::RemocCompact,
 };
 
 /// An error occurred during locking of an RwLock value for reading or writing.

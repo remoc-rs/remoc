@@ -10,10 +10,10 @@ use super::{
     default_rate_limit, rate_limit_channel,
     receiver::RecvError,
 };
-use crate::versioned::RemocCompact;
 use crate::{
     RemoteSend, chmux,
     codec::{self, ErasedDeserializer, ErasedSerializer},
+    versioned::RemocCompact,
 };
 
 /// An error occurred during sending over an mpsc channel.

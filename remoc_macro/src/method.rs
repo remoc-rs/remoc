@@ -3,8 +3,8 @@
 use proc_macro2::TokenStream;
 use quote::{TokenStreamExt, quote};
 use syn::{
-    Attribute, Block, FnArg, GenericArgument, Generics, Ident, Pat, PatType, Path, PathArguments, ReceiverKind,
-    ReturnType, Stmt, Token, Type, TypeParamBound, braced, parenthesized,
+    Attribute, Block, FnArg, GenericArgument, Generics, Ident, LitStr, Pat, PatType, Path, PathArguments,
+    ReceiverKind, ReturnType, Stmt, Token, Type, TypeParamBound, braced, parenthesized,
     parse::{Parse, ParseStream},
     punctuated::Punctuated,
     spanned::Spanned,
@@ -27,6 +27,65 @@ pub enum SelfRef {
     RefMut,
 }
 
+/// The numerical name reserved by remoc for the reply channel field within
+/// generated request enums.
+const REPLY_TX_NAME: &str = "_59";
+
+/// Whether the name is a numerical identifier that the Postbag codec encodes
+/// using a single byte.
+fn is_numerical_name(name: &str) -> bool {
+    match name.strip_prefix('_').map(str::parse::<usize>) {
+        Some(Ok(id)) => id < 60,
+        _ => false,
+    }
+}
+
+/// Whether the attributes contain a serde rename to a numerical identifier
+/// and validation that the name reserved by remoc is not used.
+fn numerical_serde_rename(attrs: &[Attribute]) -> syn::Result<bool> {
+    let mut numerical = false;
+
+    for attr in attrs {
+        if !attr.path().is_ident("serde") {
+            continue;
+        }
+
+        attr.parse_nested_meta(|meta| {
+            if !meta.path.is_ident("rename") {
+                return Ok(());
+            }
+
+            let mut check = |value: ParseStream| -> syn::Result<()> {
+                let name: LitStr = value.parse()?;
+
+                // Reject the reserved name, since it would silently collide with
+                // the reply channel field of the generated request enum.
+                if name.value() == REPLY_TX_NAME {
+                    return Err(syn::Error::new(
+                        name.span(),
+                        format!("the name `{REPLY_TX_NAME}` is reserved by remoc"),
+                    ));
+                }
+
+                numerical |= is_numerical_name(&name.value());
+                Ok(())
+            };
+
+            if meta.input.peek(Token![=]) {
+                // #[serde(rename = "...")]
+                check(meta.value()?)?;
+            } else {
+                // #[serde(rename(serialize = "...", deserialize = "..."))]
+                meta.parse_nested_meta(|meta| check(meta.value()?))?;
+            }
+
+            Ok(())
+        })?;
+    }
+
+    Ok(numerical)
+}
+
 /// A named argument.
 #[derive(Debug)]
 pub struct NamedArg {
@@ -46,6 +105,7 @@ impl NamedArg {
         } else {
             return Err(syn::Error::new(pat_type.pat.span(), "expected identifier"));
         };
+        numerical_serde_rename(&pat_type.attrs)?;
         Ok(Self { attrs: pat_type.attrs.clone(), ident, ty: (*pat_type.ty).clone() })
     }
 }
@@ -57,6 +117,13 @@ pub struct TraitMethod {
     pub doc_attrs: Vec<Attribute>,
     /// Serde attributes, applied to the request enum variant.
     pub serde_attrs: Vec<Attribute>,
+    /// Whether the request enum variant is renamed to a numerical identifier
+    /// by the user.
+    ///
+    /// This indicates that the user opted into the compact serialized
+    /// representation for this method, allowing remoc to also use a compact
+    /// name for the reply channel field.
+    pub numerical_rename: bool,
     /// Other attributes, applied to the trait method.
     pub attrs: Vec<Attribute>,
     /// Name.
@@ -153,6 +220,7 @@ impl TraitMethod {
                 true
             }
         });
+        let numerical_rename = numerical_serde_rename(&serde_attrs)?;
 
         // Parse generics.
         let generics = input.parse::<Generics>()?;
@@ -242,7 +310,19 @@ impl TraitMethod {
             None
         };
 
-        Ok(Self { doc_attrs, serde_attrs, attrs, ident, self_ref, args, ret_ty, bounds, cancel, body })
+        Ok(Self {
+            doc_attrs,
+            serde_attrs,
+            numerical_rename,
+            attrs,
+            ident,
+            self_ref,
+            args,
+            ret_ty,
+            bounds,
+            cancel,
+            body,
+        })
     }
 }
 
@@ -306,10 +386,16 @@ impl TraitMethod {
         let ident = to_pascal_case(&self.ident);
         let ret_ty = remove_self_type(&self.ret_ty, assoc);
 
+        // When the user renames the request enum variant to a numerical identifier,
+        // they opted into the compact serialized representation for this method.
+        // Thus the reply channel field also uses the numerical name reserved by remoc.
+        let reply_tx_rename = self.numerical_rename.then(|| quote! { #[serde(rename = #REPLY_TX_NAME)] });
+
         let mut entries = quote! {
             #[doc="Reply channel for sending the result of the method invocation.\n\n"]
             #[doc="The channel is closed when the calling async method is cancelled "]
             #[doc="or a connection error occurs."]
+            #reply_tx_rename
             __reply_tx: ::remoc::rch::oneshot::Sender<#ret_ty, Codec>,
         };
 

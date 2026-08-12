@@ -22,11 +22,11 @@ use super::{
     receiver::RecvError,
     send_req,
 };
-use crate::versioned::RemocCompact;
 use crate::{
     RemoteSend, chmux,
     codec::{self, ErasedDeserializer, ErasedSerializer},
     exec,
+    versioned::RemocCompact,
 };
 
 /// An error occurred during sending over an mpsc channel.

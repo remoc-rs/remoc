@@ -92,7 +92,6 @@ use super::{
     DEFAULT_MAX_ITEM_SIZE, RemoteSendError,
     base::{self},
 };
-use crate::versioned::RemocCompact;
 use crate::{
     RemoteSend, chmux,
     codec::{self, AnySend, ErasedDeserializer, ErasedSerializer},
@@ -101,6 +100,7 @@ use crate::{
         time::{Instant, sleep},
     },
     rch::{BACKCHANNEL_MSG_ERROR, BACKCHANNEL_MSG_RATE_LIMIT},
+    versioned::RemocCompact,
 };
 
 mod receiver;

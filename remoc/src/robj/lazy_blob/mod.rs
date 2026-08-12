@@ -68,11 +68,11 @@ use std::{convert::TryFrom, fmt, pin::Pin, sync::Arc};
 use tokio::sync::Mutex;
 use tracing::Instrument;
 
-use crate::versioned::RemocCompact;
 use crate::{
     chmux::{self, DataBuf},
     codec, exec,
     rch::{ConnectError, mpsc},
+    versioned::RemocCompact,
 };
 
 mod fw_bin;

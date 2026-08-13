@@ -31,14 +31,14 @@ where
     let a_cfg = cfg.clone();
     let a = async move {
         let (conn, tx, rx) = remoc::Connect::framed(a_cfg, a_tx, a_rx).await.unwrap();
-        wokio::spawn(conn);
+        tokio::spawn(conn);
         (tx, rx)
     };
 
     let b_cfg = cfg.clone();
     let b = async move {
         let (conn, tx, rx) = remoc::Connect::framed(b_cfg, b_tx, b_rx).await.unwrap();
-        wokio::spawn(conn);
+        tokio::spawn(conn);
         (tx, rx)
     };
 

@@ -4,14 +4,76 @@ All notable changes to Remoc will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 0.20.0 - 2026-08-13
+This release makes reduces the size of transmitted data, increases throughput and 
+introduces a system for evolving the serialized representation of your own types 
+while staying compatible with older versions.
+
+Remoc 0.20 remains wire-compatible with Remoc 0.19 and 0.18.
+
+The default codec is now always Postbag and can no longer be changed using crate
+features. If you were selecting a codec via a `default-codec-*` feature, see the
+notes under *Deprecated* and *Removed* below.
 
 ### Added
-- codec: `PostbagWith` codec, which allows the Postbag configuration to be specified
-  as const generic parameters; `Postbag` and `PostbagSlim` are now type aliases for it
-- codec: the maximum nesting depth of Postbag-encoded data can be specified,
-  for example `Postbag<1024>` or `PostbagSlim<1024>`, defaulting to
-  `postbag::cfg::DEFAULT_DEPTH_LIMIT`
+- performance: data of a newly opened channel is now sent immediately, without
+  waiting for the remote endpoint to confirm the port; this removes one round-trip
+  of latency when a channel is used for the first time
+- performance: messages of the channel multiplexer use variable integer encoding,
+  which reduces the per-message overhead; furthermore Remoc's own types, such as 
+  the headers exchanged by the channels, use a compact serialized representation
+- new [transports module](https://docs.rs/remoc/0.20/remoc/transports/index.html)
+  containing worked, copy-and-paste ready examples for connecting over different 
+  transports
+- new [versioned module](https://docs.rs/remoc/0.20/remoc/versioned/index.html) for
+  evolving the serialized representation of a type
+- rch::mpsc: optional additional parallel transfer channels, which serialize and
+  deserialize items concurrently and thus increase throughput over high-bandwidth
+  links
+- rch::base: `storage` and `with_storage` to access the data storage of the
+  connection that performs the current serialization or deserialization, plus
+  `StorageRef` and `storage_ref` to obtain the storage of the connection over which
+  a value is transferred
+- chmux: `AnyStorage` can now store values indexed by their type using `insert`,
+  `get`, `with` and `remove`, and exposes the configuration of the connection
+  via `AnyStorage::cfg`
+
+### Changed
+- connect: the connection future is no longer required to be `Send`, which allows
+  using transports based on JavaScript objects in a web browser
+- **BREAKING**: rch, chmux: `is_final` has been removed from the error types of send
+  and receive operations; use `is_disconnected` instead
+- **BREAKING**: chmux: `Cfg::ports_exhausted` has been remodelled and is now 
+  acutally being honored
+- **BREAKING**: chmux: `AnyStorage::insert`, `get` and `remove` have been renamed to
+  `insert_entry`, `get_entry` and `remove_entry`
+- **BREAKING**: chmux: the port allocation and connect API used by custom channel
+  implementations has changed; `PortNumber` and `PortReq` have been replaced by
+  `AllocatedLocalPort`, `SidePort` and `ConnectReq`, `Client::connect` is now
+  `Client::connect_port` and `Listener::accept_from` has been removed
+- **BREAKING**: connect: `Connect` is now generic over the type of its connection
+  future; use `BoxConnect` (obtained via `Connect::boxed`) where the previous type
+  parameters are required
+
+### Deprecated
+- codec: selecting the default codec via a `default-codec-*` crate feature is
+  deprecated, because crate features are global to an application and thus a library
+  using Remoc would be forced to use the default codec selected by the application.
+  If required, specify the codec per channel using its generic type parameter instead.
+
+### Removed
+- **BREAKING**: codec: the crate features `codec-postbag` and `default-codec-postbag`
+  have been removed, since the Postbag codec is always available and the default;
+  remove them from your `Cargo.toml`
+
+### Fixed
+- chmux: `Cfg::ports_exhausted` was ignored and connect requests always waited for
+  a port to become available
+- chmux: `SendError::is_closed` reported false when the remote endpoint closed the
+  channel without doing so gracefully
+- rch, chmux: errors caused by exhausted ports or a rejected channel are now
+  reported as a disconnection
+
 
 ## 0.19.1 - 2026-08-05
 This release considerably reduces the compile time and code size of crates using
@@ -31,6 +93,7 @@ Remoc 0.19.1 remains wire-compatible with Remoc 0.19 and 0.18.
 - rch: the `Debug` implementations of the send error types no longer require the item
   type to implement `Debug` and no longer include the item in their output
 - considerably reduced monomorphization; thus reducing compile time and binary size
+
 
 ## 0.19.0 - 2026-08-03
 This is a large release that significantly improves throughput and latency of the
@@ -124,6 +187,7 @@ version can still talk to each other.
 - rch: `watch::Receiver::changed` on a receiver that was sent to a
   remote endpoint no longer returns immediately for the initial value; it now waits
   for an actual change of the value
+
 
 ## 0.18.3 - 2025-09-19
 ### Added

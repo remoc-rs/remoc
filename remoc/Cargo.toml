@@ -31,6 +31,7 @@ js = [
 ]
 
 # Codecs
+default-codec-postbag = []
 default-codec-postbag-slim = []
 codec-bincode = ["bincode"]
 default-codec-bincode = ["codec-bincode"]
@@ -50,7 +51,7 @@ full-codecs = [
     "codec-message-pack",
     "codec-postcard",
 ]
-
+default-codec-no-warn = []
 
 [dependencies]
 remoc_macro = { version = "=0.19.1", path = "../remoc_macro", optional = true }

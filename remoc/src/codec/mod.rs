@@ -408,45 +408,34 @@ mod postcard;
 #[cfg(feature = "codec-postcard")]
 pub use postcard::Postcard;
 
+#[allow(unused_macros)]
+macro_rules! default_codec {
+    ($codec:ident) => {
+        #[doc = concat!("Default codec is overridden via crate feature to [", stringify!($codec), "].")]
+        #[cfg_attr(
+            not(feature = "default-codec-no-warn"),
+            deprecated = "changing the default codec via the default-codec-* remoc feature is deprecated; \
+                          you can enable the default-codec-no-warn remoc feature to disable this warning"
+        )]
+        pub type Default = $codec;
+    };
+}
+
 // Select the default codec.
 //
 // Changing the default codec via Cargo features is deprecated.
 cfg_select! {
-    feature = "default-codec-postbag-slim" => {
-        /// Default codec is [PostbagSlim].
-        #[deprecated = "changing the default codec via the default-codec-* feature is deprecated"]
-        pub type Default = postbag::PostbagSlim;
+    feature = "default-codec-postbag" => {
+        #[doc(no_inline)]
+        pub use postbag::Postbag as Default;
     }
-    feature = "default-codec-bincode" => {
-        /// Default codec is [Bincode].
-        #[deprecated = "changing the default codec via the default-codec-* feature is deprecated"]
-        pub type Default = Bincode;
-    }
-    feature = "default-codec-bincode2" => {
-        /// Default codec is [Bincode2].
-        #[deprecated = "changing the default codec via the default-codec-* feature is deprecated"]
-        pub type Default = Bincode2;
-    }
-    feature = "default-codec-ciborium" => {
-        /// Default codec is [Ciborium].
-        #[deprecated = "changing the default codec via the default-codec-* feature is deprecated"]
-        pub type Default = Ciborium;
-    }
-    feature = "default-codec-json" => {
-        /// Default codec is [Json].
-        #[deprecated = "changing the default codec via the default-codec-* feature is deprecated"]
-        pub type Default = Json;
-    }
-    feature = "default-codec-message-pack" => {
-        /// Default codec is [MessagePack].
-        #[deprecated = "changing the default codec via the default-codec-* feature is deprecated"]
-        pub type Default = MessagePack;
-    }
-    feature = "default-codec-postcard" => {
-        /// Default codec is [Postcard].
-        #[deprecated = "changing the default codec via the default-codec-* feature is deprecated"]
-        pub type Default = Postcard;
-    }
+    feature = "default-codec-postbag-slim" => { default_codec!(PostbagSlim); }
+    feature = "default-codec-bincode" => { default_codec!(Bincode); }
+    feature = "default-codec-bincode2" => { default_codec!(Bincode2); }
+    feature = "default-codec-ciborium" => { default_codec!(Ciborium); }
+    feature = "default-codec-json" => { default_codec!(Json); }
+    feature = "default-codec-message-pack" => { default_codec!(MessagePack); }
+    feature = "default-codec-postcard" => { default_codec!(Postcard); }
     _ => {
         #[doc(no_inline)]
         pub use postbag::Postbag as Default;

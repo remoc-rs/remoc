@@ -63,7 +63,7 @@ crate::versioned::compact::impl_enum! {
 
 impl SendError {
     /// Returns true, if error it due to channel being closed.
-    /// 
+    ///
     /// The close may be gracefully or not.
     pub fn is_closed(&self) -> bool {
         matches!(self, Self::Closed { .. })

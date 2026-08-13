@@ -453,7 +453,7 @@ macro_rules! impl_serde {
         impl<$($generic_decls)*> ::serde::Serialize for $name<$($generic_args)*>
         $($wc)*
         {
-            fn serialize<Ser>(&self, serializer: Ser) -> ::core::result::Result<Ser::Ok, Ser::Error>
+            fn serialize<Ser>(&self, serializer: Ser) -> ::std::result::Result<Ser::Ok, Ser::Error>
             where
                 Ser: ::serde::Serializer,
             {
@@ -464,7 +464,7 @@ macro_rules! impl_serde {
         impl<'de, $($generic_decls)*> ::serde::Deserialize<'de> for $name<$($generic_args)*>
         $($wc)*
         {
-            fn deserialize<De>(deserializer: De) -> ::core::result::Result<Self, De::Error>
+            fn deserialize<De>(deserializer: De) -> ::std::result::Result<Self, De::Error>
             where
                 De: ::serde::Deserializer<'de>,
             {

@@ -834,7 +834,7 @@
      "size_estimate": 768
     },
     {
-     "name": "core::io::error::repr::decode_repr",
+     "name": "std::io::error::repr::decode_repr",
      "instantiations": 17,
      "size_estimate": 765
     },
@@ -984,7 +984,7 @@
      "size_estimate": 600
     },
     {
-     "name": "tokio::runtime::task::core::Core::<T, S>::take_output::{closure#0}",
+     "name": "tokio::runtime::task::std::std::<T, S>::take_output::{closure#0}",
      "instantiations": 24,
      "size_estimate": 600
     },
@@ -1009,7 +1009,7 @@
      "size_estimate": 583
     },
     {
-     "name": "tokio::runtime::task::core::Core::<T, S>::poll::{closure#0}",
+     "name": "tokio::runtime::task::std::std::<T, S>::poll::{closure#0}",
      "instantiations": 24,
      "size_estimate": 576
     },
@@ -1054,7 +1054,7 @@
      "size_estimate": 552
     },
     {
-     "name": "tokio::runtime::task::core::Cell::<T, S>::new",
+     "name": "tokio::runtime::task::std::Cell::<T, S>::new",
      "instantiations": 24,
      "size_estimate": 552
     }

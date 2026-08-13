@@ -22,8 +22,8 @@ pub trait Counter {
     fn value(&self) -> impl Future<Output = Result<u32, remoc::rtc::CallError>> + Send;
     fn watch(
         &mut self,
-    ) -> impl ::core::future::Future<Output = Result<remoc::rch::watch::Receiver<u32>, remoc::rtc::CallError>>
-    + ::core::marker::Send;
+    ) -> impl ::std::future::Future<Output = Result<remoc::rch::watch::Receiver<u32>, remoc::rtc::CallError>>
+    + ::std::marker::Send;
     #[no_cancel]
     fn increase(
         &mut self, #[serde(default)] by: u32,

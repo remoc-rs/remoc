@@ -97,7 +97,7 @@ impl Versioner for CompactVersioner {
 #[macro_export]
 macro_rules! impl_struct {
     // Default value for a field that is not transported.
-    (@default) => { ::core::default::Default::default() };
+    (@default) => { ::std::default::Default::default() };
     (@default $init:expr) => { $init };
 
     (
@@ -147,7 +147,7 @@ macro_rules! impl_struct {
             {
                 $($current_ref_fields)*
                 #[serde(skip)]
-                _phantom: ::core::marker::PhantomData<&'transport ()>,
+                _phantom: ::std::marker::PhantomData<&'transport ()>,
             }
 
             /// Current transported representation for deserialization.
@@ -169,7 +169,7 @@ macro_rules! impl_struct {
             {
                 $($old_ref_fields)*
                 #[serde(skip)]
-                _phantom: ::core::marker::PhantomData<&'transport ()>,
+                _phantom: ::std::marker::PhantomData<&'transport ()>,
             }
 
             /// Old transported representation for deserialization.
@@ -194,10 +194,10 @@ macro_rules! impl_struct {
 
             fn as_current<'transport>(
                 &'transport self,
-            ) -> ::core::result::Result<Self::CurrentRef<'transport>, $crate::versioned::Error> {
-                ::core::result::Result::Ok(CurrentRef {
+            ) -> ::std::result::Result<Self::CurrentRef<'transport>, $crate::versioned::Error> {
+                ::std::result::Result::Ok(CurrentRef {
                     $( $mapped: &self.$mapped, )*
-                    _phantom: ::core::marker::PhantomData,
+                    _phantom: ::std::marker::PhantomData,
                 })
             }
 
@@ -205,8 +205,8 @@ macro_rules! impl_struct {
 
             fn from_current(
                 current: Self::Current,
-            ) -> ::core::result::Result<Self, $crate::versioned::Error> {
-                ::core::result::Result::Ok(Self {
+            ) -> ::std::result::Result<Self, $crate::versioned::Error> {
+                ::std::result::Result::Ok(Self {
                     $( $mapped: current.$mapped, )*
                     $( $dfield: $dinit, )*
                 })
@@ -219,18 +219,18 @@ macro_rules! impl_struct {
 
             fn as_old<'transport>(
                 &'transport self,
-            ) -> ::core::result::Result<Self::OldRef<'transport>, $crate::versioned::Error> {
-                ::core::result::Result::Ok(OldRef {
+            ) -> ::std::result::Result<Self::OldRef<'transport>, $crate::versioned::Error> {
+                ::std::result::Result::Ok(OldRef {
                     $( $mapped: &self.$mapped, )*
                     $($old_extra_init)*
-                    _phantom: ::core::marker::PhantomData,
+                    _phantom: ::std::marker::PhantomData,
                 })
             }
 
             type Old = Old<$($generic_args)*>;
 
-            fn from_old(old: Self::Old) -> ::core::result::Result<Self, $crate::versioned::Error> {
-                ::core::result::Result::Ok(Self {
+            fn from_old(old: Self::Old) -> ::std::result::Result<Self, $crate::versioned::Error> {
+                ::std::result::Result::Ok(Self {
                     $( $mapped: old.$mapped, )*
                     $( $dfield: $dinit, )*
                 })
@@ -476,8 +476,8 @@ macro_rules! impl_enum {
 
             fn as_current<'transport>(
                 &'transport self,
-            ) -> ::core::result::Result<Self::CurrentRef<'transport>, $crate::versioned::Error> {
-                ::core::result::Result::Ok(match self {
+            ) -> ::std::result::Result<Self::CurrentRef<'transport>, $crate::versioned::Error> {
+                ::std::result::Result::Ok(match self {
                     $( Self::$variant => Current::$variant, )*
                 })
             }
@@ -486,8 +486,8 @@ macro_rules! impl_enum {
 
             fn from_current(
                 current: Self::Current,
-            ) -> ::core::result::Result<Self, $crate::versioned::Error> {
-                ::core::result::Result::Ok(match current {
+            ) -> ::std::result::Result<Self, $crate::versioned::Error> {
+                ::std::result::Result::Ok(match current {
                     $( Current::$variant => Self::$variant, )*
                 })
             }
@@ -499,16 +499,16 @@ macro_rules! impl_enum {
 
             fn as_old<'transport>(
                 &'transport self,
-            ) -> ::core::result::Result<Self::OldRef<'transport>, $crate::versioned::Error> {
-                ::core::result::Result::Ok(match self {
+            ) -> ::std::result::Result<Self::OldRef<'transport>, $crate::versioned::Error> {
+                ::std::result::Result::Ok(match self {
                     $( Self::$variant => Old::$variant, )*
                 })
             }
 
             type Old = Old<$( $($gen ,)* $( $($cgen ,)* )? )?>;
 
-            fn from_old(old: Self::Old) -> ::core::result::Result<Self, $crate::versioned::Error> {
-                ::core::result::Result::Ok(match old {
+            fn from_old(old: Self::Old) -> ::std::result::Result<Self, $crate::versioned::Error> {
+                ::std::result::Result::Ok(match old {
                     $( Old::$variant => Self::$variant, )*
                 })
             }
@@ -619,16 +619,16 @@ macro_rules! impl_enum {
 
             fn as_current<'transport>(
                 &'transport self,
-            ) -> ::core::result::Result<Self::CurrentRef<'transport>, $crate::versioned::Error> {
-                ::core::result::Result::Ok(match self { $($as_current_arms)* })
+            ) -> ::std::result::Result<Self::CurrentRef<'transport>, $crate::versioned::Error> {
+                ::std::result::Result::Ok(match self { $($as_current_arms)* })
             }
 
             type Current = Current<$($generic_args)*>;
 
             fn from_current(
                 current: Self::Current,
-            ) -> ::core::result::Result<Self, $crate::versioned::Error> {
-                ::core::result::Result::Ok(match current { $($from_current_arms)* })
+            ) -> ::std::result::Result<Self, $crate::versioned::Error> {
+                ::std::result::Result::Ok(match current { $($from_current_arms)* })
             }
 
             type OldRef<'transport>
@@ -638,14 +638,14 @@ macro_rules! impl_enum {
 
             fn as_old<'transport>(
                 &'transport self,
-            ) -> ::core::result::Result<Self::OldRef<'transport>, $crate::versioned::Error> {
-                ::core::result::Result::Ok(match self { $($as_old_arms)* })
+            ) -> ::std::result::Result<Self::OldRef<'transport>, $crate::versioned::Error> {
+                ::std::result::Result::Ok(match self { $($as_old_arms)* })
             }
 
             type Old = Old<$($generic_args)*>;
 
-            fn from_old(old: Self::Old) -> ::core::result::Result<Self, $crate::versioned::Error> {
-                ::core::result::Result::Ok(match old { $($from_old_arms)* })
+            fn from_old(old: Self::Old) -> ::std::result::Result<Self, $crate::versioned::Error> {
+                ::std::result::Result::Ok(match old { $($from_old_arms)* })
             }
         }
 
@@ -687,9 +687,9 @@ macro_rules! impl_enum {
             as_current_arms = [
                 $($as_current_arms)*
                 Self::$variant { .. } => {
-                    return ::core::result::Result::Err(::std::convert::Into::into(::std::format!(
+                    return ::std::result::Result::Err(::std::convert::Into::into(::std::format!(
                         "the enum variant {}::{} cannot be serialized",
-                        ::core::stringify!($name), ::core::stringify!($variant)
+                        ::std::stringify!($name), ::std::stringify!($variant)
                     )))
                 }
             ]
@@ -697,9 +697,9 @@ macro_rules! impl_enum {
             as_old_arms = [
                 $($as_old_arms)*
                 Self::$variant { .. } => {
-                    return ::core::result::Result::Err(::std::convert::Into::into(::std::format!(
+                    return ::std::result::Result::Err(::std::convert::Into::into(::std::format!(
                         "the enum variant {}::{} cannot be serialized",
-                        ::core::stringify!($name), ::core::stringify!($variant)
+                        ::std::stringify!($name), ::std::stringify!($variant)
                     )))
                 }
             ]

@@ -59,7 +59,9 @@ pub struct Cfg {
     /// integer encoding.
     ///
     /// This is automatically enabled by [`Connect::io`](crate::Connect::io).
-    /// You just need to modify this setting when using a custom message frame.
+    /// You just need to modify this setting when using a custom message frame that
+    /// needs to switch between fixed and variable length encoding after the initial
+    /// handshake.
     pub io_frame_len_varint: Option<Arc<AtomicBool>>,
     /// Maximum number of open ports.
     ///
@@ -146,7 +148,7 @@ pub struct Cfg {
     /// By default this is 64.
     /// This must not be zero.
     pub transport_receive_queue: usize,
-    /// Maximum number of outstanding connection requests.
+    /// Maximum number of outstanding connection requests and pre-connected ports.
     ///
     /// By default this is 128.
     /// This must not be zero.
@@ -158,9 +160,7 @@ pub struct Cfg {
     /// than the link, limits throughput; otherwise it only spends additional CPU time.
     ///
     /// A value of 1 is not recommended, since it performs worse than using no additional
-    /// channel at all. Use 2 or more; in our benchmarks 4 were enough to saturate a
-    /// 100 MB/s link, but the value worth using depends on the payload, the codec and the
-    /// machine.
+    /// channel at all. Recommended value is between 2 and 4 to saturate a 100 MB/s link.
     ///
     /// This can be overridden individually per channel using
     /// [`Sender::set_parallel`](crate::rch::mpsc::Sender::set_parallel)

@@ -6,7 +6,7 @@ use remoc::{
 };
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "js")]
+#[cfg(all(target_family = "wasm", feature = "js"))]
 use wasm_bindgen_test::wasm_bindgen_test;
 
 use crate::loop_channel;
@@ -124,8 +124,8 @@ async fn exchange(remote_version: u32) -> Person {
     person
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn current_representation() {
     crate::init();
 
@@ -134,8 +134,8 @@ async fn current_representation() {
     assert_eq!(person, Person { first_name: "Anna".into(), last_name: "Meyer".into(), age: 42 });
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn old_representation() {
     crate::init();
 

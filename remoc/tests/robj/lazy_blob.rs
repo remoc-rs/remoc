@@ -1,13 +1,13 @@
 use rand::{Rng, RngExt};
 
-#[cfg(feature = "js")]
+#[cfg(all(target_family = "wasm", feature = "js"))]
 use wasm_bindgen_test::wasm_bindgen_test;
 
 use crate::loop_channel;
 use remoc::robj::lazy_blob::LazyBlob;
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn simple() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<LazyBlob>().await;
@@ -37,8 +37,8 @@ async fn simple() {
     assert_eq!(Vec::from(fetched), data);
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn remote_forwarded() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<LazyBlob>().await;
@@ -77,8 +77,8 @@ async fn remote_forwarded() {
     assert_eq!(Vec::from(fetched), data);
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn remote_forwarded_2hops() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<LazyBlob>().await;
@@ -117,8 +117,8 @@ async fn remote_forwarded_2hops() {
     assert_eq!(Vec::from(fetched), data);
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn local() {
     crate::init();
 

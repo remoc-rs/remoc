@@ -1,4 +1,4 @@
-#[cfg(feature = "js")]
+#[cfg(all(target_family = "wasm", feature = "js"))]
 use wasm_bindgen_test::wasm_bindgen_test;
 
 use crate::loop_channel;
@@ -64,8 +64,8 @@ impl Counter for CounterObj {
     }
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn simple() {
     use remoc::rtc::Server;
 
@@ -99,8 +99,8 @@ async fn simple() {
     assert!(counter_obj_opt.is_none());
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn simple_plus() {
     use remoc::rtc::Server;
 
@@ -134,8 +134,8 @@ async fn simple_plus() {
     assert!(counter_obj_opt.is_none());
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn simple_spawn() {
     use remoc::rtc::Server;
 

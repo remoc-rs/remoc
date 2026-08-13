@@ -6,7 +6,7 @@
 use rand::{Rng, RngExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-#[cfg(feature = "js")]
+#[cfg(all(target_family = "wasm", feature = "js"))]
 use wasm_bindgen_test::wasm_bindgen_test;
 
 use crate::loop_channel;
@@ -18,8 +18,8 @@ use remoc::{exec, rch::io};
 
 /// Test sized channel with simple send/receive.
 /// Pattern: Send receiver to remote, keep sender local.
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn sized_simple() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<io::Receiver>().await;
@@ -54,8 +54,8 @@ async fn sized_simple() {
 
 /// Test unsized channel with simple send/receive.
 /// Pattern: Send receiver to remote, keep sender local.
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn unsized_simple() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<io::Receiver>().await;
@@ -91,8 +91,8 @@ async fn unsized_simple() {
 
 /// Test sized channel with sender sent to remote.
 /// Pattern: Send sender to remote, keep receiver local.
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn sized_send_sender() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<io::Sender>().await;
@@ -121,8 +121,8 @@ async fn sized_send_sender() {
 // Edge case: Size 0
 // ============================================================================
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn sized_zero() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<io::Receiver>().await;
@@ -147,8 +147,8 @@ async fn sized_zero() {
     assert_eq!(rx.bytes_received(), 0);
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn unsized_zero() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<io::Receiver>().await;
@@ -177,8 +177,8 @@ async fn unsized_zero() {
 // Failure cases: Size mismatch
 // ============================================================================
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn sized_send_more_than_announced() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<io::Receiver>().await;
@@ -203,8 +203,8 @@ async fn sized_send_more_than_announced() {
     read_task.await.unwrap();
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn sized_send_less_than_announced_sender_shutdown() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<io::Receiver>().await;
@@ -231,8 +231,8 @@ async fn sized_send_less_than_announced_sender_shutdown() {
     read_task.await.unwrap();
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn sized_send_less_than_announced_receiver_eof() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<io::Receiver>().await;
@@ -259,8 +259,8 @@ async fn sized_send_less_than_announced_receiver_eof() {
 // Failure cases: Unsized without shutdown
 // ============================================================================
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn unsized_no_shutdown() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<io::Receiver>().await;
@@ -287,8 +287,8 @@ async fn unsized_no_shutdown() {
 // Large data transfer
 // ============================================================================
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn sized_large_data() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<io::Receiver>().await;
@@ -318,8 +318,8 @@ async fn sized_large_data() {
     assert_eq!(buf, data);
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn unsized_large_data() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<io::Receiver>().await;
@@ -354,8 +354,8 @@ async fn unsized_large_data() {
 // Multiple writes
 // ============================================================================
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn sized_multiple_writes() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<io::Receiver>().await;
@@ -382,8 +382,8 @@ async fn sized_multiple_writes() {
     assert_eq!(rx.bytes_received(), 15);
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn unsized_multiple_writes() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<io::Receiver>().await;
@@ -412,8 +412,8 @@ async fn unsized_multiple_writes() {
 // Bytes tracking
 // ============================================================================
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn bytes_tracking() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<io::Receiver>().await;
@@ -449,8 +449,8 @@ async fn bytes_tracking() {
 // Forwarding
 // ============================================================================
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn sized_forward() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<io::Receiver>().await;
@@ -479,8 +479,8 @@ async fn sized_forward() {
     assert_eq!(buf, b"hello world");
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn unsized_forward() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<io::Receiver>().await;
@@ -518,8 +518,8 @@ async fn unsized_forward() {
 // Empty write
 // ============================================================================
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn empty_write() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<io::Receiver>().await;
@@ -550,8 +550,8 @@ async fn empty_write() {
 // ============================================================================
 
 /// Test partial reads with sized channel using read_exact.
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn sized_partial_reads() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<io::Receiver>().await;
@@ -601,8 +601,8 @@ async fn sized_partial_reads() {
 // ============================================================================
 
 /// Simulates a file transfer use case where metadata and io::Receiver are sent together.
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn file_transfer_simulation() {
     use serde::{Deserialize, Serialize};
 
@@ -665,8 +665,8 @@ async fn file_transfer_simulation() {
 }
 
 /// Test with unknown size - useful for streaming content of unknown length.
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn streaming_transfer_unknown_size() {
     use serde::{Deserialize, Serialize};
 
@@ -726,8 +726,8 @@ async fn streaming_transfer_unknown_size() {
 
 /// Test that tokio::io::copy works with io channel.
 /// Important: tokio::io::copy does NOT call shutdown - caller must do it.
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn tokio_copy_integration() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<io::Receiver>().await;
@@ -765,8 +765,8 @@ async fn tokio_copy_integration() {
 /// Test sized channel behavior: receiver uses size as contract, not EOF.
 /// With sized(N), once N bytes are received, transfer is complete.
 /// Shutdown is still recommended for cleanup but receiver doesn't require it.
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn tokio_copy_sized_no_shutdown_succeeds() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<io::Receiver>().await;
@@ -797,8 +797,8 @@ async fn tokio_copy_sized_no_shutdown_succeeds() {
 }
 
 /// Test unsized channel: NOT calling shutdown causes receiver error.
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn tokio_copy_unsized_no_shutdown_fails() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<io::Receiver>().await;
@@ -828,8 +828,8 @@ async fn tokio_copy_unsized_no_shutdown_fails() {
 
 /// Test behavior when read error occurs during copy.
 /// Important: if read fails, shutdown must NOT be called!
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn tokio_copy_read_error_no_shutdown() {
     use std::{
         pin::Pin,

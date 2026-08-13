@@ -1,7 +1,7 @@
 use remoc::rch::base::{StorageRef, storage_ref};
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "js")]
+#[cfg(all(target_family = "wasm", feature = "js"))]
 use wasm_bindgen_test::wasm_bindgen_test;
 
 use crate::loop_channel;
@@ -17,8 +17,8 @@ struct Msg {
     storage_ref: StorageRef,
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn both_endpoints() {
     crate::init();
 
@@ -45,8 +45,8 @@ async fn both_endpoints() {
     assert_eq!(sender_storage.get::<ReceiverMark>(), None);
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn dropped_without_sending() {
     crate::init();
 
@@ -65,8 +65,8 @@ struct LibClient {
 
 /// A library is handed a channel by the application and has no access to the
 /// connection itself, but still obtains its storage.
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn over_nested_channel() {
     crate::init();
 
@@ -92,8 +92,8 @@ async fn over_nested_channel() {
 }
 
 /// Only the receiving endpoint requires the storage.
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn without_handle() {
     crate::init();
 

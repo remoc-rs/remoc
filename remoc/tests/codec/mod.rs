@@ -5,7 +5,7 @@ use std::{
     fmt,
 };
 
-#[cfg(feature = "js")]
+#[cfg(all(target_family = "wasm", feature = "js"))]
 use wasm_bindgen_test::wasm_bindgen_test;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -85,63 +85,63 @@ where
     assert_eq!(deser, data);
 }
 
-#[cfg_attr(not(feature = "js"), test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 fn postbag() {
     roundtrip::<TestStruct, codec::Postbag>()
 }
 
-#[cfg_attr(not(feature = "js"), test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 fn postbag_slim() {
     roundtrip::<TestStruct, codec::PostbagSlim>()
 }
 
 #[cfg(feature = "codec-bincode")]
-#[cfg_attr(not(feature = "js"), test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 fn bincode() {
     roundtrip::<TestStruct, codec::Bincode>()
 }
 
 #[cfg(feature = "codec-ciborium")]
-#[cfg_attr(not(feature = "js"), test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 fn ciborium() {
     roundtrip::<TestStruct, codec::Ciborium>()
 }
 
 #[cfg(feature = "codec-json")]
-#[cfg_attr(not(feature = "js"), test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 #[should_panic]
 fn json_without_attr() {
     roundtrip::<TestStruct, codec::Json>()
 }
 
 #[cfg(feature = "codec-json")]
-#[cfg_attr(not(feature = "js"), test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 fn json_with_attr() {
     roundtrip::<TestStructWithAttr, codec::Json>()
 }
 
 #[cfg(feature = "codec-message-pack")]
-#[cfg_attr(not(feature = "js"), test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 fn message_pack() {
     roundtrip::<TestStruct, codec::MessagePack>()
 }
 
 #[cfg(feature = "codec-postcard")]
-#[cfg_attr(not(feature = "js"), test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 fn postcard() {
     roundtrip::<TestStruct, codec::Postcard>()
 }
 
-#[cfg_attr(not(feature = "js"), test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 fn postbag_depth_limit() {
     use remoc::codec::{Codec, Postbag, PostbagSlim, PostbagWith};
     use serde::{Deserialize, Serialize};

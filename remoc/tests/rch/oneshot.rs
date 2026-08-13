@@ -1,12 +1,12 @@
 use remoc::rch::oneshot;
 
-#[cfg(feature = "js")]
+#[cfg(all(target_family = "wasm", feature = "js"))]
 use wasm_bindgen_test::wasm_bindgen_test;
 
 use crate::loop_channel;
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn simple() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<(oneshot::Sender<i16>, oneshot::Receiver<i16>)>().await;
@@ -28,8 +28,8 @@ async fn simple() {
     sending.try_result().unwrap().unwrap();
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn close() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<oneshot::Sender<i16>>().await;
@@ -55,8 +55,8 @@ async fn close() {
     }
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn forward_local() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<oneshot::Receiver<i16>>().await;
@@ -79,8 +79,8 @@ async fn forward_local() {
     forward.await.unwrap();
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn forwarded_local() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<oneshot::Receiver<i16>>().await;
@@ -99,8 +99,8 @@ async fn forwarded_local() {
     assert_eq!(i, r, "forwarded value mismatch");
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn forward_local_dropped() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<oneshot::Receiver<i16>>().await;

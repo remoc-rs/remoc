@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-#[cfg(feature = "js")]
+#[cfg(all(target_family = "wasm", feature = "js"))]
 use wasm_bindgen_test::wasm_bindgen_test;
 
 use remoc::{
@@ -11,8 +11,8 @@ use remoc::{
     },
 };
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn standalone() {
     let mut obs: ObservableVec<_, remoc::codec::Default> = ObservableVec::new();
 
@@ -28,8 +28,8 @@ async fn standalone() {
     obs.clear();
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn events() {
     let mut obs: ObservableVec<_, remoc::codec::Default> = ObservableVec::new();
 
@@ -64,8 +64,8 @@ async fn events() {
     assert!(sub.is_done());
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn events_incremental() {
     let hs = vec![0u32, 1, 2];
     let mut obs: ObservableVec<_, remoc::codec::Default> = ObservableVec::from(hs.clone());
@@ -94,8 +94,8 @@ async fn events_incremental() {
     assert!(sub.is_done());
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn mirrored() {
     let mut pre = Vec::new();
     for i in 1000..1500i32 {
@@ -165,8 +165,8 @@ async fn mirrored() {
     }
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn mirrored_disconnect() {
     let mut obs: ObservableVec<_, remoc::codec::Default> = ObservableVec::new();
 
@@ -189,8 +189,8 @@ async fn mirrored_disconnect() {
     assert!(matches!(mirror.borrow().await, Err(RecvError::Closed)));
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn mirrored_disconnect_after_done() {
     let mut obs: ObservableVec<_, remoc::codec::Default> = ObservableVec::new();
 
@@ -223,8 +223,8 @@ async fn mirrored_disconnect_after_done() {
     assert!(mb.is_done());
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn incremental() {
     let mut pre = Vec::new();
     for i in 0..5000 {
@@ -258,8 +258,8 @@ async fn incremental() {
     }
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn mirrored_subscribe() {
     let mut obs: ObservableVec<_, remoc::codec::Default> = ObservableVec::new();
     for i in 0..100 {
@@ -303,8 +303,8 @@ async fn mirrored_subscribe() {
     assert_eq!(sub2.recv().await.unwrap(), None);
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn mirrored_subscribe_incremental() {
     let mut obs: ObservableVec<_, remoc::codec::Default> = ObservableVec::new();
     for i in 0..100 {

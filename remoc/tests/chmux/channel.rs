@@ -7,7 +7,7 @@ use futures::{
 use std::time::Duration;
 use tracing::Instrument;
 
-#[cfg(feature = "js")]
+#[cfg(all(target_family = "wasm", feature = "js"))]
 use wasm_bindgen_test::wasm_bindgen_test;
 
 use crate::loop_transport;
@@ -47,8 +47,8 @@ fn cfg2() -> chmux::Cfg {
     }
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn basic() {
     crate::init();
 
@@ -158,8 +158,8 @@ async fn basic() {
     b_mux_done_rx.await.unwrap();
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn receiver_stream() {
     crate::init();
 
@@ -241,8 +241,8 @@ async fn receiver_stream() {
     b_mux_done_rx.await.unwrap();
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn all_received() {
     crate::init();
 
@@ -314,8 +314,8 @@ async fn all_received() {
     b_mux_done_rx.await.unwrap();
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn all_received_receiver_dropped() {
     crate::init();
 
@@ -381,11 +381,11 @@ async fn all_received_receiver_dropped() {
 }
 
 #[cfg_attr(
-    all(not(feature = "js"), not(target_family = "wasm")),
+    all(not(all(target_family = "wasm", feature = "js")), not(target_family = "wasm")),
     tokio::test(flavor = "multi_thread", worker_threads = 8)
 )]
-#[cfg_attr(all(not(feature = "js"), target_family = "wasm"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(all(not(all(target_family = "wasm", feature = "js")), target_family = "wasm"), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn hangup() {
     crate::init();
 
@@ -492,8 +492,8 @@ async fn hangup() {
     b_mux_done_rx.await.unwrap();
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn no_pre_connect() {
     crate::init();
 

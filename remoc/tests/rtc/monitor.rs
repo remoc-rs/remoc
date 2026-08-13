@@ -1,4 +1,4 @@
-#[cfg(feature = "js")]
+#[cfg(all(target_family = "wasm", feature = "js"))]
 use wasm_bindgen_test::wasm_bindgen_test;
 
 use std::{
@@ -124,8 +124,8 @@ where
     }
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn count() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<CounterClient>().await;
@@ -155,8 +155,8 @@ async fn count() {
     assert_eq!(count.load(Ordering::SeqCst), 4);
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn rate_limit() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<CounterClient>().await;
@@ -250,8 +250,8 @@ where
     }
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn guard_in_flight() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<WorkerClient>().await;
@@ -327,8 +327,8 @@ impl Decoder for DecoderObj {
     }
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn incompatible_client_trips() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<DecoderClient>().await;
@@ -357,8 +357,8 @@ async fn incompatible_client_trips() {
     assert!(obj.is_some());
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn incompatible_client_tolerates() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<DecoderClient>().await;
@@ -413,8 +413,8 @@ where
     }
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn incompatible_server_throttles() {
     use remoc::exec::time::{Instant, sleep};
     use std::time::Duration;
@@ -469,8 +469,8 @@ async fn incompatible_server_throttles() {
     sleep(Duration::from_millis(10)).await;
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn incompatible_server_tolerates() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<DecoderClient>().await;
@@ -504,8 +504,8 @@ async fn incompatible_server_tolerates() {
     assert_eq!(server_failures.load(Ordering::SeqCst), 10);
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn rate_limit_monitor_throttles() {
     use remoc::exec::time::Instant;
     use std::{num::NonZeroUsize, time::Duration};
@@ -549,8 +549,8 @@ async fn rate_limit_monitor_throttles() {
     assert!(elapsed >= window * 2, "calls should have been rate limited, but only took {elapsed:?}");
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn concurrent_limit_monitor_limits() {
     use remoc::exec::time::Instant;
     use std::{num::NonZeroUsize, time::Duration};
@@ -615,8 +615,8 @@ where
     }
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn chain_server_monitors_both_apply() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<CounterClient>().await;
@@ -651,8 +651,8 @@ async fn chain_server_monitors_both_apply() {
     assert_eq!(count_b.load(Ordering::SeqCst), 4);
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn chain_server_monitors_short_circuit() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<CounterClient>().await;
@@ -684,8 +684,8 @@ async fn chain_server_monitors_short_circuit() {
     assert_eq!(count.load(Ordering::SeqCst), 0);
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn chain_server_monitors_guards() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<WorkerClient>().await;
@@ -764,8 +764,8 @@ where
     }
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn chain_client_monitors_both_apply() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<CounterClient>().await;
@@ -801,8 +801,8 @@ async fn chain_client_monitors_both_apply() {
     assert_eq!(count_b.load(Ordering::SeqCst), 4);
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn chain_client_monitors_short_circuit() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<CounterClient>().await;
@@ -898,8 +898,8 @@ where
     }
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn req_receiver_monitor_counts() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<CounterClient>().await;
@@ -936,8 +936,8 @@ async fn req_receiver_monitor_counts() {
     assert_eq!(value, 65);
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn req_receiver_monitor_drops() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<CounterClient>().await;
@@ -972,8 +972,8 @@ async fn req_receiver_monitor_drops() {
     assert_eq!(value, 0);
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn req_receiver_monitor_chain_short_circuit() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<CounterClient>().await;
@@ -1008,8 +1008,8 @@ async fn req_receiver_monitor_chain_short_circuit() {
     assert_eq!(value, 0);
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn req_receiver_monitor_stream_filtered() {
     use futures::StreamExt;
 

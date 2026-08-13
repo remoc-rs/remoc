@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-#[cfg(feature = "js")]
+#[cfg(all(target_family = "wasm", feature = "js"))]
 use wasm_bindgen_test::wasm_bindgen_test;
 
 use remoc::{
@@ -8,8 +8,8 @@ use remoc::{
     robs::vec_deque::{ObservableVecDeque, VecDequeEvent},
 };
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn standalone() {
     let mut obs: ObservableVecDeque<_, remoc::codec::Default> = ObservableVecDeque::new();
 
@@ -25,8 +25,8 @@ async fn standalone() {
     obs.clear();
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn events() {
     let mut obs: ObservableVecDeque<_, remoc::codec::Default> = ObservableVecDeque::new();
 
@@ -78,8 +78,8 @@ async fn events() {
     assert!(sub.is_done());
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn incremental() {
     let mut obs: ObservableVecDeque<_, remoc::codec::Default> = ObservableVecDeque::new();
     obs.push_back(0u32);
@@ -104,8 +104,8 @@ async fn incremental() {
     assert_eq!(sub.recv().await.unwrap(), None);
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn mirror() {
     let mut obs: ObservableVecDeque<_, remoc::codec::Default> = ObservableVecDeque::new();
     obs.push_back(0u32);
@@ -167,8 +167,8 @@ async fn mirror() {
     assert_eq!(final_state, expected);
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn mirror_incremental() {
     let mut obs: ObservableVecDeque<_, remoc::codec::Default> = ObservableVecDeque::new();
     obs.push_back(0u32);
@@ -210,8 +210,8 @@ async fn mirror_incremental() {
     }
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn swap_remove() {
     let mut obs: ObservableVecDeque<_, remoc::codec::Default> = ObservableVecDeque::new();
 
@@ -238,8 +238,8 @@ async fn swap_remove() {
     assert_eq!(sub.recv().await.unwrap(), Some(VecDequeEvent::SwapRemoveFront(1)));
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn pop_operations_comprehensive() {
     let mut obs: ObservableVecDeque<_, remoc::codec::Default> = ObservableVecDeque::new();
     let mut sub = obs.subscribe(1024);
@@ -291,8 +291,8 @@ async fn pop_operations_comprehensive() {
     assert_eq!(sub.recv().await.unwrap(), Some(VecDequeEvent::Done));
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn pop_operations_single_element() {
     let mut obs: ObservableVecDeque<_, remoc::codec::Default> = ObservableVecDeque::new();
     let mut sub = obs.subscribe(1024);
@@ -320,8 +320,8 @@ async fn pop_operations_single_element() {
     assert_eq!(sub.recv().await.unwrap(), Some(VecDequeEvent::Done));
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn pop_operations_mirror() {
     let mut obs: ObservableVecDeque<_, remoc::codec::Default> = ObservableVecDeque::new();
 
@@ -402,8 +402,8 @@ async fn pop_operations_mirror() {
     assert_eq!(final_state, expected);
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn pop_operations_stress_test() {
     let mut obs: ObservableVecDeque<_, remoc::codec::Default> = ObservableVecDeque::new();
     let mut sub = obs.subscribe(2048);
@@ -478,8 +478,8 @@ async fn pop_operations_stress_test() {
     assert_eq!(sub.recv().await.unwrap(), Some(VecDequeEvent::Done));
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn mirrored_subscribe() {
     let mut obs: ObservableVecDeque<_, remoc::codec::Default> = ObservableVecDeque::new();
     for i in 0..100 {
@@ -523,8 +523,8 @@ async fn mirrored_subscribe() {
     assert_eq!(sub2.recv().await.unwrap(), None);
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn mirrored_subscribe_incremental() {
     use std::collections::VecDeque;
 

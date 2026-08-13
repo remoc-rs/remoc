@@ -1,7 +1,7 @@
 use rand::{Rng, RngExt};
 use std::time::Duration;
 
-#[cfg(feature = "js")]
+#[cfg(all(target_family = "wasm", feature = "js"))]
 use wasm_bindgen_test::wasm_bindgen_test;
 
 use crate::loop_channel;
@@ -15,8 +15,8 @@ use remoc::{
     },
 };
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn negation() {
     crate::init();
     let ((mut a_tx, mut a_rx), (mut b_tx, mut b_rx)) = loop_channel::<i32>().await;
@@ -43,8 +43,8 @@ async fn negation() {
     reply_task.await.expect("reply task failed");
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn big_msg() {
     crate::init();
     let ((mut a_tx, mut a_rx), (mut b_tx, mut b_rx)) = loop_channel::<Vec<u8>>().await;
@@ -129,8 +129,8 @@ async fn tcp_big_msg() {
     reply_task.await.expect("reply task failed");
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn close_notify() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<u8>().await;
@@ -155,8 +155,8 @@ async fn close_notify() {
     }
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn oversized_msg_send_error() {
     crate::init();
     let ((mut a_tx, _a_rx), (_b_tx, mut b_rx)) = loop_channel::<Vec<u8>>().await;
@@ -182,8 +182,8 @@ async fn oversized_msg_send_error() {
     }
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn oversized_msg_recv_error() {
     crate::init();
     let ((mut a_tx, _a_rx), (_b_tx, mut b_rx)) = loop_channel::<Vec<u8>>().await;

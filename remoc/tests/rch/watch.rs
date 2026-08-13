@@ -1,7 +1,7 @@
 use futures::StreamExt;
 use std::time::Duration;
 
-#[cfg(feature = "js")]
+#[cfg(all(target_family = "wasm", feature = "js"))]
 use wasm_bindgen_test::wasm_bindgen_test;
 
 use crate::{droppable_loop_channel, loop_channel};
@@ -62,26 +62,26 @@ async fn simple(transfer_strategy: TransferStrategy) {
     recv_task.await.unwrap();
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn simple_single_transfer_strategy() {
     simple(TransferStrategy::Single).await;
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn simple_global_buffered_transfer_strategy() {
     simple(TransferStrategy::GlobalBuffered).await;
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn simple_channel_buffered_transfer_strategy() {
     simple(TransferStrategy::ChannelBuffered).await;
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn simple_stream() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<watch::Receiver<i16>>().await;
@@ -130,8 +130,8 @@ async fn simple_stream() {
     recv_task.await.unwrap();
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn forward() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<watch::Receiver<i16>>().await;
@@ -184,8 +184,8 @@ async fn forward() {
     forward.await.unwrap();
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn forwarded() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<watch::Receiver<i16>>().await;
@@ -226,8 +226,8 @@ async fn forwarded() {
     recv_task.await.unwrap();
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn modify_stream() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<watch::Receiver<i16>>().await;
@@ -268,8 +268,8 @@ async fn modify_stream() {
     recv_task.await.unwrap();
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn send_if_modified() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<watch::Receiver<i16>>().await;
@@ -317,8 +317,8 @@ async fn send_if_modified() {
     recv_task.await.unwrap();
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn send_if_different() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<watch::Receiver<i16>>().await;
@@ -370,8 +370,8 @@ async fn send_if_different() {
     recv_task.await.unwrap();
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn close() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<watch::Sender<i16>>().await;
@@ -407,8 +407,8 @@ async fn close() {
     }
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn conn_failure() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx), conn) = droppable_loop_channel::<watch::Sender<i16>>().await;
@@ -440,8 +440,8 @@ async fn conn_failure() {
     }
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn max_item_size_exceeded() {
     crate::init();
     if !remoc::exec::are_threads_available().await {
@@ -512,8 +512,8 @@ async fn max_item_size_exceeded() {
     tx.check().unwrap();
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn max_item_size_exceeded_check() {
     crate::init();
     if !remoc::exec::are_threads_available().await {
@@ -578,8 +578,8 @@ async fn max_item_size_exceeded_check() {
     assert!(matches!(recv_task.await.unwrap(), Err(ChangedError::Closed)));
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn has_changed() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<watch::Receiver<i16>>().await;
@@ -622,8 +622,8 @@ async fn has_changed() {
     }
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn mark_changed_and_unchanged() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<watch::Receiver<i16>>().await;
@@ -661,8 +661,8 @@ async fn mark_changed_and_unchanged() {
     assert_eq!(value, 30);
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn wait_for_immediate() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<watch::Receiver<i16>>().await;
@@ -676,8 +676,8 @@ async fn wait_for_immediate() {
     assert_eq!(*value, 42);
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn wait_for_future_value() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<watch::Receiver<i16>>().await;
@@ -704,8 +704,8 @@ async fn wait_for_future_value() {
     let _tx = send_task.await.unwrap();
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn wait_for_closed() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<watch::Receiver<i16>>().await;
@@ -724,8 +724,8 @@ async fn wait_for_closed() {
     assert!(result.is_err(), "wait_for should fail when sender is dropped");
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn conn_failure_receiver_changed() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx), conn) = droppable_loop_channel::<watch::Receiver<i16>>().await;
@@ -784,8 +784,8 @@ async fn conn_failure_receiver_changed() {
     assert!(matches!(rx.has_changed(), Err(ChangedError::Recv(ref e)) if e.is_disconnected()));
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn sender_drop_receiver_changed() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<watch::Receiver<i16>>().await;
@@ -825,8 +825,8 @@ async fn sender_drop_receiver_changed() {
     assert_eq!(*rx.borrow().unwrap(), 2);
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn rate_limit_default_and_set() {
     crate::init();
 
@@ -843,8 +843,8 @@ async fn rate_limit_default_and_set() {
     assert_eq!(tx.rate_limit(), Duration::from_millis(75));
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn rate_limit_coalesces_burst() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<watch::Receiver<i32>>().await;
@@ -895,8 +895,8 @@ async fn rate_limit_coalesces_burst() {
     assert!(count < 10, "expected coalescing, but got {count} updates for {end_value} sends");
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn rate_limit_throttles_rate() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<watch::Receiver<i32>>().await;
@@ -950,8 +950,8 @@ async fn rate_limit_throttles_rate() {
     assert!(count < (end_value / 2) as u32, "expected throttling, but got {count} updates for {end_value} sends");
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn rate_limit_survives_sender_transport() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<watch::Sender<i32>>().await;
@@ -1003,8 +1003,8 @@ async fn rate_limit_survives_sender_transport() {
     assert!(count < 10, "expected coalescing, but got {count} updates for {end_value} sends");
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn receiver_rate_limit_default_and_set() {
     crate::init();
 
@@ -1024,8 +1024,8 @@ async fn receiver_rate_limit_default_and_set() {
     assert_eq!(rx.rate_limit(), Duration::ZERO);
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn receiver_rate_limit_coalesces_burst() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<watch::Receiver<i32>>().await;
@@ -1085,8 +1085,8 @@ async fn receiver_rate_limit_coalesces_burst() {
     assert!(count < 10, "expected coalescing, but got {count} updates for {end_value} sends");
 }
 
-#[cfg_attr(not(feature = "js"), tokio::test)]
-#[cfg_attr(feature = "js", wasm_bindgen_test)]
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn receiver_rate_limit_combines_with_sender_via_max() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<watch::Receiver<i32>>().await;

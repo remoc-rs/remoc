@@ -10,10 +10,11 @@ pub async fn connect(
     // resolves to, and failed links are reconnected without affecting the connection.
     let stream = tcp_connect([target], port).await?;
 
-    // The aggregated connection is an AsyncRead and AsyncWrite pair like any other.
-    let (stream_rx, stream_tx) = tokio::io::split(stream);
+    // Aggligator preserves message boundaries, so it is split into a sink and a
+    // stream of messages and used as a framed transport.
+    let (stream_rx, stream_tx) = stream.into_split();
 
-    let (conn, tx, rx) = remoc::Connect::io(remoc::Cfg::default(), stream_rx, stream_tx).await?;
+    let (conn, tx, rx) = remoc::Connect::framed(remoc::Cfg::default(), stream_tx, stream_rx).await?;
     tokio::spawn(conn);
 
     Ok((tx, rx))
@@ -24,9 +25,9 @@ pub async fn serve(port: u16) -> Result<(), Box<dyn std::error::Error>> {
     let addr = SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), port);
 
     tcp_server(addr, |stream| async move {
-        let (stream_rx, stream_tx) = tokio::io::split(stream);
+        let (stream_rx, stream_tx) = stream.into_split();
 
-        let Ok((conn, tx, rx)) = remoc::Connect::io(remoc::Cfg::default(), stream_rx, stream_tx).await else {
+        let Ok((conn, tx, rx)) = remoc::Connect::framed(remoc::Cfg::default(), stream_tx, stream_rx).await else {
             return;
         };
         tokio::spawn(conn);

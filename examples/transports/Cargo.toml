@@ -16,7 +16,7 @@ bytes = "1"
 futures = "0.3"
 tokio = { version = "1", features = ["io-std", "io-util", "net", "process", "rt"] }
 
-aggligator-transport-tcp = { version = "0.3", default-features = false }
+aggligator-transport-tcp = { version = "0.4", default-features = false }
 axum = { version = "0.8", features = ["ws"] }
 rustls-pemfile = "2"
 tokio-rustls = "0.26"

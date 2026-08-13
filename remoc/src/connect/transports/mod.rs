@@ -34,9 +34,9 @@
 /// alive, so a Remoc connection running over it survives network outages without
 /// losing any of its channels or remote objects.
 ///
-/// The aggregated connection is an [AsyncRead](tokio::io::AsyncRead) and
-/// [AsyncWrite](tokio::io::AsyncWrite) pair, so it is passed to
-/// [Connect::io](super::Connect::io) like a plain socket.
+/// The aggregated connection preserves message boundaries and thus is split into a
+/// [Sink](futures::Sink) and a [Stream](futures::Stream) of [Bytes](bytes::Bytes) and
+/// passed to [Connect::framed](super::Connect::framed).
 /// Besides TCP, [transports](https://crates.io/keywords/aggligator-transport) for
 /// TLS, WebSocket, SOCKS5, USB and Bluetooth are available.
 ///

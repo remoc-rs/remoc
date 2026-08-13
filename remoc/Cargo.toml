@@ -22,6 +22,7 @@ robj = ["rch"]
 robs = ["rch"]
 rtc = ["rch", "remoc_macro"]
 js = [
+    "wokio/web",
     "dep:getrandom",
     "dep:js-sys",
     "dep:web-sys",
@@ -58,6 +59,7 @@ remoc_macro = { version = "=0.19.1", path = "../remoc_macro", optional = true }
 
 custom_debug = "0.6"
 futures = { version = "0.3.31", default-features = false, features = ["std"] }
+wokio = { version = "0.1" }
 tokio = { version = "1.43", features = ["macros", "rt", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 tracing = "0.1.29"

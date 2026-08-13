@@ -196,7 +196,7 @@ pub struct WorkerObj;
 impl Worker for WorkerObj {
     async fn work(&self) -> Result<(), remoc::rtc::CallError> {
         // Stay busy for a while so that concurrent requests overlap.
-        remoc::exec::time::sleep(std::time::Duration::from_millis(100)).await;
+        wokio::time::sleep(std::time::Duration::from_millis(100)).await;
         Ok(())
     }
 }
@@ -416,8 +416,8 @@ where
 #[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
 #[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn incompatible_server_throttles() {
-    use remoc::exec::time::{Instant, sleep};
     use std::time::Duration;
+    use wokio::time::{Instant, sleep};
 
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<DecoderClient>().await;
@@ -507,8 +507,8 @@ async fn incompatible_server_tolerates() {
 #[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
 #[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn rate_limit_monitor_throttles() {
-    use remoc::exec::time::Instant;
     use std::{num::NonZeroUsize, time::Duration};
+    use wokio::time::Instant;
 
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<CounterClient>().await;
@@ -552,8 +552,8 @@ async fn rate_limit_monitor_throttles() {
 #[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
 #[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn concurrent_limit_monitor_limits() {
-    use remoc::exec::time::Instant;
     use std::{num::NonZeroUsize, time::Duration};
+    use wokio::time::Instant;
 
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<WorkerClient>().await;

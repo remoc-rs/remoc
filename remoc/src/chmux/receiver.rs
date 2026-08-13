@@ -16,7 +16,7 @@ use super::{
     mux::PortEvt,
     port_allocator::SidePort,
 };
-use crate::exec::runtime;
+use wokio::runtime;
 
 /// An error occurred during receiving a data message.
 #[derive(Debug, Clone)]

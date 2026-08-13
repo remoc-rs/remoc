@@ -1,5 +1,4 @@
-#![cfg_attr(not(feature = "js"), forbid(unsafe_code))]
-#![cfg_attr(feature = "js", deny(unsafe_code))]
+#![forbid(unsafe_code)]
 #![warn(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc(
@@ -246,56 +245,43 @@ async fn server(mut rx: rch::base::Receiver<CountReq>) {
 
 pub mod prelude;
 
-#[doc(hidden)]
-pub mod exec;
-
 pub mod chmux;
 pub use chmux::Cfg;
 
 #[cfg(feature = "serde")]
-#[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
 pub mod codec;
 
 #[cfg(feature = "serde")]
-#[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
 pub mod versioned;
 
 #[cfg(feature = "rch")]
-#[cfg_attr(docsrs, doc(cfg(feature = "rch")))]
 pub mod rch;
 
 #[cfg(feature = "rch")]
 mod remote_send;
 #[cfg(feature = "rch")]
-#[cfg_attr(docsrs, doc(cfg(feature = "rch")))]
 pub use remote_send::RemoteSend;
 
 #[cfg(feature = "rch")]
 mod connect;
 #[cfg(all(doc, feature = "rch"))]
-#[cfg_attr(docsrs, doc(cfg(feature = "rch")))]
 pub use connect::transports;
 #[cfg(feature = "rch")]
-#[cfg_attr(docsrs, doc(cfg(feature = "rch")))]
 pub use connect::{
     BoxConnect, Connect, ConnectError, LocalBoxConnect, LoopbackConnect,
     ext::{ConnectExt, ConsumeError, ProvideError},
 };
 
 #[cfg(feature = "rfn")]
-#[cfg_attr(docsrs, doc(cfg(feature = "rfn")))]
 pub mod rfn;
 
 #[cfg(feature = "robj")]
-#[cfg_attr(docsrs, doc(cfg(feature = "robj")))]
 pub mod robj;
 
 #[cfg(feature = "robs")]
-#[cfg_attr(docsrs, doc(cfg(feature = "robs")))]
 pub mod robs;
 
 #[cfg(feature = "rtc")]
-#[cfg_attr(docsrs, doc(cfg(feature = "rtc")))]
 pub mod rtc;
 
 // Re-export serde for remoc_macro used by rtc.

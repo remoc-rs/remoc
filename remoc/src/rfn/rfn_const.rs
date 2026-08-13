@@ -5,7 +5,7 @@ use tracing::Instrument;
 
 use super::{CallError, msg::RFnRequest};
 use crate::{
-    RemoteSend, codec, exec,
+    RemoteSend, codec,
     rch::{mpsc, oneshot},
 };
 
@@ -162,7 +162,7 @@ where
             tokio::sync::watch::channel(RFnProvider::DEFAULT_MAX_CONCURRENCY);
         let fun = Arc::new(fun);
 
-        exec::spawn(
+        wokio::spawn(
             async move {
                 let mut semaphore = Arc::new(Semaphore::new(*max_concurrency_rx.borrow_and_update()));
 
@@ -188,7 +188,7 @@ where
                                 Ok(Some(RFnRequest {argument, result_tx})) => {
                                     let fun_task = fun.clone();
                                     let semaphore = semaphore.clone();
-                                    exec::spawn(async move {
+                                    wokio::spawn(async move {
                                         let _permit = semaphore.acquire().await.ok();
                                         let result = fun_task(argument).await;
                                         let _ = result_tx.send(result);

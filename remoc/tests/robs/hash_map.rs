@@ -1,14 +1,12 @@
 use std::{collections::HashMap, time::Duration};
+use wokio::time::sleep;
 
 #[cfg(all(target_family = "wasm", feature = "js"))]
 use wasm_bindgen_test::wasm_bindgen_test;
 
-use remoc::{
-    exec::time::sleep,
-    robs::{
-        RecvError,
-        hash_map::{HashMapEvent, ObservableHashMap},
-    },
+use remoc::robs::{
+    RecvError,
+    hash_map::{HashMapEvent, ObservableHashMap},
 };
 
 #[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]

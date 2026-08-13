@@ -1,6 +1,7 @@
 use futures::{SinkExt, StreamExt, future};
 use rand::RngExt;
 use std::time::Duration;
+use wokio::{self, time::sleep};
 
 #[cfg(all(target_family = "wasm", feature = "js"))]
 use wasm_bindgen_test::wasm_bindgen_test;
@@ -8,7 +9,6 @@ use wasm_bindgen_test::wasm_bindgen_test;
 use crate::{droppable_loop_channel, loop_channel};
 use remoc::{
     codec,
-    exec::{self, time::sleep},
     rch::{
         ClosedReason, SendResultExt, SendingError,
         base::{self, SendErrorKind},
@@ -147,7 +147,7 @@ async fn recv_many() {
 
     let rng = 1..1024;
     let rng2 = rng.clone();
-    exec::spawn(async move {
+    wokio::spawn(async move {
         for i in rng2 {
             println!("Sending {i}");
             let tx = tx.clone();
@@ -203,7 +203,7 @@ async fn recv_len() {
 
     let rng = 1..1024;
     let rng2 = rng.clone();
-    exec::spawn(async move {
+    wokio::spawn(async move {
         for i in rng2 {
             println!("Sending {i}");
             let tx = tx.clone();
@@ -465,7 +465,7 @@ async fn multiple() {
         let n_tx = rx.recv().await.unwrap().unwrap();
 
         let dur = Duration::from_millis(rng.random_range(0..100));
-        let task = exec::spawn(async move {
+        let task = wokio::spawn(async move {
             sleep(dur).await;
 
             println!("Sending {i}");
@@ -545,7 +545,7 @@ async fn forward() {
 #[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn max_item_size_exceeded() {
     crate::init();
-    if !remoc::exec::has_threads().await {
+    if !wokio::task::has_threads().await {
         println!("test requires threads");
         return;
     }
@@ -808,7 +808,7 @@ async fn forward_local() {
     a_tx.send(rx).await.unwrap();
     let mut rx = b_rx.recv().await.unwrap().unwrap();
 
-    let send_task = exec::spawn(async move {
+    let send_task = wokio::spawn(async move {
         for i in 1..=100 {
             local_tx.send(i).await.unwrap();
         }
@@ -838,7 +838,7 @@ async fn forwarded_local() {
     a_tx.send(rx).await.unwrap();
     let mut rx = b_rx.recv().await.unwrap().unwrap();
 
-    let send_task = exec::spawn(async move {
+    let send_task = wokio::spawn(async move {
         for i in 1..=50 {
             local_tx.send(i).await.unwrap();
         }

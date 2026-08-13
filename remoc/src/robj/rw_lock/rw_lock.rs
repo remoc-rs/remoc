@@ -8,7 +8,7 @@ use tracing::Instrument;
 
 use super::msg::{ReadRequest, Value, WriteRequest};
 use crate::{
-    RemoteSend, chmux, codec, exec,
+    RemoteSend, chmux, codec,
     rch::{
         base::{self},
         mpsc, oneshot,
@@ -172,7 +172,7 @@ where
         // when it becomes invalid.
         let mut invalid_rx = value.invalid_rx.clone();
         let cache_lock = self.cache.clone();
-        exec::spawn(
+        wokio::spawn(
             async move {
                 // Wait for cache invalidation.
                 loop {

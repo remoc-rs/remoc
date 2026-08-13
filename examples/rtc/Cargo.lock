@@ -317,6 +317,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uuid",
+ "wokio",
 ]
 
 [[package]]
@@ -628,4 +629,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
 dependencies = [
  "windows-link",
+]
+
+[[package]]
+name = "wokio"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7d7ab8d58237a7b075f8e60bb32319f3cc33fca3ba32ebaf67fa032a4998f48"
+dependencies = [
+ "futures",
+ "pin-project-lite",
+ "tokio",
+ "tracing",
 ]

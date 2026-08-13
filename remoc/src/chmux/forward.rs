@@ -5,7 +5,6 @@ use std::{fmt, num::Wrapping};
 use tracing::Instrument;
 
 use super::{ConnectError, Received, RecvChunkError, RecvError, SendError, port_allocator::PortsExhausted};
-use crate::exec;
 
 /// An error occurred during forwarding of a message.
 #[derive(Debug, Clone)]
@@ -73,7 +72,7 @@ impl std::error::Error for ForwardError {}
 pub(crate) async fn forward(rx: &mut super::Receiver, tx: &mut super::Sender) -> Result<usize, ForwardError> {
     // Required to avoid borrow checking loop limitation.
     fn spawn_forward(id: u32, mut rx: super::Receiver, mut tx: super::Sender) {
-        exec::spawn(
+        wokio::spawn(
             async move {
                 if let Err(err) = forward(&mut rx, &mut tx).await {
                     tracing::debug!("port forwarding for id {id} failed: {err}");
@@ -148,7 +147,7 @@ pub(crate) async fn forward(rx: &mut super::Receiver, tx: &mut super::Sender) ->
                 // Connect them.
                 let connects = tx.connect(connect_reqs).await?;
                 for (req, connect) in reqs.into_iter().zip(connects) {
-                    exec::spawn(
+                    wokio::spawn(
                         async move {
                             let id = req.id();
                             match connect.await {

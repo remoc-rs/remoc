@@ -60,7 +60,6 @@ use super::{ClosedReason, RemoteSendError, Sending, base};
 use crate::{
     RemoteSend, chmux,
     codec::{self, AnySend, ErasedDeserializer, ErasedSerializer},
-    exec,
     rch::{
         BACKCHANNEL_MSG_CLOSE, BACKCHANNEL_MSG_ERROR,
         base::{ErasedReceiver, ErasedSender},
@@ -104,7 +103,7 @@ where
 {
     let (tx, rx) = channel(1);
 
-    let hnd = exec::spawn(async move {
+    let hnd = wokio::spawn(async move {
         loop {
             let permit = match tx.reserve().await {
                 Ok(permit) => permit,
@@ -132,7 +131,7 @@ where
 /// channel is closed or dropped.
 ///
 /// Dropping this *does not* stop forwarding.
-pub struct Forwarding(exec::task::JoinHandle<Result<(), SendError<()>>>);
+pub struct Forwarding(wokio::task::JoinHandle<Result<(), SendError<()>>>);
 
 impl fmt::Debug for Forwarding {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -352,7 +351,7 @@ async fn send_impl(
                     let handle_send_req = handle_send_req.clone();
                     let (send_req_tx, mut send_req_rx) =
                         tokio::sync::mpsc::channel::<Box<dyn ErasedSendReq + Send>>(1);
-                    exec::spawn(async move {
+                    wokio::spawn(async move {
                         while let Some(send_req) = send_req_rx.recv().await {
                             handle_send_req(&mut remote_tx, send_req).await;
                         }
@@ -465,7 +464,7 @@ async fn recv_impl(
             remote_rxs
                 .map(|mut remote_rx| {
                     let (recved_tx, recved_rx) = tokio::sync::mpsc::channel(1);
-                    exec::spawn(async move {
+                    wokio::spawn(async move {
                         loop {
                             tokio::select! {
                                 biased;

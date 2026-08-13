@@ -51,7 +51,7 @@ use std::{error::Error, fmt, marker::PhantomData, ops::Deref, pin::Pin, sync::Ar
 use tokio::sync::Mutex;
 
 use crate::{
-    RemoteSend, chmux, codec, exec,
+    RemoteSend, chmux, codec,
     rch::{
         base::{self},
         mpsc, oneshot,
@@ -213,7 +213,7 @@ where
         let mut request_rx = request_rx.set_buffer::<1>();
         let (keep_tx, keep_rx) = tokio::sync::oneshot::channel();
 
-        exec::spawn(async move {
+        wokio::spawn(async move {
             tokio::select! {
                 biased;
                 Err(_) = keep_rx => (),

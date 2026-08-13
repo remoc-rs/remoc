@@ -145,7 +145,7 @@ async fn simple_spawn() {
     println!("Spawning counter server");
     let counter_obj = CounterObj::new();
     let (server, client) = CounterServer::new(counter_obj, 1);
-    let server_task = remoc::exec::spawn(async move {
+    let server_task = wokio::spawn(async move {
         let (counter_obj_opt, res) = server.serve().await;
         res.unwrap();
         let counter_obj = counter_obj_opt.unwrap();

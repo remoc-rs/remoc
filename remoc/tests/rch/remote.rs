@@ -1,5 +1,6 @@
 use rand::{Rng, RngExt};
 use std::time::Duration;
+use wokio::time::timeout;
 
 #[cfg(all(target_family = "wasm", feature = "js"))]
 use wasm_bindgen_test::wasm_bindgen_test;
@@ -7,8 +8,6 @@ use wasm_bindgen_test::wasm_bindgen_test;
 use crate::loop_channel;
 use remoc::{
     codec::StreamingUnavailable,
-    exec,
-    exec::time::timeout,
     rch::{
         DEFAULT_MAX_ITEM_SIZE,
         base::{RecvError, SendError, SendErrorKind},
@@ -21,7 +20,7 @@ async fn negation() {
     crate::init();
     let ((mut a_tx, mut a_rx), (mut b_tx, mut b_rx)) = loop_channel::<i32>().await;
 
-    let reply_task = exec::spawn(async move {
+    let reply_task = wokio::spawn(async move {
         while let Some(i) = b_rx.recv().await.unwrap() {
             match b_tx.send(-i).await {
                 Ok(()) => (),
@@ -49,7 +48,7 @@ async fn big_msg() {
     crate::init();
     let ((mut a_tx, mut a_rx), (mut b_tx, mut b_rx)) = loop_channel::<Vec<u8>>().await;
 
-    let reply_task = exec::spawn(async move {
+    let reply_task = wokio::spawn(async move {
         while let Some(mut msg) = b_rx.recv().await.unwrap() {
             msg.reverse();
             match b_tx.send(msg).await {
@@ -73,7 +72,7 @@ async fn big_msg() {
             println!("Send error: {err}");
             match &err.kind {
                 SendErrorKind::Serialize(ser)
-                    if ser.0.is::<StreamingUnavailable>() && !remoc::exec::has_threads().await =>
+                    if ser.0.is::<StreamingUnavailable>() && !wokio::task::has_threads().await =>
                 {
                     println!("Okay, because no threads available");
                     return;
@@ -99,7 +98,7 @@ async fn tcp_big_msg() {
     crate::init();
     let ((mut a_tx, mut a_rx), (mut b_tx, mut b_rx)) = crate::tcp_loop_channel::<Vec<u8>>(9877).await;
 
-    let reply_task = exec::spawn(async move {
+    let reply_task = wokio::spawn(async move {
         while let Some(mut msg) = b_rx.recv().await.unwrap() {
             msg.reverse();
             match b_tx.send(msg).await {
@@ -161,7 +160,7 @@ async fn oversized_msg_send_error() {
     crate::init();
     let ((mut a_tx, _a_rx), (_b_tx, mut b_rx)) = loop_channel::<Vec<u8>>().await;
 
-    exec::spawn(async move {
+    wokio::spawn(async move {
         let _ = b_rx.recv().await;
     });
 
@@ -169,7 +168,7 @@ async fn oversized_msg_send_error() {
     println!("Sending message of length {}", data.len());
     let res = a_tx.send(data).await;
 
-    if remoc::exec::has_threads().await {
+    if wokio::task::has_threads().await {
         assert!(
             matches!(res, Err(SendError { kind: SendErrorKind::MaxItemSizeExceeded, .. })),
             "sending oversized item must fail"
@@ -188,7 +187,7 @@ async fn oversized_msg_recv_error() {
     crate::init();
     let ((mut a_tx, _a_rx), (_b_tx, mut b_rx)) = loop_channel::<Vec<u8>>().await;
 
-    exec::spawn(async move {
+    wokio::spawn(async move {
         let data: Vec<u8> = vec![1u8; 100];
         println!("Sending message of length {}", data.len());
         a_tx.send(data).await.unwrap();

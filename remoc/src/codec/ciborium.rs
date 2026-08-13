@@ -12,7 +12,6 @@ use super::{Codec, DeserializationError, SerializationError};
 /// More information is provided in the [`ciborium` README].
 ///
 /// [`ciborium` README]: https://github.com/enarx/ciborium#compatibility-with-other-implementations
-#[cfg_attr(docsrs, doc(cfg(feature = "codec-ciborium")))]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Ciborium;
 

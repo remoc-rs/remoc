@@ -11,7 +11,7 @@ use std::{
 use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
 
 use super::{cfg::OnPortsExhausted, msg::PortDataItem};
-use crate::exec::time::timeout;
+use wokio::time::timeout;
 
 /// The requested remote port number has alredy been allocated.
 #[derive(Debug, Clone)]

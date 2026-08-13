@@ -4,7 +4,7 @@ use tracing::Instrument;
 
 use super::{CallError, msg::RFnRequest};
 use crate::{
-    RemoteSend, codec, exec,
+    RemoteSend, codec,
     rch::{mpsc, oneshot},
 };
 
@@ -124,7 +124,7 @@ where
         let mut request_rx = request_rx.set_buffer::<1>();
         let (keep_tx, keep_rx) = tokio::sync::oneshot::channel();
 
-        exec::spawn(
+        wokio::spawn(
             async move {
                 let term = async move {
                     if let Ok(()) = keep_rx.await {

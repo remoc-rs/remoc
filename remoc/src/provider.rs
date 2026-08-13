@@ -12,33 +12,26 @@ use crate::robj;
 /// For example, you can keep providers of different types in a single vector.
 ///
 /// Dropping the provider will stop making the object available remotely.
-#[cfg_attr(docsrs, doc(cfg(any(feature = "rfn", feature = "robj"))))]
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Provider {
     /// A provider for [RFn](rfn::RFn).
     #[cfg(feature = "rfn")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "rfn")))]
     RFn(rfn::RFnProvider),
     /// A provider for [RFnMut](rfn::RFnMut).
     #[cfg(feature = "rfn")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "rfn")))]
     RFnMut(rfn::RFnMutProvider),
     /// A provider for [RFnOnce](rfn::RFnOnce).
     #[cfg(feature = "rfn")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "rfn")))]
     RFnOnce(rfn::RFnOnceProvider),
     /// A provider for [Handle](robj::handle::Handle).
     #[cfg(feature = "robj")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "robj")))]
     Handle(robj::handle::Provider),
     /// A provider for [Lazy](robj::lazy::Lazy).
     #[cfg(feature = "robj")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "robj")))]
     Lazy(robj::lazy::Provider),
     /// A provider for [LazyBlob](robj::lazy_blob::LazyBlob).
     #[cfg(feature = "robj")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "robj")))]
     LazyBlob(robj::lazy_blob::Provider),
 }
 

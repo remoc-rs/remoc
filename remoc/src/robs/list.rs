@@ -70,7 +70,7 @@ use tokio::sync::{Mutex, OwnedMutexGuard, RwLock, RwLockReadGuard, mpsc, oneshot
 use tracing::Instrument;
 
 use super::{ChangeNotifier, ChangeSender, RecvError, SendError, default_on_err};
-use crate::{exec, prelude::*};
+use crate::prelude::*;
 
 /// A list change event.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -223,7 +223,7 @@ where
         let (sub_tx, sub_rx) = mpsc::unbounded_channel();
         let len = Arc::new(AtomicUsize::new(initial.len()));
         let subscriber_count = Arc::new(AtomicUsize::new(0));
-        exec::spawn(Self::task(initial, rx, sub_rx, subscriber_count.clone()).in_current_span());
+        wokio::spawn(Self::task(initial, rx, sub_rx, subscriber_count.clone()).in_current_span());
         Self {
             tx,
             change: ChangeSender::new(),
@@ -674,7 +674,7 @@ where
         let inner_task = Arc::downgrade(&inner);
 
         // Process change events.
-        exec::spawn(
+        wokio::spawn(
             async move {
                 loop {
                     let event = tokio::select! {

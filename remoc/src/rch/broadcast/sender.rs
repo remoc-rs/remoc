@@ -14,7 +14,7 @@ use super::{
     super::{SendErrorExt, Sending as BaseSending, SendingError, base, mpsc},
     BroadcastMsg, Receiver,
 };
-use crate::{RemoteSend, chmux, codec, exec};
+use crate::{RemoteSend, chmux, codec};
 
 /// An error occurred during sending over a broadcast channel.
 #[derive(Clone, custom_debug::Debug)]
@@ -189,7 +189,7 @@ where
                     // Spawn task that waits for subscriber to become ready again,
                     // then add it back to subscriber list.
                     let ready_tx = inner.ready_tx.clone();
-                    exec::spawn(async move {
+                    wokio::spawn(async move {
                         let _ = sub.send(BroadcastMsg::Lagged).await;
                         // Make sure subscriber has space for next message.
                         let _permit = sub.reserve().await;
@@ -254,7 +254,7 @@ where
         let mut rx = rx.set_buffer::<1>();
         let this = self.clone();
 
-        exec::spawn(async move {
+        wokio::spawn(async move {
             while let Ok(Some(value)) = rx.recv().await {
                 if this.send(value).is_err() {
                     break;

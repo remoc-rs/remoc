@@ -26,7 +26,7 @@ use super::{
     mux::PortEvt,
     port_allocator::{PortsExhausted, SidePort},
 };
-use crate::exec::{self, runtime};
+use wokio::{self, runtime};
 
 /// An error occurred during sending of a message.
 #[derive(Debug, Clone)]
@@ -530,7 +530,7 @@ impl Sender {
             let (response_tx, response_rx) = oneshot::channel();
             ports_response.push((port_req, response_tx));
 
-            let response = exec::spawn(async move {
+            let response = wokio::spawn(async move {
                 match response_rx.await {
                     Ok(ConnectRsp::Accepted(sender, receiver)) => Ok((sender, receiver)),
                     Ok(ConnectRsp::Rejected { no_ports }) => {

@@ -1,12 +1,12 @@
 //! Connection extensions.
 
 use std::{error::Error, fmt, future::Future};
+use wokio::{self, task::MaybeSend};
 
 use crate::{
     RemoteSend,
     chmux::ChMuxError,
     connect::{Connect, ConnectError},
-    exec::{self, task::MaybeSend},
     rch::{
         base,
         base::{RecvError, SendError},
@@ -14,7 +14,6 @@ use crate::{
 };
 
 /// Error occurred during establishing a providing connection.
-#[cfg_attr(docsrs, doc(cfg(feature = "rch")))]
 #[derive(Debug, Clone)]
 pub enum ProvideError<TransportSinkError, TransportStreamError> {
     /// Channel multiplexer error.
@@ -72,7 +71,6 @@ where
 }
 
 /// Error occurred during establishing a consuming connection.
-#[cfg_attr(docsrs, doc(cfg(feature = "rch")))]
 #[derive(Debug, Clone)]
 pub enum ConsumeError<TransportSinkError, TransportStreamError> {
     /// Channel multiplexer error.
@@ -248,7 +246,6 @@ async fn connect_server() {
 ```
 "##
 )]
-#[cfg_attr(docsrs, doc(cfg(feature = "rch")))]
 pub trait ConnectExt<T, TransportSinkError, TransportStreamError> {
     /// Establishes the connection and provides a single value to the remote endpoint.
     ///
@@ -307,7 +304,7 @@ where
             res = tx.send(value) => res?,
         }
 
-        exec::spawn(conn.in_current_span());
+        wokio::spawn(conn.in_current_span());
 
         Ok(())
     }
@@ -331,7 +328,7 @@ where
             }
         };
 
-        exec::spawn(conn.in_current_span());
+        wokio::spawn(conn.in_current_span());
 
         Ok(value)
     }

@@ -1,17 +1,14 @@
 use futures::StreamExt;
 use std::time::Duration;
+use wokio::time::sleep;
 
 #[cfg(all(target_family = "wasm", feature = "js"))]
 use wasm_bindgen_test::wasm_bindgen_test;
 
 use crate::{droppable_loop_channel, loop_channel};
-use remoc::{
-    exec,
-    exec::time::sleep,
-    rch::{
-        base::SendErrorKind,
-        watch::{self, ChangedError, ReceiverStream, SendError, TransferStrategy, WatchExt},
-    },
+use remoc::rch::{
+    base::SendErrorKind,
+    watch::{self, ChangedError, ReceiverStream, SendError, TransferStrategy, WatchExt},
 };
 
 async fn simple(transfer_strategy: TransferStrategy) {
@@ -32,7 +29,7 @@ async fn simple(transfer_strategy: TransferStrategy) {
         println!("Initial value: {value:?}");
     }
 
-    let recv_task = exec::spawn(async move {
+    let recv_task = wokio::spawn(async move {
         let mut value = *rx.borrow().unwrap();
         assert_eq!(value, start_value);
 
@@ -96,7 +93,7 @@ async fn simple_stream() {
     let rx = b_rx.recv().await.unwrap().unwrap();
     let mut rx = ReceiverStream::from(rx);
 
-    let recv_task = exec::spawn(async move {
+    let recv_task = wokio::spawn(async move {
         let mut value = 0;
         while let Some(rxed_value) = rx.next().await {
             value = rxed_value.unwrap();
@@ -152,7 +149,7 @@ async fn forward() {
         println!("Initial value: {value:?}");
     }
 
-    let recv_task = exec::spawn(async move {
+    let recv_task = wokio::spawn(async move {
         let mut value = *rx.borrow().unwrap();
         assert_eq!(value, start_value);
 
@@ -200,7 +197,7 @@ async fn forwarded() {
     a_tx.send(rx).await.unwrap();
     let mut rx = b_rx.recv().await.unwrap().unwrap();
 
-    let recv_task = exec::spawn(async move {
+    let recv_task = wokio::spawn(async move {
         let mut value = *rx.borrow().unwrap();
         assert_eq!(value, start_value);
 
@@ -242,7 +239,7 @@ async fn modify_stream() {
     let rx = b_rx.recv().await.unwrap().unwrap();
     let mut rx = ReceiverStream::from(rx);
 
-    let recv_task = exec::spawn(async move {
+    let recv_task = wokio::spawn(async move {
         let mut value = 0;
         while let Some(rxed_value) = rx.next().await {
             value = rxed_value.unwrap();
@@ -284,7 +281,7 @@ async fn send_if_modified() {
     let rx = b_rx.recv().await.unwrap().unwrap();
     let mut rx = ReceiverStream::from(rx);
 
-    let recv_task = exec::spawn(async move {
+    let recv_task = wokio::spawn(async move {
         let mut last_value = start_value;
         while let Some(rxed_value) = rx.next().await {
             let value = rxed_value.unwrap();
@@ -333,7 +330,7 @@ async fn send_if_different() {
     let rx = b_rx.recv().await.unwrap().unwrap();
     let mut rx = ReceiverStream::from(rx);
 
-    let recv_task = exec::spawn(async move {
+    let recv_task = wokio::spawn(async move {
         let mut last_value = start_value - 1;
         while let Some(rxed_value) = rx.next().await {
             let value = rxed_value.unwrap();
@@ -444,7 +441,7 @@ async fn conn_failure() {
 #[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn max_item_size_exceeded() {
     crate::init();
-    if !remoc::exec::has_threads().await {
+    if !wokio::task::has_threads().await {
         println!("test requires threads");
         return;
     }
@@ -466,7 +463,7 @@ async fn max_item_size_exceeded() {
         println!("Initial value: {value:?}");
     }
 
-    let recv_task = exec::spawn(async move {
+    let recv_task = wokio::spawn(async move {
         loop {
             let res = rx.changed().await;
             println!("RX changed result: {res:?}");
@@ -516,7 +513,7 @@ async fn max_item_size_exceeded() {
 #[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn max_item_size_exceeded_check() {
     crate::init();
-    if !remoc::exec::has_threads().await {
+    if !wokio::task::has_threads().await {
         println!("test requires threads");
         return;
     }
@@ -538,7 +535,7 @@ async fn max_item_size_exceeded_check() {
         println!("Initial value: {value:?}");
     }
 
-    let recv_task = exec::spawn(async move {
+    let recv_task = wokio::spawn(async move {
         loop {
             let res = rx.changed().await;
             println!("RX changed result: {res:?}");
@@ -687,7 +684,7 @@ async fn wait_for_future_value() {
     let mut rx = b_rx.recv().await.unwrap().unwrap();
 
     // Spawn a task that sends the target value after a delay.
-    let send_task = exec::spawn(async move {
+    let send_task = wokio::spawn(async move {
         sleep(Duration::from_millis(50)).await;
         tx.send(5).unwrap();
         sleep(Duration::from_millis(50)).await;
@@ -715,7 +712,7 @@ async fn wait_for_closed() {
     let mut rx = b_rx.recv().await.unwrap().unwrap();
 
     // Drop sender after a short delay — wait_for should return an error.
-    let _drop_task = exec::spawn(async move {
+    let _drop_task = wokio::spawn(async move {
         sleep(Duration::from_millis(50)).await;
         drop(tx);
     });
@@ -861,7 +858,7 @@ async fn rate_limit_coalesces_burst() {
     println!("Receiving remote watch channel receiver");
     let mut rx = b_rx.recv().await.unwrap().unwrap();
 
-    let recv_task = exec::spawn(async move {
+    let recv_task = wokio::spawn(async move {
         let mut count = 0u32;
         let mut last = *rx.borrow_and_update().unwrap();
         while rx.changed().await.is_ok() {
@@ -913,7 +910,7 @@ async fn rate_limit_throttles_rate() {
     println!("Receiving remote watch channel receiver");
     let mut rx = b_rx.recv().await.unwrap().unwrap();
 
-    let recv_task = exec::spawn(async move {
+    let recv_task = wokio::spawn(async move {
         let mut count = 0u32;
         let mut last = *rx.borrow_and_update().unwrap();
         while rx.changed().await.is_ok() {
@@ -972,7 +969,7 @@ async fn rate_limit_survives_sender_transport() {
     assert_eq!(remote_tx.rate_limit(), rate_limit);
 
     let mut rx = rx;
-    let recv_task = exec::spawn(async move {
+    let recv_task = wokio::spawn(async move {
         let mut count = 0u32;
         let mut last = *rx.borrow_and_update().unwrap();
         while rx.changed().await.is_ok() {
@@ -1051,7 +1048,7 @@ async fn receiver_rate_limit_coalesces_burst() {
     // Allow the back channel to propagate the requested rate limit to the sender.
     sleep(rate_limit).await;
 
-    let recv_task = exec::spawn(async move {
+    let recv_task = wokio::spawn(async move {
         let mut count = 0u32;
         let mut last = *rx.borrow_and_update().unwrap();
         while rx.changed().await.is_ok() {
@@ -1111,7 +1108,7 @@ async fn receiver_rate_limit_combines_with_sender_via_max() {
     // Allow the back channel to propagate the requested rate limit to the sender.
     sleep(receiver_rate_limit).await;
 
-    let recv_task = exec::spawn(async move {
+    let recv_task = wokio::spawn(async move {
         let mut count = 0u32;
         let mut last = *rx.borrow_and_update().unwrap();
         while rx.changed().await.is_ok() {

@@ -3,7 +3,7 @@ use std::fmt;
 use tracing::Instrument;
 
 use super::{CallError, msg::RFnRequest};
-use crate::{RemoteSend, codec, exec, rch::oneshot};
+use crate::{RemoteSend, codec, rch::oneshot};
 
 /// Provides a remotely callable async [FnOnce] function.
 ///
@@ -114,7 +114,7 @@ where
         let (request_tx, request_rx) = oneshot::channel();
         let (keep_tx, keep_rx) = tokio::sync::oneshot::channel();
 
-        exec::spawn(
+        wokio::spawn(
             async move {
                 tokio::select! {
                     biased;

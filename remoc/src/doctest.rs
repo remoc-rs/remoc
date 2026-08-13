@@ -11,8 +11,6 @@ where
 {
     use futures::StreamExt;
 
-    use crate::exec;
-
     let (transport_a_tx, transport_b_rx) = futures::channel::mpsc::channel::<bytes::Bytes>(0);
     let (transport_b_tx, transport_a_rx) = futures::channel::mpsc::channel::<bytes::Bytes>(0);
 
@@ -22,14 +20,14 @@ where
     let a = async move {
         let (conn, tx, rx) =
             crate::Connect::framed(Default::default(), transport_a_tx, transport_a_rx).await.unwrap();
-        exec::spawn(conn);
+        wokio::spawn(conn);
         (tx, rx)
     };
 
     let b = async move {
         let (conn, tx, rx) =
             crate::Connect::framed(Default::default(), transport_b_tx, transport_b_rx).await.unwrap();
-        exec::spawn(conn);
+        wokio::spawn(conn);
         (tx, rx)
     };
 

@@ -45,7 +45,7 @@ use super::{
     sender::Sender,
     sizer::{BufferSizer, DummySizer, GlobalCreditsReport},
 };
-use crate::exec::time::{sleep, timeout};
+use wokio::time::{sleep, timeout};
 
 /// Multiplexer protocol error.
 fn protocol_err<SinkError, StreamError>(msg: impl AsRef<str>) -> super::ChMuxError<SinkError, StreamError> {

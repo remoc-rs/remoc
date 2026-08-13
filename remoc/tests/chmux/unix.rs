@@ -11,7 +11,7 @@ use tokio::{
 };
 use tokio_util::codec::{FramedRead, FramedWrite, length_delimited::LengthDelimitedCodec};
 
-use remoc::{chmux, exec};
+use remoc::chmux;
 
 async fn uds_server() {
     let _ = fs::remove_file("/tmp/chmux_test");
@@ -26,7 +26,7 @@ async fn uds_server() {
     let mux_cfg = chmux::Cfg::default();
     let (mux, _, mut server) = chmux::ChMux::new(mux_cfg, framed_tx, framed_rx).await.unwrap();
 
-    let mux_run = exec::spawn(async move { mux.run().await.unwrap() });
+    let mux_run = wokio::spawn(async move { mux.run().await.unwrap() });
 
     while let Some((mut tx, mut rx)) = server.accept().await.unwrap() {
         println!("Server accepting request");
@@ -57,7 +57,7 @@ async fn uds_client() {
 
     let mux_cfg = chmux::Cfg::default();
     let (mux, client, _) = chmux::ChMux::new(mux_cfg, framed_tx, framed_rx).await.unwrap();
-    let mux_run = exec::spawn(async move { mux.run().await.unwrap() });
+    let mux_run = wokio::spawn(async move { mux.run().await.unwrap() });
 
     {
         let client = client;
@@ -89,11 +89,11 @@ async fn uds_test() {
     crate::init();
 
     println!("Starting server task...");
-    let server_task = exec::spawn(uds_server());
+    let server_task = wokio::spawn(uds_server());
     sleep(Duration::from_millis(100)).await;
 
     println!("String client thread...");
-    let client_task = exec::spawn(uds_client());
+    let client_task = wokio::spawn(uds_client());
 
     println!("Waiting for server task...");
     server_task.await.unwrap();
@@ -131,13 +131,13 @@ async fn uds_round_trip_latency() -> Duration {
     let ((server_mux, _server_client, mut server), (client_mux, client, _client_server)) =
         try_join(accept, connect).await.unwrap();
 
-    exec::spawn(async move { server_mux.run().await.unwrap() });
-    exec::spawn(async move { client_mux.run().await.unwrap() });
+    wokio::spawn(async move { server_mux.run().await.unwrap() });
+    wokio::spawn(async move { client_mux.run().await.unwrap() });
 
     // Server: echo back every message it receives.
-    exec::spawn(async move {
+    wokio::spawn(async move {
         while let Some((mut tx, mut rx)) = server.accept().await.unwrap() {
-            exec::spawn(async move {
+            wokio::spawn(async move {
                 while let Some(msg) = rx.recv().await.unwrap() {
                     tx.send(Bytes::from(msg)).await.unwrap();
                 }

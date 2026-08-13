@@ -6,7 +6,6 @@ use super::{Codec, DeserializationError, SerializationError};
 ///
 /// See [bincode] for details.
 /// This uses the [`bincode::config::legacy`] configuration.
-#[cfg_attr(docsrs, doc(cfg(feature = "codec-bincode")))]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Bincode;
 
@@ -40,7 +39,6 @@ impl Codec for Bincode {
 ///
 /// See [bincode] for details.
 /// This uses the [`bincode::config::standard`] configuration and is not compatible with Bincode 1.
-#[cfg_attr(docsrs, doc(cfg(feature = "codec-bincode")))]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Bincode2;
 

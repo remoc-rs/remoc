@@ -11,7 +11,7 @@ use super::{
     },
     Interlock, Location,
 };
-use crate::{Cfg, Connect, chmux, codec, exec};
+use crate::{Cfg, Connect, chmux, codec};
 
 #[derive(Default)]
 pub(super) enum LocalConnect {
@@ -67,7 +67,7 @@ impl Receiver {
                 let (loopback, tx, rx) = Connect::loopback::<(), (), codec::Dummy>(Cfg::default()).await;
                 let LocalConnect::Requested(reply_tx) = mem::take(&mut self.local) else { unreachable!() };
                 if reply_tx.send(tx.into_inner()).is_ok() {
-                    exec::spawn(loopback);
+                    wokio::spawn(loopback);
                     self.receiver = Some(Ok(rx.into_inner()));
                     return;
                 }

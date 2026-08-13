@@ -49,7 +49,7 @@ use std::{
 };
 
 use super::mpsc;
-use crate::{RemoteSend, codec, exec};
+use crate::{RemoteSend, codec};
 
 mod receiver;
 mod sender;
@@ -82,7 +82,7 @@ where
 {
     let (tx, rx) = channel();
 
-    let hnd = exec::spawn(async move {
+    let hnd = wokio::spawn(async move {
         tokio::select! {
             biased;
             () = tx.closed() => Ok(()),
@@ -109,7 +109,7 @@ where
 /// channel is closed or dropped.
 ///
 /// Dropping this *does not* stop forwarding.
-pub struct Forwarding(exec::task::JoinHandle<Result<(), SendError<()>>>);
+pub struct Forwarding(wokio::task::JoinHandle<Result<(), SendError<()>>>);
 
 impl fmt::Debug for Forwarding {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

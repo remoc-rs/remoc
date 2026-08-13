@@ -279,7 +279,7 @@ use std::{
 use tokio_util::sync::ReusableBoxFuture;
 
 use crate::{
-    RemoteSend, chmux, codec, exec,
+    RemoteSend, chmux, codec,
     rch::{SendingError, SendingErrorKind, base, mpsc, oneshot},
 };
 
@@ -1270,8 +1270,6 @@ impl Error for ServeError {}
 
 // Re-exports for proc macro usage.
 #[doc(hidden)]
-pub use crate::exec::task::spawn;
-#[doc(hidden)]
 pub use serde::{Deserialize, Serialize};
 #[doc(hidden)]
 pub use tokio::select;
@@ -1281,6 +1279,8 @@ pub use tokio::sync::RwLock as LocalRwLock;
 pub use tokio::sync::broadcast as local_broadcast;
 #[doc(hidden)]
 pub use tokio::sync::mpsc as local_mpsc;
+#[doc(hidden)]
+pub use wokio::task::spawn;
 #[doc(hidden)]
 pub type ReplyErrorSender = tokio::sync::mpsc::Sender<SendingErrorKind>;
 #[doc(hidden)]
@@ -1327,7 +1327,7 @@ pub async fn send_reply<T, E, Codec>(
     let Ok(sending) = reply_tx.send(result) else { return };
 
     let err_tx = err_tx.clone();
-    exec::spawn(
+    wokio::spawn(
         async move {
             if let Err(err) = sending.await {
                 let kind = err.kind();

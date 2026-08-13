@@ -25,7 +25,6 @@ use super::{
 use crate::{
     RemoteSend, chmux,
     codec::{self, ErasedDeserializer, ErasedSerializer},
-    exec,
 };
 
 /// An error occurred during sending over an mpsc channel.
@@ -329,7 +328,7 @@ fn drop_when_closed(
     target: Arc<dyn Any + Send + Sync>, mut dropped_rx: tokio::sync::mpsc::Receiver<()>,
     mut closed_rx: tokio::sync::watch::Receiver<Option<ClosedReason>>,
 ) {
-    exec::spawn(async move {
+    wokio::spawn(async move {
         loop {
             tokio::select! {
                 biased;
@@ -450,7 +449,7 @@ where
     /// # Panics
     /// This function panics if called within an asynchronous execution context.
     pub fn blocking_send(&self, value: T) -> Result<Sending<T>, SendError<T>> {
-        exec::task::block_on(self.send(value))
+        wokio::task::block_on(self.send(value))
     }
 
     /// Wait for channel capacity, returning an owned permit.

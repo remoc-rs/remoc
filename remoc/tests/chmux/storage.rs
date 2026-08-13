@@ -5,7 +5,7 @@ use std::time::Duration;
 use wasm_bindgen_test::wasm_bindgen_test;
 
 use crate::loop_transport;
-use remoc::{chmux, exec};
+use remoc::chmux;
 
 #[derive(Clone, Debug, PartialEq)]
 struct Version(u32);
@@ -26,8 +26,8 @@ async fn value_storage() {
     loop_transport!(0, a_tx, a_rx, b_tx, b_rx);
     let ((a_mux, a_client, _a_server), (b_mux, _b_client, mut b_server)) =
         try_join(chmux::ChMux::new(cfg(), a_tx, a_rx), chmux::ChMux::new(cfg(), b_tx, b_rx)).await.unwrap();
-    exec::spawn(async move { a_mux.run().await.unwrap() });
-    exec::spawn(async move { b_mux.run().await.unwrap() });
+    wokio::spawn(async move { a_mux.run().await.unwrap() });
+    wokio::spawn(async move { b_mux.run().await.unwrap() });
 
     let connect = a_client.connect(a_client.connect_req().unwrap());
     let accept = async { b_server.accept().await.unwrap().unwrap() };

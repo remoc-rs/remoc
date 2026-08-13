@@ -1,14 +1,13 @@
 use std::fmt;
-
 use tracing::Instrument;
+use wokio::task::JoinHandle;
 
 use super::{
     ReadLock, RwLock,
     msg::{ReadRequest, Value, WriteRequest},
 };
 use crate::{
-    RemoteSend, codec, exec,
-    exec::task::JoinHandle,
+    RemoteSend, codec,
     rch::{mpsc, watch},
 };
 
@@ -44,7 +43,7 @@ where
         let write_req_rx = write_req_rx.set_buffer();
         let (term_tx, term_rx) = tokio::sync::oneshot::channel();
 
-        let task = exec::spawn(
+        let task = wokio::spawn(
             async move {
                 tokio::select! {
                     biased;

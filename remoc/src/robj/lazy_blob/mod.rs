@@ -70,7 +70,7 @@ use tracing::Instrument;
 
 use crate::{
     chmux::{self, DataBuf},
-    codec, exec,
+    codec,
     rch::{ConnectError, mpsc},
 };
 
@@ -206,7 +206,7 @@ where
         let mut req_rx = req_rx.set_buffer::<1>();
         let len = data.len() as _;
 
-        exec::spawn(
+        wokio::spawn(
             async move {
                 let do_send = async move {
                     loop {
@@ -218,7 +218,7 @@ where
                         };
 
                         let data = data.clone();
-                        exec::spawn(
+                        wokio::spawn(
                             async move {
                                 match fw_tx.into_inner() {
                                     Some(fw_bin::InnerSender::Local(tx)) => {

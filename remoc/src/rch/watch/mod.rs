@@ -87,6 +87,10 @@ use std::{
     task::{Context, Poll, ready},
     time::Duration,
 };
+use wokio::{
+    self,
+    time::{Instant, sleep},
+};
 
 use super::{
     DEFAULT_MAX_ITEM_SIZE, RemoteSendError,
@@ -95,10 +99,6 @@ use super::{
 use crate::{
     RemoteSend, chmux,
     codec::{self, AnySend, ErasedDeserializer, ErasedSerializer},
-    exec::{
-        self,
-        time::{Instant, sleep},
-    },
     rch::{BACKCHANNEL_MSG_ERROR, BACKCHANNEL_MSG_RATE_LIMIT},
 };
 
@@ -175,7 +175,7 @@ where
     let (mut tx, rx) = channel(init);
     let sender_rate_limit_tx = tx.inner.as_ref().unwrap().sender_rate_limit_tx.clone();
 
-    let hnd = exec::spawn(async move {
+    let hnd = wokio::spawn(async move {
         loop {
             tokio::select! {
                 biased;
@@ -211,7 +211,7 @@ where
 ///
 /// Dropping this *does not* stop forwarding.
 pub struct Forwarding {
-    hnd: exec::task::JoinHandle<Result<(), SendError>>,
+    hnd: wokio::task::JoinHandle<Result<(), SendError>>,
     sender_rate_limit_tx: tokio::sync::watch::Sender<Duration>,
 }
 

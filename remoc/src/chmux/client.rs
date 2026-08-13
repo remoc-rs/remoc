@@ -11,6 +11,7 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::sync::{mpsc, oneshot};
+use wokio::task::JoinHandle;
 
 use super::{
     any_storage::AnyStorage,
@@ -18,7 +19,6 @@ use super::{
     receiver::Receiver,
     sender::Sender,
 };
-use crate::{exec, exec::task::JoinHandle};
 
 /// An error occurred during connecting to a remote service.
 #[derive(Debug, Clone)]
@@ -217,7 +217,7 @@ impl Client {
         let (sent_tx, sent_rx) = oneshot::channel();
         let listener_dropped = self.listener_dropped.clone();
 
-        let response = exec::spawn(async move {
+        let response = wokio::spawn(async move {
             if listener_dropped.load(Ordering::Relaxed) {
                 return Err(ConnectError::Rejected);
             }

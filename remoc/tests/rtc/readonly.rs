@@ -80,8 +80,8 @@ async fn closed() {
         assert!(!client.is_closed());
         println!("Client capacity: {}", client.capacity());
 
-        remoc::exec::spawn(async move {
-            remoc::exec::time::sleep(std::time::Duration::from_millis(500)).await;
+        wokio::spawn(async move {
+            wokio::time::sleep(std::time::Duration::from_millis(500)).await;
             drop_tx.send(()).unwrap();
         });
 

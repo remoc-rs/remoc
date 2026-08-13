@@ -6,7 +6,6 @@ use super::{Codec, DeserializationError, SerializationError};
 ///
 /// See [postcard] for details.
 /// This uses the default function configuration.
-#[cfg_attr(docsrs, doc(cfg(feature = "codec-postcard")))]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Postcard;
 

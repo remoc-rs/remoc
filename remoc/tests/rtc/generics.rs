@@ -104,7 +104,7 @@ async fn simple() {
 
         println!("Spawning watch...");
         let mut watch_rx = client.watch().await.unwrap();
-        remoc::exec::spawn(async move {
+        wokio::spawn(async move {
             while watch_rx.changed().await.is_ok() {
                 println!("Watch value: {}", *watch_rx.borrow_and_update().unwrap());
             }

@@ -29,7 +29,6 @@ mod io_transport;
 pub mod transports;
 
 /// Error occurred during establishing a connection over a physical transport.
-#[cfg_attr(docsrs, doc(cfg(feature = "rch")))]
 #[derive(Debug, Clone)]
 pub enum ConnectError<TransportSinkError, TransportStreamError> {
     /// Establishing [chmux](crate::chmux) connection failed.
@@ -197,21 +196,18 @@ impl<TransportSinkError, TransportStreamError> From<base::ConnectError>
 ///     }
 /// }
 /// ```
-#[cfg_attr(docsrs, doc(cfg(feature = "rch")))]
 #[must_use = "You must poll or spawn the Connect future for the connection to work."]
 pub struct Connect<F>(F);
 
 /// A [connection](Connect) with a boxed connection future.
 ///
 /// Obtain it using [Connect::boxed].
-#[cfg_attr(docsrs, doc(cfg(feature = "rch")))]
 pub type BoxConnect<'transport, TransportSinkError, TransportStreamError> =
     Connect<BoxFuture<'transport, Result<(), ChMuxError<TransportSinkError, TransportStreamError>>>>;
 
 /// A [connection](Connect) with a boxed connection future that is not [Send].
 ///
 /// Obtain it using [Connect::boxed_local].
-#[cfg_attr(docsrs, doc(cfg(feature = "rch")))]
 pub type LocalBoxConnect<'transport, TransportSinkError, TransportStreamError> =
     Connect<LocalBoxFuture<'transport, Result<(), ChMuxError<TransportSinkError, TransportStreamError>>>>;
 

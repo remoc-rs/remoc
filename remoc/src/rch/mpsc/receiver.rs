@@ -20,7 +20,6 @@ use super::{
 use crate::{
     RemoteSend, chmux,
     codec::{self, ErasedDeserializer, ErasedSerializer},
-    exec,
 };
 
 /// An error occurred during receiving over an mpsc channel.
@@ -343,7 +342,7 @@ impl<T, Codec, const BUFFER: usize, const MAX_ITEM_SIZE: usize> Receiver<T, Code
     /// # Panics
     /// This function panics if called within an asynchronous execution context.
     pub fn blocking_recv(&mut self) -> Result<Option<T>, RecvError> {
-        exec::task::block_on(self.recv())
+        wokio::task::block_on(self.recv())
     }
 
     /// Receives the next values for this receiver and extends `buffer`.

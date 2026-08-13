@@ -74,7 +74,7 @@ use tokio::sync::{RwLock, RwLockReadGuard, oneshot, watch};
 use tracing::Instrument;
 
 use super::{ChangeNotifier, ChangeSender, RecvError, SendError, default_on_err, send_event};
-use crate::{exec, prelude::*};
+use crate::prelude::*;
 
 /// A hash map change event.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -836,7 +836,7 @@ where
         let (tx, rx) = rch::mpsc::channel(128);
         let len = hm.len();
 
-        exec::spawn(
+        wokio::spawn(
             async move {
                 for (k, v) in hm.into_iter() {
                     match tx.send((k, v)).await {
@@ -1015,7 +1015,7 @@ where
 
         // Process change events.
         let tx_send = tx.clone();
-        exec::spawn(
+        wokio::spawn(
             async move {
                 loop {
                     let event = tokio::select! {

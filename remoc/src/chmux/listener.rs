@@ -16,7 +16,7 @@ use super::{
     receiver::Receiver,
     sender::Sender,
 };
-use crate::exec::runtime;
+use wokio::runtime;
 
 /// An multiplexer listener error.
 #[derive(Debug, Clone)]

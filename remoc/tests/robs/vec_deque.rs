@@ -1,12 +1,10 @@
 use std::time::Duration;
+use wokio::time::sleep;
 
 #[cfg(all(target_family = "wasm", feature = "js"))]
 use wasm_bindgen_test::wasm_bindgen_test;
 
-use remoc::{
-    exec::time::sleep,
-    robs::vec_deque::{ObservableVecDeque, VecDequeEvent},
-};
+use remoc::robs::vec_deque::{ObservableVecDeque, VecDequeEvent};
 
 #[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
 #[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]

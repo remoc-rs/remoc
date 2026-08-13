@@ -5,7 +5,7 @@ use wasm_bindgen_test::wasm_bindgen_test;
 
 use crate::loop_channel_with_cfg;
 use remoc::{
-    codec, exec,
+    codec,
     rch::{
         broadcast::{self, ReceiverStream},
         mpsc,
@@ -24,7 +24,7 @@ async fn simple() {
     let rx2 = tx.subscribe::<16>(16);
     let rx3 = tx.subscribe::<16>(16);
 
-    let send_task = exec::spawn(async move {
+    let send_task = wokio::spawn(async move {
         println!("Sending remote broadcast channel receivers");
         a_tx.send(rx1).await.unwrap();
         a_tx.send(rx2).await.unwrap();
@@ -38,7 +38,7 @@ async fn simple() {
 
     send_task.await.unwrap();
 
-    let rx1_task = exec::spawn(async move {
+    let rx1_task = wokio::spawn(async move {
         let mut i = 0;
         loop {
             match rx1.recv().await {
@@ -54,7 +54,7 @@ async fn simple() {
         }
     });
 
-    let rx2_task = exec::spawn(async move {
+    let rx2_task = wokio::spawn(async move {
         let mut i = 0;
         loop {
             match rx2.recv().await {
@@ -71,7 +71,7 @@ async fn simple() {
     });
 
     let (rx3_go_tx, rx3_go_rx) = tokio::sync::oneshot::channel();
-    let rx3_task = exec::spawn(async move {
+    let rx3_task = wokio::spawn(async move {
         rx3_go_rx.await.unwrap();
 
         let mut lagged = false;
@@ -125,7 +125,7 @@ async fn simple_stream() {
     let rx2 = tx.subscribe::<16>(16);
     let rx3 = tx.subscribe::<16>(16);
 
-    let send_task = exec::spawn(async move {
+    let send_task = wokio::spawn(async move {
         println!("Sending remote broadcast channel receivers");
         a_tx.send(rx1).await.unwrap();
         a_tx.send(rx2).await.unwrap();
@@ -139,7 +139,7 @@ async fn simple_stream() {
 
     send_task.await.unwrap();
 
-    let rx1_task = exec::spawn(async move {
+    let rx1_task = wokio::spawn(async move {
         let mut i = 0;
         loop {
             match rx1.next().await {
@@ -155,7 +155,7 @@ async fn simple_stream() {
         }
     });
 
-    let rx2_task = exec::spawn(async move {
+    let rx2_task = wokio::spawn(async move {
         let mut i = 0;
         loop {
             match rx2.next().await {
@@ -172,7 +172,7 @@ async fn simple_stream() {
     });
 
     let (rx3_go_tx, rx3_go_rx) = tokio::sync::oneshot::channel();
-    let rx3_task = exec::spawn(async move {
+    let rx3_task = wokio::spawn(async move {
         rx3_go_rx.await.unwrap();
 
         let mut lagged = false;

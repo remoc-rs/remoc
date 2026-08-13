@@ -6,16 +6,13 @@ use futures::{
 };
 use std::time::Duration;
 use tracing::Instrument;
+use wokio::time::{sleep, timeout};
 
 #[cfg(all(target_family = "wasm", feature = "js"))]
 use wasm_bindgen_test::wasm_bindgen_test;
 
 use crate::loop_transport;
-use remoc::{
-    chmux::{self, OnPortsExhausted, ReceiverStream, SendError},
-    exec,
-    exec::time::{sleep, timeout},
-};
+use remoc::chmux::{self, OnPortsExhausted, ReceiverStream, SendError};
 
 fn cfg() -> chmux::Cfg {
     chmux::Cfg {
@@ -59,7 +56,7 @@ async fn basic() {
     println!("Connected: a_mux={:?}, b_mux={:?}", a_mux, b_mux);
 
     let (a_mux_done_tx, a_mux_done_rx) = oneshot::channel();
-    exec::spawn(
+    wokio::spawn(
         async move {
             println!("A mux run");
             a_mux.run().await.expect("a_mux");
@@ -69,7 +66,7 @@ async fn basic() {
     );
 
     let (b_mux_done_tx, b_mux_done_rx) = oneshot::channel();
-    exec::spawn(
+    wokio::spawn(
         async move {
             println!("B mux run");
             b_mux.run().await.expect("b_mux");
@@ -81,10 +78,10 @@ async fn basic() {
     const N_MSG: usize = 500;
 
     let (server_done_tx, server_done_rx) = oneshot::channel();
-    exec::spawn(async move {
+    wokio::spawn(async move {
         println!("B server start");
         while let Some((mut tx, mut rx)) = b_server.accept().await.unwrap() {
-            exec::spawn(async move {
+            wokio::spawn(async move {
                 while let Some(msg) = rx.recv().await.unwrap() {
                     println!("Server received: {}", String::from_utf8(msg.into()).unwrap());
                 }
@@ -168,7 +165,7 @@ async fn receiver_stream() {
         try_join(chmux::ChMux::new(cfg(), a_tx, a_rx), chmux::ChMux::new(cfg2(), b_tx, b_rx)).await.unwrap();
 
     let (a_mux_done_tx, a_mux_done_rx) = oneshot::channel();
-    exec::spawn(
+    wokio::spawn(
         async move {
             a_mux.run().await.expect("a_mux");
             let _ = a_mux_done_tx.send(());
@@ -177,7 +174,7 @@ async fn receiver_stream() {
     );
 
     let (b_mux_done_tx, b_mux_done_rx) = oneshot::channel();
-    exec::spawn(
+    wokio::spawn(
         async move {
             b_mux.run().await.expect("b_mux");
             let _ = b_mux_done_tx.send(());
@@ -188,7 +185,7 @@ async fn receiver_stream() {
     const N_MSG: usize = 100;
 
     let (server_done_tx, server_done_rx) = oneshot::channel();
-    exec::spawn(async move {
+    wokio::spawn(async move {
         while let Some((mut tx, rx)) = b_server.accept().await.unwrap() {
             let mut n = 0;
             let mut rx = ReceiverStream::from(rx);
@@ -251,13 +248,13 @@ async fn all_received() {
         try_join(chmux::ChMux::new(cfg(), a_tx, a_rx), chmux::ChMux::new(cfg2(), b_tx, b_rx)).await.unwrap();
 
     let (a_mux_done_tx, a_mux_done_rx) = oneshot::channel();
-    exec::spawn(async move {
+    wokio::spawn(async move {
         a_mux.run().await.expect("a_mux");
         let _ = a_mux_done_tx.send(());
     });
 
     let (b_mux_done_tx, b_mux_done_rx) = oneshot::channel();
-    exec::spawn(async move {
+    wokio::spawn(async move {
         b_mux.run().await.expect("b_mux");
         let _ = b_mux_done_tx.send(());
     });
@@ -267,7 +264,7 @@ async fn all_received() {
     const COUNT: usize = 10;
 
     let (server_done_tx, server_done_rx) = oneshot::channel();
-    exec::spawn(async move {
+    wokio::spawn(async move {
         while let Some((_tx, mut rx)) = b_server.accept().await.unwrap() {
             let mut count = 0;
             loop {
@@ -324,13 +321,13 @@ async fn all_received_receiver_dropped() {
         try_join(chmux::ChMux::new(cfg(), a_tx, a_rx), chmux::ChMux::new(cfg2(), b_tx, b_rx)).await.unwrap();
 
     let (a_mux_done_tx, a_mux_done_rx) = oneshot::channel();
-    exec::spawn(async move {
+    wokio::spawn(async move {
         a_mux.run().await.expect("a_mux");
         let _ = a_mux_done_tx.send(());
     });
 
     let (b_mux_done_tx, b_mux_done_rx) = oneshot::channel();
-    exec::spawn(async move {
+    wokio::spawn(async move {
         b_mux.run().await.expect("b_mux");
         let _ = b_mux_done_tx.send(());
     });
@@ -338,7 +335,7 @@ async fn all_received_receiver_dropped() {
     let (receiver_ready_tx, receiver_ready_rx) = oneshot::channel();
     let (drop_receiver_tx, drop_receiver_rx) = oneshot::channel();
     let (server_done_tx, server_done_rx) = oneshot::channel();
-    exec::spawn(async move {
+    wokio::spawn(async move {
         let Some((_tx, rx)) = b_server.accept().await.unwrap() else { panic!("server closed unexpectedly") };
         let _ = receiver_ready_tx.send(());
         let _ = drop_receiver_rx.await;
@@ -356,7 +353,7 @@ async fn all_received_receiver_dropped() {
     let reports = (0..4).map(|_| tx.all_received()).collect::<Vec<_>>();
     let (reports_started_tx, reports_started_rx) = oneshot::channel();
     let (reports_done_tx, reports_done_rx) = oneshot::channel();
-    exec::spawn(async move {
+    wokio::spawn(async move {
         let _ = reports_started_tx.send(());
         join_all(reports).await;
         let _ = reports_done_tx.send(());
@@ -396,7 +393,7 @@ async fn hangup() {
     println!("Connected: a_mux={:?}, b_mux={:?}", a_mux, b_mux);
 
     let (a_mux_done_tx, a_mux_done_rx) = oneshot::channel();
-    exec::spawn(
+    wokio::spawn(
         async move {
             println!("A mux start");
             a_mux.run().await.unwrap();
@@ -406,7 +403,7 @@ async fn hangup() {
     );
 
     let (b_mux_done_tx, b_mux_done_rx) = oneshot::channel();
-    exec::spawn(
+    wokio::spawn(
         async move {
             println!("B mux start");
             b_mux.run().await.unwrap();
@@ -416,7 +413,7 @@ async fn hangup() {
     );
 
     let (server_done_tx, server_done_rx) = oneshot::channel();
-    exec::spawn(async move {
+    wokio::spawn(async move {
         println!("B server start");
         while let Some((mut tx, mut rx)) = b_server.accept().await.unwrap() {
             while let Some(msg) = rx.recv().await.unwrap() {
@@ -504,7 +501,7 @@ async fn no_pre_connect() {
     println!("Connected: a_mux={:?}, b_mux={:?}", a_mux, b_mux);
 
     let (a_mux_done_tx, a_mux_done_rx) = oneshot::channel();
-    exec::spawn(
+    wokio::spawn(
         async move {
             println!("A mux run");
             a_mux.run().await.expect("a_mux");
@@ -514,7 +511,7 @@ async fn no_pre_connect() {
     );
 
     let (b_mux_done_tx, b_mux_done_rx) = oneshot::channel();
-    exec::spawn(
+    wokio::spawn(
         async move {
             println!("B mux run");
             b_mux.run().await.expect("b_mux");
@@ -526,10 +523,10 @@ async fn no_pre_connect() {
     const N_MSG: usize = 500;
 
     let (server_done_tx, server_done_rx) = oneshot::channel();
-    exec::spawn(async move {
+    wokio::spawn(async move {
         println!("B server start");
         while let Some((mut tx, mut rx)) = b_server.accept().await.unwrap() {
-            exec::spawn(async move {
+            wokio::spawn(async move {
                 while let Some(msg) = rx.recv().await.unwrap() {
                     println!("Server received: {}", String::from_utf8(msg.into()).unwrap());
                 }

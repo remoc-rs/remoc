@@ -10,7 +10,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use wasm_bindgen_test::wasm_bindgen_test;
 
 use crate::loop_channel;
-use remoc::{exec, rch::io};
+use remoc::rch::io;
 
 // ============================================================================
 // Basic functionality tests
@@ -38,7 +38,7 @@ async fn sized_simple() {
     assert_eq!(rx.size(), Some(11));
 
     // Run write and read concurrently to avoid flow control blocking
-    let write_task = exec::spawn(async move {
+    let write_task = wokio::spawn(async move {
         tx.write_all(b"hello world").await.unwrap();
         tx.shutdown().await.unwrap();
     });
@@ -73,7 +73,7 @@ async fn unsized_simple() {
     // Size still unknown
     assert_eq!(rx.size(), None);
 
-    let write_task = exec::spawn(async move {
+    let write_task = wokio::spawn(async move {
         tx.write_all(b"hello world").await.unwrap();
         tx.shutdown().await.unwrap();
     });
@@ -104,7 +104,7 @@ async fn sized_send_sender() {
     let mut tx = b_rx.recv().await.unwrap().unwrap();
 
     // Run write and read concurrently
-    let read_task = exec::spawn(async move {
+    let read_task = wokio::spawn(async move {
         let mut buf = Vec::new();
         rx.read_to_end(&mut buf).await.unwrap();
         assert_eq!(buf, b"hello world");
@@ -133,7 +133,7 @@ async fn sized_zero() {
     a_tx.send(rx).await.unwrap();
     let mut rx = b_rx.recv().await.unwrap().unwrap();
 
-    let write_task = exec::spawn(async move {
+    let write_task = wokio::spawn(async move {
         // Should not be able to write anything, just shutdown
         tx.shutdown().await.unwrap();
     });
@@ -158,7 +158,7 @@ async fn unsized_zero() {
     a_tx.send(rx).await.unwrap();
     let mut rx = b_rx.recv().await.unwrap().unwrap();
 
-    let write_task = exec::spawn(async move {
+    let write_task = wokio::spawn(async move {
         // Write nothing, just shutdown
         tx.shutdown().await.unwrap();
     });
@@ -189,7 +189,7 @@ async fn sized_send_more_than_announced() {
     let mut rx = b_rx.recv().await.unwrap().unwrap();
 
     // Start reader to consume data so writer can proceed until it fails
-    let read_task = exec::spawn(async move {
+    let read_task = wokio::spawn(async move {
         let mut buf = Vec::new();
         let _ = rx.read_to_end(&mut buf).await;
     });
@@ -215,7 +215,7 @@ async fn sized_send_less_than_announced_sender_shutdown() {
     let mut rx = b_rx.recv().await.unwrap().unwrap();
 
     // Start reader
-    let read_task = exec::spawn(async move {
+    let read_task = wokio::spawn(async move {
         let mut buf = Vec::new();
         let _ = rx.read_to_end(&mut buf).await;
     });
@@ -304,7 +304,7 @@ async fn sized_large_data() {
     let mut rx = b_rx.recv().await.unwrap().unwrap();
 
     let data_clone = data.clone();
-    let write_task = exec::spawn(async move {
+    let write_task = wokio::spawn(async move {
         tx.write_all(&data_clone).await.unwrap();
         tx.shutdown().await.unwrap();
     });
@@ -335,7 +335,7 @@ async fn unsized_large_data() {
     let mut rx = b_rx.recv().await.unwrap().unwrap();
 
     let data_clone = data.clone();
-    let write_task = exec::spawn(async move {
+    let write_task = wokio::spawn(async move {
         tx.write_all(&data_clone).await.unwrap();
         tx.shutdown().await.unwrap();
     });
@@ -365,7 +365,7 @@ async fn sized_multiple_writes() {
     a_tx.send(rx).await.unwrap();
     let mut rx = b_rx.recv().await.unwrap().unwrap();
 
-    let write_task = exec::spawn(async move {
+    let write_task = wokio::spawn(async move {
         tx.write_all(b"hello").await.unwrap();
         tx.write_all(b" ").await.unwrap();
         tx.write_all(b"world").await.unwrap();
@@ -393,7 +393,7 @@ async fn unsized_multiple_writes() {
     a_tx.send(rx).await.unwrap();
     let mut rx = b_rx.recv().await.unwrap().unwrap();
 
-    let write_task = exec::spawn(async move {
+    let write_task = wokio::spawn(async move {
         tx.write_all(b"one ").await.unwrap();
         tx.write_all(b"two ").await.unwrap();
         tx.write_all(b"three").await.unwrap();
@@ -427,7 +427,7 @@ async fn bytes_tracking() {
     assert_eq!(rx.bytes_received(), 0);
 
     // Writer in background
-    let write_task = exec::spawn(async move {
+    let write_task = wokio::spawn(async move {
         tx.write_all(b"12345").await.unwrap();
         assert_eq!(tx.bytes_written(), 5);
         tx.write_all(b"67890").await.unwrap();
@@ -466,7 +466,7 @@ async fn sized_forward() {
     c_tx.send(rx).await.unwrap();
     let mut rx = d_rx.recv().await.unwrap().unwrap();
 
-    let write_task = exec::spawn(async move {
+    let write_task = wokio::spawn(async move {
         tx.write_all(b"hello world").await.unwrap();
         tx.shutdown().await.unwrap();
     });
@@ -499,7 +499,7 @@ async fn unsized_forward() {
     c_tx.send(rx).await.unwrap();
     let mut rx = d_rx.recv().await.unwrap().unwrap();
 
-    let write_task = exec::spawn(async move {
+    let write_task = wokio::spawn(async move {
         tx.write_all(b"hello world").await.unwrap();
         tx.shutdown().await.unwrap();
     });
@@ -529,7 +529,7 @@ async fn empty_write() {
     a_tx.send(rx).await.unwrap();
     let mut rx = b_rx.recv().await.unwrap().unwrap();
 
-    let write_task = exec::spawn(async move {
+    let write_task = wokio::spawn(async move {
         // Empty write should be a no-op
         tx.write_all(b"").await.unwrap();
         tx.write_all(b"hello").await.unwrap();
@@ -564,7 +564,7 @@ async fn sized_partial_reads() {
     // Check remaining before any reads
     assert_eq!(rx.remaining(), Some(10));
 
-    let write_task = exec::spawn(async move {
+    let write_task = wokio::spawn(async move {
         tx.write_all(b"0123456789").await.unwrap();
         tx.shutdown().await.unwrap();
     });
@@ -633,7 +633,7 @@ async fn file_transfer_simulation() {
 
     // Client writes file content (in background to avoid deadlock)
     let file_content_clone = file_content.clone();
-    let write_task = exec::spawn(async move {
+    let write_task = wokio::spawn(async move {
         // Simulate chunked file reading
         for chunk in file_content_clone.chunks(1024) {
             io_tx.write_all(chunk).await.unwrap();
@@ -688,7 +688,7 @@ async fn streaming_transfer_unknown_size() {
     client_tx.send(StreamTransfer { name: "live_stream".to_string(), data: io_rx }).await.unwrap();
 
     // Client writes data in chunks (simulating live data)
-    let write_task = exec::spawn(async move {
+    let write_task = wokio::spawn(async move {
         for i in 0..10 {
             let chunk = format!("Chunk {}\n", i);
             io_tx.write_all(chunk.as_bytes()).await.unwrap();
@@ -741,7 +741,7 @@ async fn tokio_copy_integration() {
     let mut rx = b_rx.recv().await.unwrap().unwrap();
 
     let data_clone = data.clone();
-    let write_task = exec::spawn(async move {
+    let write_task = wokio::spawn(async move {
         let mut reader = std::io::Cursor::new(data_clone);
 
         // tokio::io::copy just copies bytes, does NOT call shutdown
@@ -779,7 +779,7 @@ async fn tokio_copy_sized_no_shutdown_succeeds() {
     a_tx.send(rx).await.unwrap();
     let mut rx = b_rx.recv().await.unwrap().unwrap();
 
-    let write_task = exec::spawn(async move {
+    let write_task = wokio::spawn(async move {
         let mut reader = std::io::Cursor::new(data);
         tokio::io::copy(&mut reader, &mut tx).await.unwrap();
         // NOT calling shutdown - for sized channels this still works
@@ -810,7 +810,7 @@ async fn tokio_copy_unsized_no_shutdown_fails() {
     a_tx.send(rx).await.unwrap();
     let mut rx = b_rx.recv().await.unwrap().unwrap();
 
-    let write_task = exec::spawn(async move {
+    let write_task = wokio::spawn(async move {
         let mut reader = std::io::Cursor::new(data);
         tokio::io::copy(&mut reader, &mut tx).await.unwrap();
         // NOT calling shutdown - for unsized, this causes receiver error
@@ -874,7 +874,7 @@ async fn tokio_copy_read_error_no_shutdown() {
     let mut rx = b_rx.recv().await.unwrap().unwrap();
 
     // Writer: read from failing source, DO NOT shutdown on error
-    let write_task = exec::spawn(async move {
+    let write_task = wokio::spawn(async move {
         let mut reader = FailingReader {
             data: full_data.clone(),
             pos: 0,

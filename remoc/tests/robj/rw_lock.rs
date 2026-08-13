@@ -2,10 +2,7 @@
 use wasm_bindgen_test::wasm_bindgen_test;
 
 use crate::loop_channel;
-use remoc::{
-    exec,
-    robj::rw_lock::{Owner, RwLock},
-};
+use remoc::robj::rw_lock::{Owner, RwLock};
 
 #[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
 #[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
@@ -46,7 +43,7 @@ async fn simple() {
         drop(read3);
 
         println!("Making write request");
-        let write_req = exec::spawn(async move { rw_lock3.write().await.unwrap() });
+        let write_req = wokio::spawn(async move { rw_lock3.write().await.unwrap() });
 
         println!("Waiting for invalidation");
         read1.invalidated().await;

@@ -15,15 +15,15 @@ use std::{
     rc::{Rc, Weak},
 };
 use tracing::Instrument;
+use wokio::{
+    self,
+    task::{self, JoinHandle},
+};
 
 use super::{super::DEFAULT_MAX_ITEM_SIZE, BIG_DATA_CHUNK_QUEUE, io::ChannelBytesReader, register_storage};
 use crate::{
     chmux::{self, Received, RecvChunkError},
     codec::{self, AnySend, DeserializationError, ErasedDeserializer, StreamingUnavailable},
-    exec::{
-        self,
-        task::{self, JoinHandle},
-    },
 };
 
 /// An error that occurred during receiving from a remote endpoint.
@@ -323,7 +323,7 @@ impl ErasedReceiver {
                     }
 
                     if let Some(Some(Received::Chunks)) = &self.recved
-                        && !exec::has_threads().await
+                        && !wokio::task::has_threads().await
                     {
                         return Err(RecvError::Deserialize(DeserializationError::new(StreamingUnavailable)));
                     }
@@ -479,7 +479,7 @@ impl ErasedReceiver {
                 // forward compatibility.
                 for request in requests {
                     if let Some(callback) = pds.expected.remove(&request.id()) {
-                        exec::spawn(callback(request).in_current_span());
+                        wokio::spawn(callback(request).in_current_span());
                     }
                 }
 
@@ -491,7 +491,7 @@ impl ErasedReceiver {
 
             // Spawn registered tasks.
             for task in pds.tasks.drain(..) {
-                exec::spawn(task.in_current_span());
+                wokio::spawn(task.in_current_span());
             }
 
             return Ok(Some(self.item.take().unwrap()));

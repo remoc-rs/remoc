@@ -15,6 +15,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use tracing::Instrument;
+use wokio::{self, task};
 
 use super::{
     super::{DEFAULT_MAX_ITEM_SIZE, SendErrorExt},
@@ -25,7 +26,6 @@ use super::{
 use crate::{
     chmux::{self, AllReceived, AnyStorage, ConnectReq},
     codec::{self, AnySend, ErasedSerializer, SerializationError, StreamingUnavailable},
-    exec::{self, task},
 };
 
 pub use crate::chmux::Closed;
@@ -397,7 +397,7 @@ impl ErasedSender {
         serializer: ErasedSerializer, allocator: chmux::PortAllocator, storage: AnyStorage, item: AnySend,
         tx: tokio::sync::mpsc::Sender<BytesMut>, chunk_size: usize,
     ) -> Result<(AnySend, PortSerializer, usize), (SerializationError, AnySend)> {
-        if !exec::has_threads().await {
+        if !wokio::task::has_threads().await {
             return Err((SerializationError::new(StreamingUnavailable), item));
         }
 
@@ -572,12 +572,12 @@ impl ErasedSender {
         //
         // We have to spawn a task for this to ensure cancellation safety.
         for (callback, connect) in callbacks.into_iter().zip(connects) {
-            exec::spawn(callback(connect).in_current_span());
+            wokio::spawn(callback(connect).in_current_span());
         }
 
         // Spawn registered tasks.
         for task in tasks {
-            exec::spawn(task.in_current_span());
+            wokio::spawn(task.in_current_span());
         }
 
         Ok(())

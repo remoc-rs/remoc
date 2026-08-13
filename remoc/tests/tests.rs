@@ -11,8 +11,6 @@ use tokio::net::{TcpListener, TcpStream};
 #[cfg(feature = "rch")]
 use remoc::{RemoteSend, rch::base};
 
-use remoc::exec;
-
 mod chmux;
 
 #[cfg(feature = "serde")]
@@ -85,7 +83,7 @@ where
     T: RemoteSend,
 {
     let (a, b, mut drop_rx) = droppable_loop_channel_with_cfg(cfg).await;
-    exec::spawn(async move {
+    wokio::spawn(async move {
         let _ = drop_rx.recv().await;
     });
     (a, b)
@@ -105,7 +103,7 @@ where
     let a_drop_tx = drop_tx.clone();
     let a = async move {
         let (conn, tx, rx) = remoc::Connect::framed(a_cfg, transport_a_tx, transport_a_rx).await.unwrap();
-        exec::spawn(async move {
+        wokio::spawn(async move {
             tokio::select! {
                 biased;
                 _ = a_drop_tx.closed() => (),
@@ -118,7 +116,7 @@ where
     let b_cfg = cfg.clone();
     let b = async move {
         let (conn, tx, rx) = remoc::Connect::framed(b_cfg, transport_b_tx, transport_b_rx).await.unwrap();
-        exec::spawn(async move {
+        wokio::spawn(async move {
             tokio::select! {
                 biased;
                 _ = drop_tx.closed() => (),
@@ -146,7 +144,7 @@ where
         let (socket_rx, socket_tx) = socket.into_split();
         let cfg = remoc::Cfg { io_buffer_size: 100_000, ..Default::default() };
         let (conn, tx, rx) = remoc::Connect::io(cfg, socket_rx, socket_tx).await.unwrap();
-        exec::spawn(conn);
+        wokio::spawn(conn);
         (tx, rx)
     };
 
@@ -155,7 +153,7 @@ where
         let (socket_rx, socket_tx) = socket.into_split();
         let cfg = remoc::Cfg { io_buffer_size: 8721, ..Default::default() };
         let (conn, tx, rx) = remoc::Connect::io(cfg, socket_rx, socket_tx).await.unwrap();
-        exec::spawn(conn);
+        wokio::spawn(conn);
         (tx, rx)
     };
 

@@ -83,7 +83,7 @@ use uuid::Uuid;
 
 use crate::{
     chmux::{AnyBox, AnyEntry},
-    codec, exec,
+    codec,
     rch::{
         base::{PortDeserializer, PortSerializer},
         mpsc,
@@ -380,7 +380,7 @@ where
                 let dropped_tx = dropped_tx.set_buffer::<1>();
                 let mut dropped_rx = dropped_rx.set_buffer::<1>();
 
-                exec::spawn(
+                wokio::spawn(
                     async move {
                         loop {
                             if *keep_rx.borrow_and_update() {

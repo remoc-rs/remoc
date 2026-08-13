@@ -8,7 +8,6 @@ use super::{Codec, DeserializationError, SerializationError};
 ///
 /// When using this with data the contains maps with non-string keys you will
 /// need to apply attributes from [map](super::map) to work correctly.
-#[cfg_attr(docsrs, doc(cfg(feature = "codec-json")))]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Json;
 

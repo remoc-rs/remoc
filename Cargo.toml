@@ -5,6 +5,7 @@ edition = "2024"
 rust-version = "1.95"
 license = "Apache-2.0"
 
+homepage = "https://remoc.rs/"
 repository = "https://github.com/remoc-rs/remoc/"
 authors = [
     "Sebastian Urban <surban@surban.net>",

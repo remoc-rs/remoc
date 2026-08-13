@@ -5,6 +5,7 @@ keywords = ["remote", "channel", "rpc", "stream", "multiplexer"]
 categories = ["asynchronous", "network-programming"]
 
 version = { workspace = true }
+homepage = { workspace = true }
 repository = { workspace = true }
 edition = { workspace = true }
 rust-version = { workspace = true }

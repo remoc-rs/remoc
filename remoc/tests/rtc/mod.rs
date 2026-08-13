@@ -12,6 +12,7 @@ mod generics_non_clone;
 mod monitor;
 mod readonly;
 mod rename;
+mod serde_with;
 mod simple;
 mod simple_clone;
 mod simple_req;

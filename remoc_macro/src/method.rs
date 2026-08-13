@@ -1,6 +1,6 @@
 //! Method parsing and generation.
 
-use proc_macro2::TokenStream;
+use proc_macro2::{TokenStream, TokenTree};
 use quote::{TokenStreamExt, quote};
 use syn::{
     Attribute, Block, FnArg, GenericArgument, Generics, Ident, LitStr, Pat, PatType, Path, PathArguments,
@@ -40,6 +40,21 @@ fn is_numerical_name(name: &str) -> bool {
     }
 }
 
+/// Skips over the value of a meta item, i.e. everything up to the next comma
+/// at the current nesting level.
+fn skip_meta_value(input: ParseStream) -> syn::Result<()> {
+    input.step(|cursor| {
+        let mut rest = *cursor;
+        while let Some((tt, next)) = rest.token_tree() {
+            match &tt {
+                TokenTree::Punct(punct) if punct.as_char() == ',' => break,
+                _ => rest = next,
+            }
+        }
+        Ok(((), rest))
+    })
+}
+
 /// Whether the attributes contain a serde rename to a numerical identifier
 /// and validation that the name reserved by remoc is not used.
 fn numerical_serde_rename(attrs: &[Attribute]) -> syn::Result<bool> {
@@ -52,7 +67,7 @@ fn numerical_serde_rename(attrs: &[Attribute]) -> syn::Result<bool> {
 
         attr.parse_nested_meta(|meta| {
             if !meta.path.is_ident("rename") {
-                return Ok(());
+                return skip_meta_value(meta.input);
             }
 
             let mut check = |value: ParseStream| -> syn::Result<()> {

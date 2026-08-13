@@ -4,9 +4,9 @@ version = 4
 
 [[package]]
 name = "aggligator"
-version = "0.11.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30d04696690c9fb93a2fafd1c673fe7f0afeaa9ac2aaecb3220891c916b93f7e"
+checksum = "02ec943295dacf08f79b23f8abcb43533d1485d38ed9e83695f3df9d0307bd44"
 dependencies = [
  "async-trait",
  "atomic_refcell",
@@ -25,9 +25,9 @@ dependencies = [
 
 [[package]]
 name = "aggligator-transport-tcp"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "254a9956b11a32509e80619f40b08ea89aacb0e2e1e2800c7b7f97060e498a07"
+checksum = "fdd76bb59b8f1ed86a010c4f5642b5e726ee9de7adf634e35d24abd8717666d8"
 dependencies = [
  "aggligator",
  "async-trait",

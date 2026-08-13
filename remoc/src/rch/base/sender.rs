@@ -397,7 +397,7 @@ impl ErasedSender {
         serializer: ErasedSerializer, allocator: chmux::PortAllocator, storage: AnyStorage, item: AnySend,
         tx: tokio::sync::mpsc::Sender<BytesMut>, chunk_size: usize,
     ) -> Result<(AnySend, PortSerializer, usize), (SerializationError, AnySend)> {
-        if !exec::are_threads_available().await {
+        if !exec::has_threads().await {
             return Err((SerializationError::new(StreamingUnavailable), item));
         }
 

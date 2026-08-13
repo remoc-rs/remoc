@@ -15,6 +15,12 @@ pub mod task {
         let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
         rt.block_on(future)
     }
+
+    /// The [Send] bound required to [spawn] a task on this platform.
+    ///
+    /// On native platforms tasks may be moved between threads, thus this requires [Send].
+    pub trait MaybeSend: Send {}
+    impl<T: Send + ?Sized> MaybeSend for T {}
 }
 
 pub mod time {

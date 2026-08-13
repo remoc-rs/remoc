@@ -323,7 +323,7 @@ impl ErasedReceiver {
                     }
 
                     if let Some(Some(Received::Chunks)) = &self.recved
-                        && !exec::are_threads_available().await
+                        && !exec::has_threads().await
                     {
                         return Err(RecvError::Deserialize(DeserializationError::new(StreamingUnavailable)));
                     }

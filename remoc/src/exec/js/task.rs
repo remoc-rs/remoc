@@ -181,3 +181,10 @@ pub fn block_on<F: Future>(future: F) -> F::Output {
     let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
     rt.block_on(future)
 }
+
+/// The [Send] bound required to [spawn] a task on this platform.
+///
+/// In a JavaScript runtime environment tasks are spawned onto the current thread,
+/// thus this imposes no requirement and is implemented for every type.
+pub trait MaybeSend {}
+impl<T: ?Sized> MaybeSend for T {}

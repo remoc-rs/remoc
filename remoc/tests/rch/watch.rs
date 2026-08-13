@@ -444,7 +444,7 @@ async fn conn_failure() {
 #[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn max_item_size_exceeded() {
     crate::init();
-    if !remoc::exec::are_threads_available().await {
+    if !remoc::exec::has_threads().await {
         println!("test requires threads");
         return;
     }
@@ -516,7 +516,7 @@ async fn max_item_size_exceeded() {
 #[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn max_item_size_exceeded_check() {
     crate::init();
-    if !remoc::exec::are_threads_available().await {
+    if !remoc::exec::has_threads().await {
         println!("test requires threads");
         return;
     }

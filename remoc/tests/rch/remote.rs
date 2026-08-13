@@ -73,7 +73,7 @@ async fn big_msg() {
             println!("Send error: {err}");
             match &err.kind {
                 SendErrorKind::Serialize(ser)
-                    if ser.0.is::<StreamingUnavailable>() && !remoc::exec::are_threads_available().await =>
+                    if ser.0.is::<StreamingUnavailable>() && !remoc::exec::has_threads().await =>
                 {
                     println!("Okay, because no threads available");
                     return;
@@ -169,7 +169,7 @@ async fn oversized_msg_send_error() {
     println!("Sending message of length {}", data.len());
     let res = a_tx.send(data).await;
 
-    if remoc::exec::are_threads_available().await {
+    if remoc::exec::has_threads().await {
         assert!(
             matches!(res, Err(SendError { kind: SendErrorKind::MaxItemSizeExceeded, .. })),
             "sending oversized item must fail"

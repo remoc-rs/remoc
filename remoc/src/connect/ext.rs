@@ -3,13 +3,15 @@
 use std::{error::Error, fmt, future::Future};
 
 use crate::{
+    RemoteSend,
     chmux::ChMuxError,
-    connect::ConnectError,
-    exec::{self, MaybeSend},
-    rch::base::{RecvError, SendError},
+    connect::{Connect, ConnectError},
+    exec::{self, task::MaybeSend},
+    rch::{
+        base,
+        base::{RecvError, SendError},
+    },
 };
-
-use crate::{RemoteSend, connect::Connect, rch::base};
 
 /// Error occurred during establishing a providing connection.
 #[cfg_attr(docsrs, doc(cfg(feature = "rch")))]

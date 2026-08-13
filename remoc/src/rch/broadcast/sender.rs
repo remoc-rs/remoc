@@ -163,7 +163,8 @@ where
 
     /// Attempts to send a value to all active receivers.
     ///
-    /// No back-pressure is provided.
+    /// No [back pressure](crate::rch#flow-control-and-back-pressure) is provided;
+    /// a receiver that does not keep up loses values.
     pub fn send(&self, value: T) -> Result<Broadcasting<T>, SendError<T>> {
         let mut inner = self.inner.lock().unwrap();
 

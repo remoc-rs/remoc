@@ -97,6 +97,39 @@
 //! The remote endpoint can then send back an empty message as confirmation over the oneshot channel
 //! after it has processed the received value.
 //!
+//! # Flow control and back pressure
+//!
+//! Back pressure works across the connection: a receiver that stops fetching values will
+//! eventually stop the sender, no matter how fast the sending side produces data.
+//! The memory a channel occupies is therefore bounded, even if the two endpoints run at
+//! very different speeds.
+//!
+//! On its way out a value passes three stages, each of which can hold it up:
+//!
+//!   1. the queue of the channel itself, holding the number of items that was specified
+//!      when the channel was created, or [DEFAULT_BUFFER] items when the sending half
+//!      was received from a remote endpoint,
+//!   2. serialization, which cuts the value into chunks of
+//!      [chunk_size](crate::Cfg::chunk_size) bytes,
+//!   3. the transport, which takes a chunk only when the remote endpoint has credit for
+//!      it.
+//!
+//! Credit is what limits the amount of data in flight. Every port has an allowance of its
+//! own, [port_receive_buffer](crate::Cfg::port_receive_buffer) bytes, and draws on a pool
+//! shared by all ports of the connection,
+//! [shared_receive_buffer](crate::Cfg::shared_receive_buffer).
+//! The remote endpoint returns credit as it consumes what it has received, so a receiver
+//! that is never polled stops returning credit and the transmission comes to rest once
+//! the allowance is used up.
+//!
+//! Sending resolves once the value has been taken into the queue of the channel, not once
+//! it has reached the other side; await the returned [Sending] handle for that.
+//! What a sender waits on is thus a full queue, and the queue is full because the
+//! transport is waiting for credit.
+//!
+//! [Broadcast](broadcast) channels are the exception: they apply no back pressure and a
+//! receiver that falls behind loses values instead.
+//!
 //! # Size considerations
 //!
 //! The size of the objects exchanged is not limited.

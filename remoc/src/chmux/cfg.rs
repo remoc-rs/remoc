@@ -104,6 +104,8 @@ pub struct Cfg {
     ///
     /// This controls the maximum amout of in-flight data per port, that is data on the transport
     /// plus received but yet unprocessed data.
+    /// It is thus the amount of data a sender can transmit before back pressure from a receiver
+    /// that does not consume it reaches the sender.
     ///
     /// By default this is 128 kB.
     /// This must be at least 4 bytes.

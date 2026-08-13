@@ -8,6 +8,11 @@
 //! Instead use methods from [Connect](crate::Connect) to establish a connection over
 //! a physical transport and work with high-level [remote channels](crate::rch).
 //!
+//! Data is sent in chunks and every port is subject to credit-based flow control, which is
+//! what provides [back pressure](crate::rch#flow-control-and-back-pressure) to the remote
+//! channels built on top of this module.
+//! [Cfg] configures the buffers involved.
+//!
 //! # Protocol version compatibility
 //! Two endpoints can only communicate if they have the same [protocol version](PROTOCOL_VERSION).
 //! A change in protocol version will be accompanied by an increase of the

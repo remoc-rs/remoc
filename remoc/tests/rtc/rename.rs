@@ -38,6 +38,12 @@ pub trait Counter {
         #[serde(default)]
         twice: bool,
     ) -> Result<(), IncreaseError>;
+
+    /// Method with renamed fields, but without renamed request variant.
+    ///
+    /// The renamed field also opts the reply channel field into the compact
+    /// serialized representation.
+    async fn decrease(&mut self, #[serde(rename = "_0")] by: u32) -> Result<(), IncreaseError>;
 }
 
 pub struct CounterObj {
@@ -66,6 +72,19 @@ impl Counter for CounterObj {
         let by = if twice { by * 2 } else { by };
 
         match self.value.checked_add(by) {
+            Some(new_value) => self.value = new_value,
+            None => return Err(IncreaseError::Overflow),
+        }
+
+        for watch in &self.watchers {
+            let _ = watch.send(self.value);
+        }
+
+        Ok(())
+    }
+
+    async fn decrease(&mut self, by: u32) -> Result<(), IncreaseError> {
+        match self.value.checked_sub(by) {
             Some(new_value) => self.value = new_value,
             None => return Err(IncreaseError::Overflow),
         }
@@ -117,11 +136,16 @@ async fn rename() {
         client.increase(5, true).await.unwrap();
         println!("value: {}", client.value().await.unwrap());
         assert_eq!(client.value().await.unwrap(), 30);
+
+        println!("subtract 4");
+        client.decrease(4).await.unwrap();
+        println!("value: {}", client.value().await.unwrap());
+        assert_eq!(client.value().await.unwrap(), 26);
     };
 
     let ((), res) = tokio::join!(client_task, server.serve());
     res.unwrap();
 
     println!("Counter obj value: {}", counter_obj.value);
-    assert_eq!(counter_obj.value, 30);
+    assert_eq!(counter_obj.value, 26);
 }

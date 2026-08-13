@@ -114,14 +114,16 @@ pub struct NamedArg {
 
 impl NamedArg {
     /// Create a `NamedArg` from a `PatType`.
-    fn extract(pat_type: &PatType) -> syn::Result<Self> {
+    ///
+    /// Returns whether the argument is renamed to a numerical identifier by the user.
+    fn extract(pat_type: &PatType) -> syn::Result<(Self, bool)> {
         let ident = if let Pat::Ident(pat_ident) = &*pat_type.pat {
             pat_ident.ident.clone()
         } else {
             return Err(syn::Error::new(pat_type.pat.span(), "expected identifier"));
         };
-        numerical_serde_rename(&pat_type.attrs)?;
-        Ok(Self { attrs: pat_type.attrs.clone(), ident, ty: (*pat_type.ty).clone() })
+        let numerical_rename = numerical_serde_rename(&pat_type.attrs)?;
+        Ok((Self { attrs: pat_type.attrs.clone(), ident, ty: (*pat_type.ty).clone() }, numerical_rename))
     }
 }
 
@@ -132,8 +134,8 @@ pub struct TraitMethod {
     pub doc_attrs: Vec<Attribute>,
     /// Serde attributes, applied to the request enum variant.
     pub serde_attrs: Vec<Attribute>,
-    /// Whether the request enum variant is renamed to a numerical identifier
-    /// by the user.
+    /// Whether the request enum variant or any of its fields is renamed to a
+    /// numerical identifier by the user.
     ///
     /// This indicates that the user opted into the compact serialized
     /// representation for this method, allowing remoc to also use a compact
@@ -235,7 +237,7 @@ impl TraitMethod {
                 true
             }
         });
-        let numerical_rename = numerical_serde_rename(&serde_attrs)?;
+        let mut numerical_rename = numerical_serde_rename(&serde_attrs)?;
 
         // Parse generics.
         let generics = input.parse::<Generics>()?;
@@ -268,7 +270,8 @@ impl TraitMethod {
                 }
                 // other argument
                 FnArg::Typed(pat_type) => {
-                    let arg = NamedArg::extract(&pat_type)?;
+                    let (arg, arg_numerical_rename) = NamedArg::extract(&pat_type)?;
+                    numerical_rename |= arg_numerical_rename;
                     args.push(arg);
                 }
             }
@@ -401,9 +404,10 @@ impl TraitMethod {
         let ident = to_pascal_case(&self.ident);
         let ret_ty = remove_self_type(&self.ret_ty, assoc);
 
-        // When the user renames the request enum variant to a numerical identifier,
-        // they opted into the compact serialized representation for this method.
-        // Thus the reply channel field also uses the numerical name reserved by remoc.
+        // When the user renames the request enum variant or one of its fields to a
+        // numerical identifier, they opted into the compact serialized representation
+        // for this method. Thus the reply channel field also uses the numerical name
+        // reserved by remoc.
         let reply_tx_rename = self.numerical_rename.then(|| quote! { #[serde(rename = #REPLY_TX_NAME)] });
 
         let mut entries = quote! {

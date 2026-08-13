@@ -1147,9 +1147,9 @@ dependencies = [
 
 [[package]]
 name = "wokio"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7d7ab8d58237a7b075f8e60bb32319f3cc33fca3ba32ebaf67fa032a4998f48"
+checksum = "43f1149ef85a8f3e50a4fc37903b22c61c0b5b7cc55aee92e7c819d204ce3d18"
 dependencies = [
  "futures",
  "js-sys",

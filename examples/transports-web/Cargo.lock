@@ -307,7 +307,7 @@ checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
 
 [[package]]
 name = "remoc"
-version = "0.20.0"
+version = "0.20.0-pre2"
 dependencies = [
  "byteorder",
  "bytes",
@@ -325,6 +325,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+ "wokio",
 ]
 
 [[package]]
@@ -340,7 +341,7 @@ dependencies = [
 
 [[package]]
 name = "remoc_macro"
-version = "0.20.0"
+version = "0.20.0-pre2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -416,6 +417,12 @@ dependencies = [
  "quote",
  "unicode-ident",
 ]
+
+[[package]]
+name = "sync_wrapper"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0bf256ce5efdfa370213c1dabab5935a12e49f2c58d15e9eac2870d3b4f27263"
 
 [[package]]
 name = "synstructure"
@@ -600,6 +607,23 @@ dependencies = [
  "futures-util",
  "js-sys",
  "tokio",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
+name = "wokio"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43f1149ef85a8f3e50a4fc37903b22c61c0b5b7cc55aee92e7c819d204ce3d18"
+dependencies = [
+ "futures",
+ "js-sys",
+ "pin-project-lite",
+ "sync_wrapper",
+ "tokio",
+ "tracing",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

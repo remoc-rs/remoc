@@ -367,7 +367,7 @@ async fn send_impl(
     // Encode data using remote sender for sending.
     let mut remote_tx = base::ErasedSender::new(erased_serializer, raw_tx);
     remote_tx.set_max_item_size(max_item_size);
-    remote_tx.set_global_credits_use(strategy != TransferStrategy::ChannelBuffered);
+    remote_tx.set_global_credits_allowed(strategy != TransferStrategy::ChannelBuffered);
 
     // Rate limiting state.
     let mut last_send: Option<Instant> = None;

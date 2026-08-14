@@ -634,7 +634,7 @@ impl Sender {
     /// Returns whether this channel may use global credits for sending data.
     ///
     /// By default this is enabled.
-    pub fn are_global_credits_used(&self) -> bool {
+    pub fn are_global_credits_allowed(&self) -> bool {
         self.credits.global_enabled
     }
 
@@ -646,9 +646,13 @@ impl Sender {
     /// if you want to avoid that a channel with high expected backpressure takes up
     /// a lot of buffer space.
     ///
+    /// Global credits are only used when both endpoints allow it; the receiving side
+    /// decides using
+    /// [Receiver::set_global_credits_allowed](super::Receiver::set_global_credits_allowed).
+    ///
     /// By default this is enabled.
-    pub fn set_global_credits_use(&mut self, use_global_credits: bool) {
-        self.credits.global_enabled = use_global_credits;
+    pub fn set_global_credits_allowed(&mut self, allowed: bool) {
+        self.credits.global_enabled = allowed;
     }
 
     /// Returns whether data can be sent anyway, even if remote endpoint closed the channel gracefully.

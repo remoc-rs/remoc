@@ -633,15 +633,15 @@ impl ErasedSender {
 
     /// Returns whether this channel may use global credits for sending items.
     ///
-    /// See [chmux::Sender::are_global_credits_used](crate::chmux::Sender::are_global_credits_used) for details.
-    pub fn are_global_credits_used(&self) -> bool {
-        self.sender.are_global_credits_used()
+    /// See [chmux::Sender::are_global_credits_allowed](crate::chmux::Sender::are_global_credits_allowed) for details.
+    pub fn are_global_credits_allowed(&self) -> bool {
+        self.sender.are_global_credits_allowed()
     }
 
     /// Sets whether this channel may use global credits for sending items.
     ///
-    /// See [chmux::Sender::set_global_credits_use](crate::chmux::Sender::set_global_credits_use) for details.
-    pub fn set_global_credits_use(&mut self, use_global_credits: bool) {
-        self.sender.set_global_credits_use(use_global_credits);
+    /// See [chmux::Sender::set_global_credits_allowed](crate::chmux::Sender::set_global_credits_allowed) for details.
+    pub fn set_global_credits_allowed(&mut self, allowed: bool) {
+        self.sender.set_global_credits_allowed(allowed);
     }
 }

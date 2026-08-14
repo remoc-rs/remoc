@@ -522,4 +522,20 @@ impl ErasedReceiver {
     pub fn set_max_item_size(&mut self, max_item_size: usize) {
         self.max_item_size = max_item_size;
     }
+
+    /// Returns whether the remote endpoint may use global credits for sending on this channel.
+    ///
+    /// See [chmux::Receiver::are_global_credits_allowed](crate::chmux::Receiver::are_global_credits_allowed)
+    /// for details.
+    pub fn are_global_credits_allowed(&self) -> bool {
+        self.receiver.are_global_credits_allowed()
+    }
+
+    /// Sets whether the remote endpoint may use global credits for sending on this channel.
+    ///
+    /// See [chmux::Receiver::set_global_credits_allowed](crate::chmux::Receiver::set_global_credits_allowed)
+    /// for details.
+    pub fn set_global_credits_allowed(&mut self, allowed: bool) {
+        self.receiver.set_global_credits_allowed(allowed);
+    }
 }

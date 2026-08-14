@@ -37,6 +37,10 @@ notes under *Deprecated* and *Removed* below.
 - chmux: `AnyStorage` can now store values indexed by their type using `insert`,
   `get`, `with` and `remove`, and exposes the configuration of the connection
   via `AnyStorage::cfg`
+- chmux, rch::base: `Receiver::set_global_credits_allowed` lets the receiving side
+  keep a channel out of the receive buffer shared by all channels, for when it
+  expects to consume the received data slowly; global credits are used only when
+  both endpoints allow it
 
 ### Changed
 - connect: the connection future is no longer required to be `Send`, which allows
@@ -51,6 +55,10 @@ notes under *Deprecated* and *Removed* below.
   implementations has changed; `PortNumber` and `PortReq` have been replaced by
   `AllocatedLocalPort`, `SidePort` and `ConnectReq`, `Client::connect` is now
   `Client::connect_port` and `Listener::accept_from` has been removed
+- **BREAKING**: chmux, rch::base: `Sender::are_global_credits_used` and
+  `set_global_credits_use` have been renamed to `are_global_credits_allowed` and
+  `set_global_credits_allowed`, matching the new methods of the same name on the
+  receiving side
 - **BREAKING**: connect: `Connect` is now generic over the type of its connection
   future; use `BoxConnect` (obtained via `Connect::boxed`) where the previous type
   parameters are required

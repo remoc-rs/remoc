@@ -425,6 +425,33 @@ impl Receiver {
         self.max_ports = max_ports;
     }
 
+    /// Returns whether the remote endpoint may use global credits for sending on this channel.
+    ///
+    /// By default this is enabled.
+    pub fn are_global_credits_allowed(&self) -> bool {
+        self.channel_credits.are_global_credits_allowed()
+    }
+
+    /// Sets whether the remote endpoint may use global credits for sending on this channel.
+    ///
+    /// While disabled, the remote endpoint may only have as much data in-flight as the
+    /// [port receive buffer](super::Cfg::port_receive_buffer) allows. This limits the
+    /// achievable bandwidth of the channel, but keeps it from occupying buffer space
+    /// shared with all other channels. Disable it when you expect to consume the received
+    /// data slowly; otherwise the channel is only kept from using global credits once its
+    /// receive buffer has reached the
+    /// [throttle level](super::Cfg::port_receive_throttle).
+    ///
+    /// Global credits are only used when both endpoints allow it; the sending side
+    /// decides using
+    /// [Sender::set_global_credits_allowed](super::Sender::set_global_credits_allowed),
+    /// which it can disable when it knows that back pressure is to be expected.
+    ///
+    /// By default this is enabled.
+    pub fn set_global_credits_allowed(&mut self, allowed: bool) {
+        self.channel_credits.set_global_credits_allowed(allowed, self.remote_port, &self.high_priority_tx);
+    }
+
     /// Waits that a pre-connected port is fully connected.
     async fn wait_pre_connect_done(&mut self) -> Result<(), RecvError> {
         if let Some(pre_connected_rx) = &mut self.pre_connected_rx {

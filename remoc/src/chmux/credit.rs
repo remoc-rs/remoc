@@ -425,6 +425,8 @@ struct PortCreditMonitorInner {
     throttle_release: u32,
     /// Credits from the global pool in use by this port.
     global_used: AtomicU32,
+    /// Whether the local application permits this port to use global credits at all.
+    global_allowed: AtomicBool,
     /// Whether global credit usage is active, inhibition is pending or in effect.
     global_credit_usage: AtomicU8,
 }
@@ -553,7 +555,7 @@ impl PortCreditReturner {
         }
 
         let total_used = port_used.saturating_add(global_used);
-        if total_used < monitor.throttle_release {
+        if total_used < monitor.throttle_release && monitor.global_allowed.load(Ordering::Relaxed) {
             match monitor
                 .global_credit_usage
                 .swap(PortCreditMonitorInner::GLOBAL_CREDIT_USAGE_ACTIVE, Ordering::Relaxed)
@@ -565,6 +567,47 @@ impl PortCreditReturner {
                 }
                 _ => unreachable!("invalid global_credit_usage state"),
             }
+        }
+    }
+
+    /// Whether the application permits this port to use global credits.
+    pub fn are_global_credits_allowed(&self) -> bool {
+        match self.monitor.upgrade() {
+            Some(monitor) => monitor.global_allowed.load(Ordering::Relaxed),
+            None => true,
+        }
+    }
+
+    /// Sets whether this port may use global credits and informs the remote endpoint.
+    pub fn set_global_credits_allowed(
+        &mut self, allowed: bool, remote_port: SidePort, tx: &mpsc::Sender<PortEvt>,
+    ) {
+        let Some(monitor) = self.monitor.upgrade() else { return };
+        if monitor.global_allowed.swap(allowed, Ordering::Relaxed) == allowed {
+            return;
+        }
+
+        if allowed {
+            // Allow global credits again, unless the port is over its throttle level anyway,
+            // in which case the throttle takes over and will allow them once it drops.
+            let total_used = monitor
+                .port_used
+                .load(Ordering::Relaxed)
+                .saturating_add(monitor.global_used.load(Ordering::Relaxed));
+            if total_used < monitor.throttle_release
+                && monitor
+                    .global_credit_usage
+                    .swap(PortCreditMonitorInner::GLOBAL_CREDIT_USAGE_ACTIVE, Ordering::Relaxed)
+                    == PortCreditMonitorInner::GLOBAL_CREDIT_USAGE_INHIBITED
+            {
+                self.queue_port_evt(tx, PortEvt::ChangeGlobalCreditUsage { remote_port, allow: true });
+            }
+        } else if monitor
+            .global_credit_usage
+            .swap(PortCreditMonitorInner::GLOBAL_CREDIT_USAGE_INHIBITED, Ordering::Relaxed)
+            != PortCreditMonitorInner::GLOBAL_CREDIT_USAGE_INHIBITED
+        {
+            self.queue_port_evt(tx, PortEvt::ChangeGlobalCreditUsage { remote_port, allow: false });
         }
     }
 
@@ -586,6 +629,7 @@ pub(crate) fn port_credit_monitor(limit: u32, throttle: u32) -> (PortCreditMonit
         // Three quarters of the throttle level; `/ 4 * 3` cannot overflow.
         throttle_release: (throttle / 4 * 3).max(1),
         global_used: 0.into(),
+        global_allowed: true.into(),
         global_credit_usage: PortCreditMonitorInner::GLOBAL_CREDIT_USAGE_ACTIVE.into(),
     });
     let returner = PortCreditReturner { monitor: Arc::downgrade(&inner), to_return: 0, tasks: VecDeque::new() };

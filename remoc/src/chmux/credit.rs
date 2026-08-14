@@ -409,12 +409,23 @@ impl fmt::Display for UsedPortCredit {
     }
 }
 
+/// How much of a port's receive buffer the remote endpoint is using.
+///
+/// Shared between the [PortCreditMonitor], which accounts credits as data arrives, and the
+/// [PortCreditReturner], which releases them as the data is consumed.
 #[derive(Debug)]
 struct PortCreditMonitorInner {
+    /// Port-specific credits in use.
     port_used: AtomicU32,
+    /// Port-specific credits available in total.
     port_limit: u32,
+    /// Usage at which the remote endpoint is asked to stop using global credits on this port.
     throttle: u32,
+    /// Usage at which global credit usage is allowed again.
+    throttle_release: u32,
+    /// Credits from the global pool in use by this port.
     global_used: AtomicU32,
+    /// Whether global credit usage is active, inhibition is pending or in effect.
     global_credit_usage: AtomicU8,
 }
 
@@ -542,7 +553,7 @@ impl PortCreditReturner {
         }
 
         let total_used = port_used.saturating_add(global_used);
-        if total_used < monitor.throttle {
+        if total_used < monitor.throttle_release {
             match monitor
                 .global_credit_usage
                 .swap(PortCreditMonitorInner::GLOBAL_CREDIT_USAGE_ACTIVE, Ordering::Relaxed)
@@ -572,6 +583,8 @@ pub(crate) fn port_credit_monitor(limit: u32, throttle: u32) -> (PortCreditMonit
         port_used: 0.into(),
         port_limit: limit,
         throttle,
+        // Three quarters of the throttle level; `/ 4 * 3` cannot overflow.
+        throttle_release: (throttle / 4 * 3).max(1),
         global_used: 0.into(),
         global_credit_usage: PortCreditMonitorInner::GLOBAL_CREDIT_USAGE_ACTIVE.into(),
     });

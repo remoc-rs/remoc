@@ -29,8 +29,24 @@
 //!
 //! Assuming the trait is called `Trait`, the server names will all start with `TraitServer`.
 //!
-//! Depending on whether the trait takes the receiver by value (`self`), by reference (`&self`) or
-//! by mutable reference (`&mut self`) different server types are generated:
+//! There is one server per way of holding the target object, and that is their only
+//! difference: each takes requests from the client and invokes the trait methods on the
+//! object. So start from how your code holds it — the left column is what you hand to
+//! `new()`, with `Target` standing for the type of your object:
+//!
+//! | You hold | Server type | Calls are executed |
+//! |---|---|---|
+//! | `Target` | `TraitServer` ([Server]) | one at a time; serving ends when a method taking `self` is called |
+//! | `Arc<Target>` | `TraitServerShared` ([ServerShared]) | in parallel, with `serve(true)` |
+//! | `Arc<`[`RwLock`](tokio::sync::RwLock)`<Target>>` | `TraitServerSharedMut` ([ServerSharedMut]) | `&self` in parallel, `&mut self` serialized by the write lock |
+//! | `&Target` | `TraitServerRef` ([ServerRef]) | one at a time |
+//! | `&mut Target` | `TraitServerRefMut` ([ServerRefMut]) | one at a time |
+//! | nothing, you want the requests themselves | `TraitReqReceiver` ([ReqReceiver]) | by you, as messages |
+//!
+//! If unsure, take `TraitServerSharedMut`, even when a single client is the only user.
+//!
+//! A server is only generated when the trait permits it, so the table above is also the
+//! list of what the trait's receivers allow:
 //!
 //!   * `TraitServer` is always generated,
 //!   * `TraitServerRefMut` and `TraitServerSharedMut` are generated when the receiver is
@@ -38,24 +54,11 @@
 //!   * `TraitServerRef` and `TraitServerShared` are generated when the receiver is
 //!     *never* taken by value and mutable reference.
 //!
-//! The purpose of these server types is as follows:
-//!
-//!   * server implementations with [`Send`] + [`Sync`] requirement on the target object (recommended):
-//!     * `TraitServer` implements [Server] and takes the target object by value. It will
-//!       consume the target value when a trait method taking the receiver by value is invoked.
-//!     * `TraitServerShared` implements [ServerShared] and takes an [Arc] to the target value.
-//!       It can execute client requests in parallel.
-//!       The generated [`ServerShared::serve`] implementation returns a future that implements [`Send`].
-//!     * `TraitServerSharedMut` implements [ServerSharedMut] and takes an [Arc] to a local
-//!       [RwLock](LocalRwLock) holding the target object.
-//!       It can execute const client requests in parallel and mutable requests sequentially.
-//!       The generated [`ServerSharedMut::serve`] implementation returns a future that implements [`Send`].
-//!   * server implementations with no [`Send`] + [`Sync`] requirement on the target object:
-//!     * `TraitServerRef` implements [ServerRef] and takes a reference to the target value.
-//!     * `TraitServerRefMut` implements [ServerRefMut] and takes a mutable reference to the target value.
-//!
-//! If unsure, you probably want to use `TraitServerSharedMut`, even when the target object will
-//! only be accessed by a single client.
+//! The first three require the target object to be [`Send`] + [`Sync`] and are the
+//! recommended ones; in exchange the futures returned by [`ServerShared::serve`] and
+//! [`ServerSharedMut::serve`] implement [`Send`] themselves.
+//! `TraitServerRef` and `TraitServerRefMut` place no such requirement on the object,
+//! which is what makes them useful for targets that are neither.
 //!
 //! # Request receiver type
 //!
@@ -74,6 +77,19 @@
 //! target object, which must implement the trait.
 //! Send the client to a remote endpoint and then call `serve()` on the server instance to
 //! start processing requests by the client.
+//!
+//! # Several calls at once
+//!
+//! A call is an ordinary future, so calls that do not depend on each other need not be
+//! made one after another:
+//!
+//! ```ignore
+//! let (a, b, c) = tokio::try_join!(client.a(), client.b(), client.c())?;
+//! ```
+//!
+//! All three requests are sent together and the results arrive after one round trip
+//! instead of three, which matters as soon as the endpoints are not next to each other.
+//! Note that the processing order of the calls on the server side is undefined.
 //!
 //! # Error handling
 //!
@@ -781,7 +797,7 @@ where
     Self: Sized,
 {
     /// Creates a new server instance for a shared mutable reference to the target object.
-    fn new(target: Arc<LocalRwLock<Target>>, request_buffer: usize) -> (Self, Self::Client);
+    fn new(target: Arc<tokio::sync::RwLock<Target>>, request_buffer: usize) -> (Self, Self::Client);
 
     /// Serves the target object.
     ///

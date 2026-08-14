@@ -124,16 +124,16 @@
 //! the allowance is used up.
 //!
 //! The [watch] and [broadcast] channels are the exception: neither applies back pressure.
-//! A watch channel holds only the newest value, so values are dropped when the transfer 
+//! A watch channel holds only the newest value, so values are dropped when the transfer
 //! cannot keep up; a broadcast receiver that falls behind loses values as well.
 //!
 //! The queue of a channel bounds items, not bytes; how much data is in flight is decided
 //! by the credits, so a channel created with a buffer of one item may still have a port
 //! receive buffer of data behind it. The bounds in bytes are configured in
-//! [Cfg](crate::Cfg). A channel whose data is consumed slowly loses access to the shared 
+//! [Cfg](crate::Cfg). A channel whose data is consumed slowly loses access to the shared
 //! buffer by itself, once its receive buffer reaches
 //! [port_receive_throttle](crate::Cfg::port_receive_throttle), so this needs no attention
-//! in general. 
+//! in general.
 //!
 //! # Size considerations
 //!

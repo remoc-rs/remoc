@@ -37,6 +37,7 @@
 use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
 use std::{
     any::{Any, TypeId, type_name},
+    cell::Cell,
     error::Error,
     fmt,
     io::{BufWriter, Read, Write},
@@ -379,6 +380,12 @@ where
 // ============================================================================
 // Codecs
 // ============================================================================
+
+thread_local! {
+    /// Allow using codecs without version negeotiation for tests.
+    #[doc(hidden)]
+    pub static ALLOW_UNVERSIONED: Cell<bool> = const { Cell::new(false) };
+}
 
 mod postbag;
 pub use postbag::{Postbag, PostbagSlim, PostbagWith};

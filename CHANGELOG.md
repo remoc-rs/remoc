@@ -27,6 +27,9 @@ notes under *Deprecated* and *Removed* below.
   transports
 - new [versioned module](https://docs.rs/remoc/0.20/remoc/versioned/index.html) for
   evolving the serialized representation of a type
+- performance: endpoints agree on the newest Postbag data format both can read,
+  so a connection to Remoc 0.19 or 0.18 keeps using the format those understand
+  while two current endpoints use the newer, smaller one
 - rch::mpsc: optional additional parallel transfer channels, which serialize and
   deserialize items concurrently and thus increase throughput over high-bandwidth
   links

@@ -437,10 +437,7 @@ impl Receiver {
     /// While disabled, the remote endpoint may only have as much data in-flight as the
     /// [port receive buffer](super::Cfg::port_receive_buffer) allows. This limits the
     /// achievable bandwidth of the channel, but keeps it from occupying buffer space
-    /// shared with all other channels. Disable it when you expect to consume the received
-    /// data slowly; otherwise the channel is only kept from using global credits once its
-    /// receive buffer has reached the
-    /// [throttle level](super::Cfg::port_receive_throttle).
+    /// shared with all other channels.
     ///
     /// Global credits are only used when both endpoints allow it; the sending side
     /// decides using

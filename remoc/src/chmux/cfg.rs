@@ -65,6 +65,14 @@ pub struct Cfg {
     pub io_frame_len_varint: Option<Arc<AtomicBool>>,
     /// Maximum number of open ports.
     ///
+    /// Together with the buffer sizes this bounds the memory the remote endpoint can make
+    /// this endpoint hold: at most `max_ports` times
+    /// [port_receive_buffer](Self::port_receive_buffer), plus the largest size the
+    /// [shared receive buffer](Self::shared_receive_buffer) may grow to.
+    /// Note that a port opened by the remote endpoint only counts
+    /// once your code accepts it, so how close you come to this bound is up to your
+    /// application; the exception is [connect_queue](Self::connect_queue).
+    ///
     /// This must not exceed 2^30 = 1_073_741_824.
     /// By default this is 8192.
     pub max_ports: u32,
@@ -112,6 +120,11 @@ pub struct Cfg {
     pub port_receive_buffer: u32,
     /// Receive buffer level at which to throttle a port in bytes.
     ///
+    /// A port that reaches this level is asked to stop drawing on the
+    /// [shared receive buffer](Self::shared_receive_buffer), so that a receiver which does not
+    /// keep up cannot occupy it at the expense of the other ports. It keeps its own
+    /// [port receive buffer](Self::port_receive_buffer) and thus continues to make progress.
+    ///
     /// By default this is 1 MB.
     pub port_receive_throttle: u32,
     /// Sizer for global receive buffer shared by all ports in bytes.
@@ -151,6 +164,12 @@ pub struct Cfg {
     /// This must not be zero.
     pub transport_receive_queue: usize,
     /// Maximum number of outstanding connection requests and pre-connected ports.
+    ///
+    /// A pre-connected port carries data before your code has accepted it, so this is the
+    /// one port limit that does not depend on the application: the remote endpoint can make
+    /// this endpoint hold `connect_queue` times
+    /// [port_receive_buffer](Self::port_receive_buffer) bytes for ports that have not been
+    /// accepted yet.
     ///
     /// By default this is 128.
     /// This must not be zero.

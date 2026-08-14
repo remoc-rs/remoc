@@ -99,8 +99,9 @@
 //!
 //! # Flow control and back pressure
 //!
-//! Back pressure works across the connection: a receiver that stops fetching values will
-//! eventually stop the sender, no matter how fast the sending side produces data.
+//! Back pressure works across the connection and *separately for every channel*: a receiver
+//! that stops fetching values will eventually stop its sender, no matter how fast the
+//! sending side produces data, while the other channels carry on unaffected.
 //! The memory a channel occupies is therefore bounded, even if the two endpoints run at
 //! very different speeds.
 //!
@@ -122,13 +123,9 @@
 //! that is never polled stops returning credit and the transmission comes to rest once
 //! the allowance is used up.
 //!
-//! Sending resolves once the value has been taken into the queue of the channel, not once
-//! it has reached the other side; await the returned [Sending] handle for that.
-//! What a sender waits on is thus a full queue, and the queue is full because the
-//! transport is waiting for credit.
-//!
-//! [Broadcast](broadcast) channels are the exception: they apply no back pressure and a
-//! receiver that falls behind loses values instead.
+//! The [watch] and [broadcast] channels are the exception: neither applies back pressure.
+//! A watch channel holds only the newest value, so values are dropped when the transfer 
+//! cannot keep up; a broadcast receiver that falls behind loses values as well.
 //!
 //! The queue of a channel bounds items, not bytes; how much data is in flight is decided
 //! by the credits, so a channel created with a buffer of one item may still have a port

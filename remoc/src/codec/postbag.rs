@@ -2,6 +2,60 @@ use serde::{Deserialize, Serialize};
 
 use super::{Codec, DeserializationError, SerializationError};
 
+/// Compact representations.
+///
+/// This module contains types with a more compact serialized representation.
+///
+/// The representations serde provides for some types of the standard library
+/// spell out struct field names and enum variant names, which is wasteful.
+/// The types in this module avoid that by using unnamed fields, numerical
+/// identifiers and, where applicable, a more efficient encoding of the value itself.
+///
+/// Its usage is completely optional.
+///
+/// ```rust
+/// # use serde::{Serialize, Deserialize};
+/// # use std::time::Duration;
+/// #[derive(Serialize, Deserialize)]
+/// pub struct MyData {
+///     #[serde(rename = "_0")]
+///     #[serde(with = "remoc::codec::compact")]
+///     result: Result<u32, String>,
+///     #[serde(rename = "_1")]
+///     #[serde(with = "remoc::codec::compact")]
+///     duration: Duration,
+/// }
+/// ```
+pub mod compact {
+    pub use postbag::compact::*;
+}
+
+/// # Fixed Size Integers
+///
+/// In some cases, the use of variably length encoded data may not be
+/// preferable. These modules, for use with `#[serde(with = "remoc::codec::fixint")]`
+/// "opt out" of variable length encoding.
+///
+/// Disables varint serialization/deserialization for the specified integer
+/// field. The integer will always be serialized in the same way as a fixed
+/// size array.
+///
+/// Support explicitly not provided for `usize` or `isize`, as
+/// these types would not be portable between systems of different
+/// pointer widths.
+///
+/// ```rust
+/// # use serde::{Serialize, Deserialize};
+/// #[derive(Serialize, Deserialize)]
+/// pub struct DefinitelyFixInt {
+///     #[serde(with = "remoc::codec::fixint")]
+///     x: u16,
+/// }
+/// ```
+pub mod fixint {
+    pub use postbag::fixint::*;
+}
+
 /// The Postbag data format version to use on the current connection.
 fn negotiated_version() -> Option<postbag::cfg::Version> {
     #[cfg(feature = "rch")]
@@ -150,16 +204,14 @@ impl<const WITH_IDENTS: bool, const DEPTH_LIMIT: usize> Codec for PostbagWith<WI
 /// ## Compact Representations
 ///
 /// The [`postbag::compact`] module provides more efficient representations of common
-/// types from the standard library, such as [`Result`](std::result::Result),
-/// [`Duration`](std::time::Duration) and [`SocketAddr`](std::net::SocketAddr), which
-/// would otherwise spell out their field and variant names.
+/// types from the standard library, such as [`Result`](std::result::Result) and
+/// [`Duration`](std::time::Duration).
 ///
 /// ## Nesting Depth Limit
 ///
 /// `DEPTH_LIMIT` specifies the maximum nesting depth of transferred data and defaults to
-/// [`postbag::cfg::DEFAULT_DEPTH_LIMIT`]. Specify a higher limit, for example
-/// `Postbag<1024>`, when transferring deeply nested, in particular recursive, data
-/// structures.
+/// [`postbag::cfg::DEFAULT_DEPTH_LIMIT`]. Specify a higher limit when transferring deeply
+/// nested data structures.
 pub type Postbag<const DEPTH_LIMIT: usize = { postbag::cfg::DEFAULT_DEPTH_LIMIT }> =
     PostbagWith<true, DEPTH_LIMIT>;
 
@@ -210,8 +262,7 @@ pub type Postbag<const DEPTH_LIMIT: usize = { postbag::cfg::DEFAULT_DEPTH_LIMIT 
 /// ## Nesting Depth Limit
 ///
 /// `DEPTH_LIMIT` specifies the maximum nesting depth of transferred data and defaults to
-/// [`postbag::cfg::DEFAULT_DEPTH_LIMIT`]. Specify a higher limit, for example
-/// `PostbagSlim<1024>`, when transferring deeply nested, in particular recursive, data
-/// structures.
+/// [`postbag::cfg::DEFAULT_DEPTH_LIMIT`]. Specify a higher limit when transferring deeply
+/// nested data structures.
 pub type PostbagSlim<const DEPTH_LIMIT: usize = { postbag::cfg::DEFAULT_DEPTH_LIMIT }> =
     PostbagWith<false, DEPTH_LIMIT>;

@@ -255,6 +255,11 @@ pub trait ConnectExt<T, TransportSinkError, TransportStreamError> {
     ///
     /// This is intended to be used with the [consume](Self::consume) method on
     /// the remote endpoint.
+    ///
+    /// # Completion
+    /// This completes once the value has been sent, *not* when the connection ends.
+    /// The connection keeps running on its own task afterwards and ends when the
+    /// transport fails or every channel carried over it has been closed.
     fn provide(
         self, value: T,
     ) -> impl Future<Output = Result<(), ProvideError<TransportSinkError, TransportStreamError>>> + MaybeSend;
@@ -267,6 +272,12 @@ pub trait ConnectExt<T, TransportSinkError, TransportStreamError> {
     ///
     /// This is intended to be used with the [provide](Self::provide) method on
     /// the remote endpoint.
+    ///
+    /// # Completion
+    /// This completes once the value has been received, *not* when the connection
+    /// ends. The connection keeps running on its own task for as long as the
+    /// returned value, or anything obtained through it, is still alive; dropping
+    /// all of it closes the connection.
     fn consume(
         self,
     ) -> impl Future<Output = Result<T, ConsumeError<TransportSinkError, TransportStreamError>>> + MaybeSend;

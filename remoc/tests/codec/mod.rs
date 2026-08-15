@@ -68,13 +68,30 @@ impl Default for TestStructWithAttr {
     }
 }
 
+/// Allows usage of codecs outside of remoc for testing.
+struct AllowCodecUse(());
+
+impl AllowCodecUse {
+    /// Enable usage of codecs outside of remoc for testing.
+    pub fn new() -> Self {
+        assert!(!codec::ALLOW_OUTSIDE_REMOC.replace(true));
+        Self(())
+    }
+}
+
+impl Drop for AllowCodecUse {
+    fn drop(&mut self) {
+        assert!(codec::ALLOW_OUTSIDE_REMOC.replace(false));
+    }
+}
+
 #[allow(dead_code)]
 fn roundtrip<T, Codec>()
 where
     T: Default + Serialize + DeserializeOwned + fmt::Debug + Eq,
     Codec: codec::Codec,
 {
-    codec::ALLOW_UNVERSIONED.set(true);
+    let _allow_codec_use = AllowCodecUse::new();
 
     let data: T = Default::default();
     println!("data:\n{:?}", data);
@@ -85,8 +102,6 @@ where
 
     let deser: T = <Codec as codec::Codec>::deserialize(buffer.as_slice()).unwrap();
     assert_eq!(deser, data);
-
-    codec::ALLOW_UNVERSIONED.set(false);
 }
 
 #[cfg_attr(not(all(target_family = "wasm", feature = "js")), test)]

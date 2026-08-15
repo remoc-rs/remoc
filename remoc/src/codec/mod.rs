@@ -92,6 +92,12 @@ impl SerializationError {
     }
 }
 
+impl From<std::io::Error> for SerializationError {
+    fn from(err: std::io::Error) -> Self {
+        Self(Arc::new(err))
+    }
+}
+
 impl fmt::Display for SerializationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.0)
@@ -130,6 +136,12 @@ impl DeserializationError {
     where
         E: Error + Send + Sync + 'static,
     {
+        Self(Arc::new(err))
+    }
+}
+
+impl From<std::io::Error> for DeserializationError {
+    fn from(err: std::io::Error) -> Self {
         Self(Arc::new(err))
     }
 }
@@ -382,9 +394,9 @@ where
 // ============================================================================
 
 thread_local! {
-    /// Allow using codecs without version negeotiation for tests.
+    /// Allow using codecs outside of remoc (for testing only).
     #[doc(hidden)]
-    pub static ALLOW_UNVERSIONED: Cell<bool> = const { Cell::new(false) };
+    pub static ALLOW_OUTSIDE_REMOC: Cell<bool> = const { Cell::new(false) };
 }
 
 mod postbag;

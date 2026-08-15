@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{Codec, DeserializationError, ErrorMsg, SerializationError};
+use super::{Codec, DeserializationError, SerializationError};
 
 /// The Postbag data format version to use on the current connection.
 fn negotiated_version() -> Option<postbag::cfg::Version> {
@@ -9,7 +9,7 @@ fn negotiated_version() -> Option<postbag::cfg::Version> {
         return Some(remote.min(postbag::cfg::Version::default()));
     }
 
-    if super::ALLOW_UNVERSIONED.get() {
+    if super::ALLOW_OUTSIDE_REMOC.get() {
         tracing::warn!("using local postbag version for tests");
         return Some(postbag::cfg::Version::default());
     }
@@ -18,10 +18,15 @@ fn negotiated_version() -> Option<postbag::cfg::Version> {
 }
 
 /// The configuration to use on the current connection.
-fn cfg<const WITH_IDENTS: bool, const DEPTH_LIMIT: usize>() -> Option<postbag::cfg::Cfg<WITH_IDENTS>> {
-    Some(
-        postbag::cfg::Cfg::<WITH_IDENTS>::new().with_depth_limit(DEPTH_LIMIT).with_version(negotiated_version()?),
-    )
+fn cfg<const WITH_IDENTS: bool, const DEPTH_LIMIT: usize>() -> std::io::Result<postbag::cfg::Cfg<WITH_IDENTS>> {
+    let Some(version) = negotiated_version() else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "remoc codec can only be used inside remoc",
+        ));
+    };
+
+    Ok(postbag::cfg::Cfg::<WITH_IDENTS>::new().with_depth_limit(DEPTH_LIMIT).with_version(version))
 }
 
 /// [Postbag codec](postbag) with the specified configuration.
@@ -54,10 +59,7 @@ impl<const WITH_IDENTS: bool, const DEPTH_LIMIT: usize> Codec for PostbagWith<WI
         Writer: std::io::Write,
         Item: serde::Serialize,
     {
-        let Some(cfg) = cfg::<WITH_IDENTS, DEPTH_LIMIT>() else {
-            return Err(SerializationError::new(ErrorMsg("remoc is not serializing".to_string())));
-        };
-        postbag::serialize(cfg, writer, item).map_err(SerializationError::new)?;
+        postbag::serialize(cfg::<WITH_IDENTS, DEPTH_LIMIT>()?, writer, item).map_err(SerializationError::new)?;
         Ok(())
     }
 
@@ -66,10 +68,8 @@ impl<const WITH_IDENTS: bool, const DEPTH_LIMIT: usize> Codec for PostbagWith<WI
         Reader: std::io::Read,
         Item: serde::de::DeserializeOwned,
     {
-        let Some(cfg) = cfg::<WITH_IDENTS, DEPTH_LIMIT>() else {
-            return Err(DeserializationError::new(ErrorMsg("remoc is not deserializing".to_string())));
-        };
-        let value = postbag::deserialize(cfg, reader).map_err(DeserializationError::new)?;
+        let value = postbag::deserialize(cfg::<WITH_IDENTS, DEPTH_LIMIT>()?, reader)
+            .map_err(DeserializationError::new)?;
         Ok(value)
     }
 }

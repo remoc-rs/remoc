@@ -562,7 +562,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "remoc"
-version = "0.20.0-pre3"
+version = "0.20.0-pre4"
 dependencies = [
  "async-trait",
  "bincode",
@@ -596,7 +596,7 @@ dependencies = [
 
 [[package]]
 name = "remoc_macro"
-version = "0.20.0-pre3"
+version = "0.20.0-pre4"
 dependencies = [
  "proc-macro2",
  "quote",

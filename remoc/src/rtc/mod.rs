@@ -384,12 +384,17 @@ pub use remoc_macro::remote;
 /// Call a method on a remotable trait failed.
 #[derive(Debug, Clone)]
 pub enum CallError {
-    /// Processing request failed.
+    /// The object is not being served.
     ///
-    /// The server may have been dropped or it may have panicked.
-    /// Sending the response may have failed on the server-side.
+    /// The request was never accepted, because serving of the object had already
+    /// finished: [`serve`](ServerShared::serve) returned, or the server was dropped
+    /// without ever being served.
+    NotServed,
+    /// Processing the request failed.
     ///
-    /// The request might have been dropped by the client or server monitor.
+    /// The request was accepted but no reply arrived. The server may have panicked
+    /// while handling it, sending the reply may have failed on the server side, or
+    /// the request may have been dropped by a client or server monitor.
     Dropped,
     /// Sending to a remote endpoint failed.
     RemoteSend(base::SendErrorKind),
@@ -406,18 +411,20 @@ pub enum CallError {
 crate::versioned::compact::impl_enum! {
     CallError,
     variants {
-        Dropped => "_0",
-        RemoteSend(err: base::SendErrorKind) => "_1",
-        RemoteReceive(err: base::RecvError) => "_2",
-        RemoteConnect(err: chmux::ConnectError) => "_3",
-        RemoteListen(err: chmux::ListenerError) => "_4",
-        RemoteForward => "_5",
+        NotServed => "_0",        
+        Dropped => "_1",
+        RemoteSend(err: base::SendErrorKind) => "_2",
+        RemoteReceive(err: base::RecvError) => "_3",
+        RemoteConnect(err: chmux::ConnectError) => "_4",
+        RemoteListen(err: chmux::ListenerError) => "_5",
+        RemoteForward => "_6",
     }
 }
 
 impl fmt::Display for CallError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::NotServed => write!(f, "the remote object is no longer served"),
             Self::Dropped => write!(f, "processing request failed"),
             Self::RemoteSend(err) => write!(f, "send error: {err}"),
             Self::RemoteReceive(err) => write!(f, "receive error: {err}"),
@@ -433,7 +440,8 @@ impl Error for CallError {}
 impl<T> From<mpsc::SendError<T>> for CallError {
     fn from(err: mpsc::SendError<T>) -> Self {
         match err {
-            mpsc::SendError::Closed(_) => Self::Dropped,
+            mpsc::SendError::Closed(_) => Self::NotServed,
+            mpsc::SendError::RemoteSend(err) if err.is_closed() => Self::NotServed,
             mpsc::SendError::RemoteSend(err) => Self::RemoteSend(err),
             mpsc::SendError::RemoteConnect(err) => Self::RemoteConnect(err),
             mpsc::SendError::RemoteListen(err) => Self::RemoteListen(err),

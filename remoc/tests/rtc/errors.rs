@@ -64,3 +64,46 @@ async fn max_item_size_exceeded() {
         )))
     ));
 }
+
+#[remoc::rtc::remote]
+pub trait Greeter {
+    async fn greet(&self) -> Result<String, remoc::rtc::CallError>;
+}
+
+pub struct GreeterObj;
+
+impl Greeter for GreeterObj {
+    async fn greet(&self) -> Result<String, remoc::rtc::CallError> {
+        Ok("hello".to_string())
+    }
+}
+
+/// A client whose object has stopped being served says so, rather than reporting
+/// the request as having failed while being processed.
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
+async fn calling_an_unserved_object() {
+    use remoc::rtc::ServerShared;
+    use std::sync::Arc;
+
+    crate::init();
+    let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<GreeterClient>().await;
+
+    let (server, client) = GreeterServerShared::new(Arc::new(GreeterObj), 1);
+    a_tx.send(client).await.unwrap();
+
+    let client = b_rx.recv().await.unwrap().unwrap();
+
+    // While it is served, calls work.
+    let serving = tokio::spawn(async move { server.serve(true).await });
+    assert_eq!(client.greet().await.unwrap(), "hello");
+
+    // Once serving has finished, they are refused with a reason that says why.
+    serving.abort();
+    let _ = serving.await;
+
+    // The connection itself is still up; there is simply nobody serving.
+    let err = client.greet().await.unwrap_err();
+    assert!(matches!(err, remoc::rtc::CallError::NotServed), "unexpected error: {err:?}");
+    assert!(err.to_string().contains("no longer served"), "unhelpful message: {err}");
+}

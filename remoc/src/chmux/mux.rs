@@ -350,7 +350,8 @@ where
         cfg.check();
 
         // Obtain shared receive buffer handle.
-        let mut receive_buffer_sizer = mem::replace(&mut cfg.shared_receive_buffer, DummySizer::new());
+        let dummy_sizer = DummySizer::new(&cfg.shared_receive_buffer);
+        let mut receive_buffer_sizer = mem::replace(&mut cfg.shared_receive_buffer, dummy_sizer);
         let receive_credit_monitor = GlobalCreditMonitor::new(receive_buffer_sizer.initial());
         let initial_global_credits = receive_credit_monitor.total();
         let remote_credits_report = GlobalCreditsReport::initial(initial_global_credits);
@@ -789,6 +790,13 @@ where
     /// the transport is closed.
     #[tracing::instrument(name = "remoc::chmux", level = "debug", skip_all, ret)]
     pub async fn run(mut self) -> Result<(), ChMuxError<TransportSinkError, TransportStreamError>> {
+        tracing::debug!(
+            cfg =? self.local_cfg,
+            remote_cfg =? self.remote_cfg,
+            remote_protocol_version = self.remote_protocol_version,
+            "connected"
+        );
+
         let mut transport_sink = self.transport_sink.take().unwrap();
         let mut transport_stream = self.transport_stream.take().unwrap();
 

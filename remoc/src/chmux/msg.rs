@@ -659,20 +659,11 @@ pub struct ExchangedCfg {
     pub frame_len_varint: bool,
     /// Transported types use compact serialized format.
     pub compact_transported: bool,
-    /// Newest Postbag data format version the remote endpoint can read.
-    pub postbag_version: u8,
-}
-
-/// Newest Postbag data format version this build can read.
-fn local_postbag_version() -> u8 {
-    cfg_select! {
-        feature = "serde" => {
-            u8::from(postbag::cfg::Version::default())
-        }
-        _ => {
-            0
-        }
-    }
+    /// Postbag data format version.
+    #[cfg(feature = "serde")]
+    pub postbag_version: postbag::cfg::Version,
+    #[cfg(not(feature = "serde"))]
+    pub postbag_version: (),
 }
 
 impl ExchangedCfg {
@@ -690,7 +681,10 @@ impl ExchangedCfg {
             varint: true,
             frame_len_varint: cfg.io_frame_len_varint.is_some(),
             compact_transported: true,
-            postbag_version: local_postbag_version(),
+            #[cfg(feature = "serde")]
+            postbag_version: postbag::cfg::Version::default(),
+            #[cfg(not(feature = "serde"))]
+            postbag_version: (),
         }
     }
 
@@ -708,7 +702,11 @@ impl ExchangedCfg {
         writer.write_u8(self.varint.into())?;
         writer.write_u8(self.frame_len_varint.into())?;
         writer.write_u8(self.compact_transported.into())?;
-        writer.write_u8(self.postbag_version)?;
+
+        #[cfg(feature = "serde")]
+        writer.write_u8(self.postbag_version.into())?;
+        #[cfg(not(feature = "serde"))]
+        writer.write_u8(0)?;
 
         Ok(())
     }
@@ -738,7 +736,10 @@ impl ExchangedCfg {
             varint: false,
             frame_len_varint: false,
             compact_transported: false,
-            postbag_version: 0,
+            #[cfg(feature = "serde")]
+            postbag_version: postbag::cfg::Version::Postbag0_4,
+            #[cfg(not(feature = "serde"))]
+            postbag_version: (),
         };
 
         let Ok(global_credits) = reader.read_u32::<LE>() else { return Ok(this) };
@@ -763,7 +764,10 @@ impl ExchangedCfg {
         this.compact_transported = compact_transported != 0;
 
         let Ok(postbag_version) = reader.read_u8() else { return Ok(this) };
-        this.postbag_version = postbag_version;
+        #[cfg(feature = "serde")]
+        {
+            this.postbag_version = postbag_version.try_into().unwrap_or(postbag::cfg::Version::default());
+        }
 
         Ok(this)
     }

@@ -6,15 +6,11 @@ use super::{Codec, DeserializationError, ErrorMsg, SerializationError};
 fn negotiated_version() -> Option<postbag::cfg::Version> {
     #[cfg(feature = "rch")]
     if let Some(remote) = crate::rch::base::with_storage(|storage| storage.remote_cfg().postbag_version) {
-        let our_version = postbag::cfg::Version::default();
-        return Some(match postbag::cfg::Version::try_from(remote) {
-            Ok(remote) => remote.min(our_version),
-            Err(_) => our_version,
-        });
+        return Some(remote.min(postbag::cfg::Version::default()));
     }
 
     if super::ALLOW_UNVERSIONED.get() {
-        eprintln!("using local postbag version for tests");
+        tracing::warn!("using local postbag version for tests");
         return Some(postbag::cfg::Version::default());
     }
 

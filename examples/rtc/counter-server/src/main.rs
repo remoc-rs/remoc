@@ -79,7 +79,7 @@ impl Counter for CounterObj {
 #[tokio::main]
 async fn main() {
     // Initialize logging.
-    tracing_subscriber::FmtSubscriber::builder().init();
+    tracing_subscriber::fmt::init();
 
     // Create a counter object that will be shared between all clients.
     // You could also create one counter object per connection.

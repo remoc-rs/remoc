@@ -10,7 +10,7 @@ use counter::{Counter, CounterClient, TCP_PORT};
 #[tokio::main]
 async fn main() {
     // Initialize logging.
-    tracing_subscriber::FmtSubscriber::builder().init();
+    tracing_subscriber::fmt::init();
 
     // Establish TCP connection to server.
     let socket = TcpStream::connect((Ipv4Addr::LOCALHOST, TCP_PORT)).await.unwrap();
@@ -25,11 +25,9 @@ async fn main() {
     println!("Subscribing to counter change notifications");
     let mut watch_rx = client.watch().await.unwrap();
     let watch_task = tokio::spawn(async move {
-        loop {
-            while let Ok(()) = watch_rx.changed().await {
-                let value = watch_rx.borrow_and_update().unwrap();
-                println!("Counter change notification: {}", *value);
-            }
+        while watch_rx.changed().await.is_ok() {
+            let value = watch_rx.borrow_and_update().unwrap();
+            println!("Counter change notification: {}", *value);
         }
     });
     println!("Done!");

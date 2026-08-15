@@ -30,7 +30,7 @@ pub enum OnPortsExhausted {
 ///
 /// In case of unsatisfactory performance (low throughput) your first step should be
 /// to increase the [receive buffer size](Self::shared_receive_buffer).
-#[derive(Debug, Clone)]
+#[derive(custom_debug::Debug, Clone)]
 pub struct Cfg {
     /// Time after which the connection is closed when no data is received.
     ///
@@ -191,6 +191,7 @@ pub struct Cfg {
     /// By default this is 0, i.e. a channel transfers its items over a single channel.
     pub mpsc_parallel: usize,
     #[doc(hidden)]
+    #[debug(skip)]
     pub _non_exhaustive: (),
 }
 

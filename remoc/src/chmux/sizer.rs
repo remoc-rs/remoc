@@ -91,13 +91,24 @@ impl Clone for Box<dyn BufferSizer> {
 }
 
 /// Dummy sizer for moving the real sizer out of the configuration struct.
-#[derive(Debug)]
-pub(crate) struct DummySizer;
+pub(super) struct DummySizer(String);
+
+impl fmt::Debug for DummySizer {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            write!(f, "{}", self.0)
+        } else {
+            f.debug_tuple("DummySizer").finish()
+        }
+    }
+}
 
 impl DummySizer {
     #[allow(clippy::new_ret_no_self)]
-    pub fn new() -> Box<dyn BufferSizer> {
-        Box::new(Self)
+    pub fn new(real_sizer: impl fmt::Debug) -> Box<dyn BufferSizer> {
+        let debug =
+            if tracing::enabled!(tracing::Level::DEBUG) { format!("{real_sizer:?}") } else { String::new() };
+        Box::new(Self(debug))
     }
 }
 
@@ -149,15 +160,25 @@ impl BufferSizer for FixedBuffer {
 }
 
 /// Buffer sizer that has constant size.
-#[derive(Debug, Clone)]
+#[derive(custom_debug::Debug, Clone)]
 pub struct DynamicBuffer {
+    /// Minimum size.
     min: u32,
+    /// Maximum size.
     max: u32,
     /// Level quotient.
     pub level_quot: u32,
+    /// Current size.
+    #[debug(skip)]
     current: BufferSize,
+    /// Low usage level which triggers buffer size decrease.
+    #[debug(skip)]
     low_level: u32,
+    /// High usage level which trigger buffer size increase.
+    #[debug(skip)]
     high_level: u32,
+    /// Maximum observed size.
+    #[debug(skip)]
     record_max: u32,
 }
 
@@ -165,8 +186,9 @@ impl DynamicBuffer {
     /// Create a dynamic buffer sizer with specified limits.
     #[allow(clippy::new_ret_no_self)]
     pub fn new(min: u32, max: u32) -> Box<dyn BufferSizer> {
-        assert!(min <= max);
-        let this = Self {
+        assert!(min <= max, "minimum buffer size must not exceed maximum buffer size");
+
+        Box::new(Self {
             min,
             max,
             level_quot: 2,
@@ -174,8 +196,7 @@ impl DynamicBuffer {
             low_level: 0,
             high_level: 0,
             record_max: 0,
-        };
-        Box::new(this)
+        })
     }
 
     fn set_size(&mut self, mut size: u32) {
@@ -189,10 +210,10 @@ impl DynamicBuffer {
         self.high_level = 4 * self.low_level;
 
         const MB: f32 = 1_048_576.;
-        tracing::trace!("adjusting receive buffer size to {:.1} MB", size as f32 / MB);
+        tracing::trace!(size_mb = size as f32 / MB, "adjusted receive buffer size");
         if size > self.record_max {
             self.record_max = size;
-            tracing::debug!("maximum receive buffer size increased to {:.1} MB", self.record_max as f32 / MB);
+            tracing::trace!(size_max_mb = self.record_max as f32 / MB, "maximum receive buffer size increased");
         }
     }
 }

@@ -128,30 +128,31 @@ impl<const WITH_IDENTS: bool, const DEPTH_LIMIT: usize> Codec for PostbagWith<WI
     }
 }
 
-/// [Postbag codec](postbag) with full forward and backward compatibility.
+/// [Postbag codec](postbag) for compact binary encoding with full forwards and backwards compatibility.
 ///
-/// Postbag is a high-performance binary codec that provides efficient data encoding
-/// with configurable levels of forward and backward compatibility. This codec uses the [`Full`](postbag::cfg::Full)
-/// configuration which provides maximum compatibility and schema evolution capabilities.
-///
-/// ## Key Features
-///
-/// - **Full fidelity of Rust type system**: Supports all serde-compatible types including
-///   structs, enums, tuples, arrays, maps, and all primitive types
-/// - **Efficient binary format**: Uses variable-length encoding (varint) for integers,
-///   compact representations for common types, and minimal overhead
-/// - **Full forward/backward compatibility**: Fields and enum variants can be reordered,
-///   added, or removed safely
+/// [`Postbag`] is a compact binary [serde] codec for Rust that keeps the Rust type system
+/// fully intact and has full support for backwards and forwards compatibility.
 ///
 /// ## Forward and Backward Compatibility
 ///
-/// The `Full` configuration provides comprehensive schema evolution capabilities:
+/// As usual a field a reader expects but does not receive takes its `#[serde(default)]`, and
+/// a variant it does not know needs a `#[serde(other)]` fallback.
 ///
-/// - **Field reordering**: Struct fields can be reordered without breaking compatibility
-/// - **Field addition**: New fields can be added to structs at any position
-/// - **Field removal**: Existing fields can be removed without affecting deserialization
-/// - **Enum variant evolution**: Enum variants can be added, removed, or reordered
-/// - **Schema evolution**: Safe evolution of data structures over time
+/// The following changes to your types are supported:
+///
+/// | Change to your types | **[`Postbag`]** | [`PostbagSlim`] |
+/// | --- | --- | --- |
+/// | **Structs** | | |
+/// | Add a field | **anywhere** | at the end |
+/// | Remove a field | **anywhere** | at the end |
+/// | Rename a field | **when numbered** | always |
+/// | Reorder fields | **yes** | no |
+/// | **Enums** | | |
+/// | Add a variant | **anywhere** | at the end |
+/// | Remove a variant | **anywhere** | at the end |
+/// | Rename a variant | **when numbered** | always |
+/// | Reorder variants | yes | no |
+/// | **Size** | **small** | even smaller |
 ///
 /// ## Numerical Identifier Encoding
 ///
@@ -199,13 +200,25 @@ impl<const WITH_IDENTS: bool, const DEPTH_LIMIT: usize> Codec for PostbagWith<WI
 /// regular strings. Since the identifier determines compatibility, changing the id of a
 /// field or variant is a breaking change, but fields and variants can be reordered freely.
 ///
-/// This serializes and deserializes *with* field identifiers for maximum compatibility.
+/// #### Use with `std` types
 ///
-/// ## Compact Representations
-///
-/// The [`postbag::compact`] module provides more efficient representations of common
+/// The [`compact`] module enables numerical identifier encoding on common
 /// types from the standard library, such as [`Result`](std::result::Result) and
 /// [`Duration`](std::time::Duration).
+///
+/// ```rust
+/// # use serde::{Serialize, Deserialize};
+/// # use std::time::Duration;
+/// #[derive(Serialize, Deserialize)]
+/// pub struct MyData {
+///     #[serde(rename = "_0")]
+///     #[serde(with = "remoc::codec::compact")]
+///     result: Result<u32, String>,
+///     #[serde(rename = "_1")]
+///     #[serde(with = "remoc::codec::compact")]
+///     duration: Duration,
+/// }
+/// ```
 ///
 /// ## Nesting Depth Limit
 ///
@@ -215,37 +228,31 @@ impl<const WITH_IDENTS: bool, const DEPTH_LIMIT: usize> Codec for PostbagWith<WI
 pub type Postbag<const DEPTH_LIMIT: usize = { postbag::cfg::DEFAULT_DEPTH_LIMIT }> =
     PostbagWith<true, DEPTH_LIMIT>;
 
-/// [Postbag slim codec](postbag) for compact, high-performance encoding.
+/// [Postbag slim codec](postbag) for very compact binary encoding with limited forwards and backwards compatibility.
 ///
-/// The [`Slim`](postbag::cfg::Slim) configuration prioritizes performance and compact size over compatibility.
-/// This codec provides efficient binary encoding but with limited schema evolution
-/// capabilities compared to the full [`Postbag`] codec.
+/// [`PostbagSlim`] is a very compact binary [serde] codec for Rust that keeps the Rust type system
+/// fully intact and has limited support for backwards and forwards compatibility.
 ///
-/// ## Key Features
+/// ## Forward and Backward Compatibility
 ///
-/// - **Compact encoding**: Smaller serialized data size compared to `Full` configuration
-/// - **Fast processing**: No string lookups during serialization/deserialization
-/// - **High performance**: Optimized for speed and minimal overhead
+/// As usual a field a reader expects but does not receive takes its `#[serde(default)]`, and
+/// a variant it does not know needs a `#[serde(other)]` fallback.
 ///
-/// ## Schema Evolution Limitations
+/// The following changes to your types are supported:
 ///
-/// The `Slim` configuration has limited schema evolution capabilities. **Fields and enum
-/// variants must maintain their order** for compatibility.
-///
-/// ### Supported Changes
-///
-/// - **Adding fields**: New fields can be added to the **end** of structs only
-/// - **Removing fields**: Fields can be removed from the **end** of structs only
-/// - **Adding enum variants**: New variants can be added at the **end** of enums only
-/// - **Removing enum variants**: Variants can be removed from the **end** of enums only
-///
-/// ### Important Compatibility Notes
-///
-/// - Fields and enum variants **cannot be reordered**
-/// - Fields and enum variants **cannot be added or removed from the middle**
-/// - Use serde defaults (`#[serde(default)]`) for new fields to ensure backward compatibility
-/// - Always add new fields at the end of struct definitions
-/// - Always add new enum variants at the end of enum definitions
+/// | Change to your types | [`Postbag`] | **[`PostbagSlim`]** |
+/// | --- | --- | --- |
+/// | **Structs** | | |
+/// | Add a field | anywhere | **at the end** |
+/// | Remove a field | anywhere | **at the end** |
+/// | Rename a field | when numbered | **always** |
+/// | Reorder fields | yes | **no** |
+/// | **Enums** | | |
+/// | Add a variant | anywhere | **at the end** |
+/// | Remove a variant | anywhere | **at the end** |
+/// | Rename a variant | when numbered | **always** |
+/// | Reorder variants | yes | **no** |
+/// | **Size** | small | **even smaller** |
 ///
 /// ## When to Use
 ///
@@ -255,9 +262,7 @@ pub type Postbag<const DEPTH_LIMIT: usize = { postbag::cfg::DEFAULT_DEPTH_LIMIT 
 /// - Data structures have stable field ordering
 ///
 /// Choose the full [`Postbag`] codec when schema flexibility is more important than
-/// the slight performance overhead.
-///
-/// This serializes and deserializes *without* field identifiers for maximum efficiency.
+/// the slight size overhead.
 ///
 /// ## Nesting Depth Limit
 ///

@@ -400,7 +400,7 @@ thread_local! {
 }
 
 mod postbag;
-pub use postbag::{Postbag, PostbagSlim, PostbagWith, compact, fixint};
+pub use postbag::{Postbag, PostbagSlim, PostbagWith, compact, fixint, recoverable, varfloat};
 
 #[cfg(feature = "codec-bincode")]
 mod bincode;

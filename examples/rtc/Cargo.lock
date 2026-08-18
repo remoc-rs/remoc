@@ -271,9 +271,9 @@ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
 name = "postbag"
-version = "1.0.0-pre4"
+version = "1.0.0-pre8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e38307c9e37ffa643f8597c1dcf45c11a1dd337ff5c3538f3db9b87a82d33ce"
+checksum = "9d00a91127f5dee84635d14f30edbe2a4e66d48558861b4923dd567915e54e9b"
 dependencies = [
  "serde",
 ]

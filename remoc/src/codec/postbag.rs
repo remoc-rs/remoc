@@ -30,6 +30,39 @@ pub mod compact {
     pub use postbag::compact::*;
 }
 
+/// Recoverable deserialization.
+///
+/// When a value fails to deserialize, the error normally aborts deserialization
+/// of the whole data structure, because a deserializer cannot know where the
+/// undecodable value ends and thus cannot continue after it. Consequently, a
+/// change to a type that breaks forward compatibility
+/// renders every enclosing value undecodable as well, even when the enclosing
+/// type itself did not change.
+///
+/// A value annotated with `#[serde(with = "remoc::codec::recoverable")]` is
+/// deserialized in isolation, so that a failure is confined to it.
+/// The rest of the enclosing data structure is deserialized as usual and the
+/// value itself is replaced by one obtained from [`Default::default`].
+///
+/// ```rust
+/// # use serde::{Serialize, Deserialize};
+/// # #[derive(Default, Serialize, Deserialize)]
+/// # struct B { x: u32 }
+/// # #[derive(Default, Serialize, Deserialize)]
+/// # struct C { x: u32 }
+/// #[derive(Serialize, Deserialize)]
+/// struct A {
+///     b: B,
+///     #[serde(with = "remoc::codec::recoverable")]
+///     c: C,
+/// }
+/// ```
+/// 
+/// See [`postbag::recoverable`] for more details and options.
+pub mod recoverable {
+    pub use postbag::recoverable::*;
+}
+
 /// # Fixed Size Integers
 ///
 /// In some cases, the use of variably length encoded data may not be
@@ -56,6 +89,48 @@ pub mod fixint {
     pub use postbag::fixint::*;
 }
 
+/// # Variable Size Floats
+///
+/// In some cases, the use of fixed size floating point data may be wasteful.
+/// These modules, for use with `#[serde(with = "remoc::codec::varfloat")]` "opt in"
+/// to variable length encoding.
+///
+/// Enables variable length serialization/deserialization for the specified
+/// floating point field. The encoding is lossless and preserves the bit
+/// pattern of every value, including quiet and signaling NaN payloads,
+/// both infinities, negative zero and subnormal values.
+///
+/// Whether this saves space depends entirely on the data:
+///
+/// | Value | `f64` bytes | `f32` bytes |
+/// | --- | ---: | ---: |
+/// | `0.0` | 1 | 1 |
+/// | `-0.0` | 2 | 2 |
+/// | `1.0` | 3 | 3 |
+/// | `-0.5` | 3 | 2 |
+/// | `INFINITY` | 3 | 3 |
+/// | `NAN` | 3 | 3 |
+/// | `1234.0 / 32768.0` | 4 | 4 |
+/// | `0.1` | 9 | 5 |
+/// | `PI` | 9 | 5 |
+/// | unencoded | 8 | 4 |
+///
+/// So this is worth applying to values that carry fewer significant bits than
+/// their type provides, such as data quantized to a power of two, values that
+/// are whole numbers, and fields that are zero most of the time.
+///
+/// ```rust
+/// # use serde::Serialize;
+/// #[derive(Serialize)]
+/// pub struct DefinitelyVarfloat {
+///     #[serde(with = "remoc::codec::varfloat")]
+///     x: f64,
+/// }
+/// ```
+pub mod varfloat {
+    pub use postbag::varfloat::*;
+}
+
 /// The Postbag data format version to use on the current connection.
 fn negotiated_version() -> Option<postbag::cfg::Version> {
     #[cfg(feature = "rch")]
@@ -80,7 +155,10 @@ fn cfg<const WITH_IDENTS: bool, const DEPTH_LIMIT: usize>() -> std::io::Result<p
         ));
     };
 
-    Ok(postbag::cfg::Cfg::<WITH_IDENTS>::new().with_depth_limit(DEPTH_LIMIT).with_version(version))
+    Ok(postbag::cfg::Cfg::<WITH_IDENTS>::new()
+        .with_depth_limit(DEPTH_LIMIT)
+        .with_version(version)
+        .with_header(false))
 }
 
 /// [Postbag codec](postbag) with the specified configuration.
@@ -153,6 +231,12 @@ impl<const WITH_IDENTS: bool, const DEPTH_LIMIT: usize> Codec for PostbagWith<WI
 /// | Rename a variant | **when numbered** | always |
 /// | Reorder variants | yes | no |
 /// | **Size** | **small** | even smaller |
+/// 
+/// ## Recoverable deserialization
+/// 
+/// Postbag can replace fields that failed to deserialize due to incompatible schema changes
+/// with their default values and continue deserializing the remaining fields. 
+/// See [`recoverable`] how to use this.
 ///
 /// ## Numerical Identifier Encoding
 ///

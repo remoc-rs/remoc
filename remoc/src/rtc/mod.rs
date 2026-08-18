@@ -411,7 +411,7 @@ pub enum CallError {
 crate::versioned::compact::impl_enum! {
     CallError,
     variants {
-        NotServed => "_0",        
+        NotServed => "_0",
         Dropped => "_1",
         RemoteSend(err: base::SendErrorKind) => "_2",
         RemoteReceive(err: base::RecvError) => "_3",

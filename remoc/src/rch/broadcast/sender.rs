@@ -22,23 +22,23 @@ pub enum SendError<T> {
     /// All receivers have been dropped.
     Closed(#[debug(skip)] T),
     /// Sending to a remote endpoint failed.
-    RemoteSend(base::SendErrorKind),
+    Send(base::SendErrorKind),
     /// Connecting a sent channel failed.
-    RemoteConnect(chmux::ConnectError),
+    Connect(chmux::ConnectError),
     /// Listening to a received channel failed.
-    RemoteListen(chmux::ListenerError),
+    Listen(chmux::ListenerError),
     /// Forwarding at a remote endpoint to another remote endpoint failed.
-    RemoteForward,
+    Forward,
 }
 
 crate::versioned::compact::impl_enum! {
     SendError<T>,
     variants {
         Closed(item: T) => "_0",
-        RemoteSend(err: base::SendErrorKind) => "_1",
-        RemoteConnect(err: chmux::ConnectError) => "_2",
-        RemoteListen(err: chmux::ListenerError) => "_3",
-        RemoteForward => "_4",
+        Send(err: base::SendErrorKind) => "_1",
+        Connect(err: chmux::ConnectError) => "_2",
+        Listen(err: chmux::ListenerError) => "_3",
+        Forward => "_4",
     }
     where T: RemoteSend
 }
@@ -47,10 +47,10 @@ impl<T> fmt::Display for SendError<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Closed(_) => write!(f, "no subscribers"),
-            Self::RemoteSend(err) => write!(f, "send error: {err}"),
-            Self::RemoteConnect(err) => write!(f, "connect error: {err}"),
-            Self::RemoteListen(err) => write!(f, "listen error: {err}"),
-            Self::RemoteForward => write!(f, "forwarding error"),
+            Self::Send(err) => write!(f, "send error: {err}"),
+            Self::Connect(err) => write!(f, "connect error: {err}"),
+            Self::Listen(err) => write!(f, "listen error: {err}"),
+            Self::Forward => write!(f, "forwarding error"),
         }
     }
 }
@@ -62,10 +62,10 @@ impl<T, R> TryFrom<mpsc::TrySendError<T>> for SendError<R> {
 
     fn try_from(err: mpsc::TrySendError<T>) -> Result<Self, Self::Error> {
         match err {
-            mpsc::TrySendError::RemoteSend(err) => Ok(Self::RemoteSend(err)),
-            mpsc::TrySendError::RemoteConnect(err) => Ok(Self::RemoteConnect(err)),
-            mpsc::TrySendError::RemoteListen(err) => Ok(Self::RemoteListen(err)),
-            mpsc::TrySendError::RemoteForward => Ok(Self::RemoteForward),
+            mpsc::TrySendError::Send(err) => Ok(Self::Send(err)),
+            mpsc::TrySendError::Connect(err) => Ok(Self::Connect(err)),
+            mpsc::TrySendError::Listen(err) => Ok(Self::Listen(err)),
+            mpsc::TrySendError::Forward => Ok(Self::Forward),
             other => Err(other),
         }
     }
@@ -80,24 +80,24 @@ impl<T> SendError<T> {
     /// True, if the remote endpoint closed the channel, was dropped or the connection failed.
     pub fn is_disconnected(&self) -> bool {
         match self {
-            Self::RemoteSend(err) => err.is_disconnected(),
-            Self::Closed(_) | Self::RemoteConnect(_) | Self::RemoteListen(_) | Self::RemoteForward => true,
+            Self::Send(err) => err.is_disconnected(),
+            Self::Closed(_) | Self::Connect(_) | Self::Listen(_) | Self::Forward => true,
         }
     }
 
     /// Whether the error is caused by the item to be sent.
     pub fn is_item_specific(&self) -> bool {
-        matches!(self, Self::RemoteSend(err) if err.is_item_specific())
+        matches!(self, Self::Send(err) if err.is_item_specific())
     }
 
     /// Returns the error without the contained item.
     pub fn without_item(self) -> SendError<()> {
         match self {
             Self::Closed(_) => SendError::Closed(()),
-            Self::RemoteSend(err) => SendError::RemoteSend(err),
-            Self::RemoteConnect(err) => SendError::RemoteConnect(err),
-            Self::RemoteListen(err) => SendError::RemoteListen(err),
-            Self::RemoteForward => SendError::RemoteForward,
+            Self::Send(err) => SendError::Send(err),
+            Self::Connect(err) => SendError::Connect(err),
+            Self::Listen(err) => SendError::Listen(err),
+            Self::Forward => SendError::Forward,
         }
     }
 }
@@ -165,6 +165,9 @@ where
     ///
     /// No [back pressure](crate::rch#flow-control-and-back-pressure) is provided;
     /// a receiver that does not keep up loses values.
+    ///
+    /// `Ok` means that the value was queued for sending; the returned handle
+    /// reports whether it was sent.
     pub fn send(&self, value: T) -> Result<Broadcasting<T>, SendError<T>> {
         let mut inner = self.inner.lock().unwrap();
 

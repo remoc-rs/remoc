@@ -20,34 +20,43 @@ use super::{
 use crate::{
     RemoteSend, chmux,
     codec::{self, ErasedDeserializer, ErasedSerializer},
+    versioned::result::Result as CompactResult,
 };
-
 /// An error occurred during receiving over an mpsc channel.
 #[derive(Clone, Debug)]
 pub enum RecvError {
     /// Receiving from a remote endpoint failed.
-    RemoteReceive(base::RecvError),
+    Receive(base::RecvError),
     /// Connecting a sent channel failed.
-    RemoteConnect(chmux::ConnectError),
+    Connect(chmux::ConnectError),
     /// Listening for a connection from a received channel failed.
-    RemoteListen(chmux::ListenerError),
+    Listen(chmux::ListenerError),
+    /// Remote error.
+    ///
+    /// The error occurred at the endpoint the value was received from.
+    /// [`None`] if that endpoint reported an error this one does not know.
+    Remote(Option<Box<RecvError>>),
 }
 
 crate::versioned::compact::impl_enum! {
     RecvError,
+    recover = RecvError::Remote(None),
     variants {
-        RemoteReceive(err: base::RecvError) => "_0",
-        RemoteConnect(err: chmux::ConnectError) => "_1",
-        RemoteListen(err: chmux::ListenerError) => "_2",
+        Receive(err: base::RecvError) => "_0",
+        Connect(err: chmux::ConnectError) => "_1",
+        Listen(err: chmux::ListenerError) => "_2",
+        Remote(err: Option<Box<RecvError>>) => "_50",
     }
 }
 
 impl fmt::Display for RecvError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::RemoteReceive(err) => write!(f, "receive error: {err}"),
-            Self::RemoteConnect(err) => write!(f, "connect error: {err}"),
-            Self::RemoteListen(err) => write!(f, "listen error: {err}"),
+            Self::Receive(err) => write!(f, "receive error: {err}"),
+            Self::Connect(err) => write!(f, "connect error: {err}"),
+            Self::Listen(err) => write!(f, "listen error: {err}"),
+            Self::Remote(Some(err)) => write!(f, "remote {err}"),
+            Self::Remote(None) => write!(f, "unknown remote error"),
         }
     }
 }
@@ -59,9 +68,10 @@ impl TryFrom<TryRecvError> for RecvError {
         match err {
             TryRecvError::Closed => Err(TryRecvError::Closed),
             TryRecvError::Empty => Err(TryRecvError::Empty),
-            TryRecvError::RemoteReceive(err) => Ok(Self::RemoteReceive(err)),
-            TryRecvError::RemoteConnect(err) => Ok(Self::RemoteConnect(err)),
-            TryRecvError::RemoteListen(err) => Ok(Self::RemoteListen(err)),
+            TryRecvError::Receive(err) => Ok(Self::Receive(err)),
+            TryRecvError::Connect(err) => Ok(Self::Connect(err)),
+            TryRecvError::Listen(err) => Ok(Self::Listen(err)),
+            TryRecvError::Remote(err) => Ok(Self::Remote(err)),
         }
     }
 }
@@ -72,8 +82,10 @@ impl RecvError {
     /// Returns whether the connection was rejected or failed.
     pub fn is_disconnected(&self) -> bool {
         match self {
-            Self::RemoteReceive(err) => err.is_disconnected(),
-            Self::RemoteConnect(_) | Self::RemoteListen(_) => true,
+            Self::Receive(err) => err.is_disconnected(),
+            Self::Connect(_) | Self::Listen(_) => true,
+            Self::Remote(Some(err)) => err.is_disconnected(),
+            Self::Remote(None) => false,
         }
     }
 }
@@ -87,21 +99,28 @@ pub enum TryRecvError {
     /// in the future.
     Empty,
     /// Receiving from a remote endpoint failed.
-    RemoteReceive(base::RecvError),
+    Receive(base::RecvError),
     /// Connecting a sent channel failed.
-    RemoteConnect(chmux::ConnectError),
+    Connect(chmux::ConnectError),
     /// Listening for a connection from a received channel failed.
-    RemoteListen(chmux::ListenerError),
+    Listen(chmux::ListenerError),
+    /// Remote error.
+    ///
+    /// The error occurred at the endpoint the value was received from.
+    /// [`None`] if that endpoint reported an error this one does not know.
+    Remote(Option<Box<RecvError>>),
 }
 
 crate::versioned::compact::impl_enum! {
     TryRecvError,
+    recover = TryRecvError::Remote(None),
     variants {
         Closed => "_0",
         Empty => "_1",
-        RemoteReceive(err: base::RecvError) => "_2",
-        RemoteConnect(err: chmux::ConnectError) => "_3",
-        RemoteListen(err: chmux::ListenerError) => "_4",
+        Receive(err: base::RecvError) => "_2",
+        Connect(err: chmux::ConnectError) => "_3",
+        Listen(err: chmux::ListenerError) => "_4",
+        Remote(err: Option<Box<RecvError>>) => "_50",
     }
 }
 
@@ -110,9 +129,11 @@ impl fmt::Display for TryRecvError {
         match self {
             Self::Closed => write!(f, "channel is closed"),
             Self::Empty => write!(f, "channel is empty"),
-            Self::RemoteReceive(err) => write!(f, "receive error: {err}"),
-            Self::RemoteConnect(err) => write!(f, "connect error: {err}"),
-            Self::RemoteListen(err) => write!(f, "listen error: {err}"),
+            Self::Receive(err) => write!(f, "receive error: {err}"),
+            Self::Connect(err) => write!(f, "connect error: {err}"),
+            Self::Listen(err) => write!(f, "listen error: {err}"),
+            Self::Remote(Some(err)) => write!(f, "remote {err}"),
+            Self::Remote(None) => write!(f, "unknown remote error"),
         }
     }
 }
@@ -120,9 +141,10 @@ impl fmt::Display for TryRecvError {
 impl From<RecvError> for TryRecvError {
     fn from(err: RecvError) -> Self {
         match err {
-            RecvError::RemoteReceive(err) => Self::RemoteReceive(err),
-            RecvError::RemoteConnect(err) => Self::RemoteConnect(err),
-            RecvError::RemoteListen(err) => Self::RemoteListen(err),
+            RecvError::Receive(err) => Self::Receive(err),
+            RecvError::Connect(err) => Self::Connect(err),
+            RecvError::Listen(err) => Self::Listen(err),
+            RecvError::Remote(err) => Self::Remote(err),
         }
     }
 }
@@ -134,8 +156,10 @@ impl TryRecvError {
     pub fn is_disconnected(&self) -> bool {
         match self {
             Self::Empty => false,
-            Self::RemoteReceive(err) => err.is_disconnected(),
-            Self::Closed | Self::RemoteConnect(_) | Self::RemoteListen(_) => true,
+            Self::Receive(err) => err.is_disconnected(),
+            Self::Closed | Self::Connect(_) | Self::Listen(_) => true,
+            Self::Remote(Some(err)) => err.is_disconnected(),
+            Self::Remote(None) => false,
         }
     }
 }
@@ -605,7 +629,7 @@ where
             }
 
             super::send_impl(
-                ErasedSerializer::new::<Result<T, RecvError>, Codec>(),
+                ErasedSerializer::new::<CompactResult<T, RecvError>, Codec>(),
                 Box::new(rx),
                 raw_txs,
                 raw_rx,
@@ -678,7 +702,7 @@ where
             let (raw_tx, raw_rx) = match request.accept().await {
                 Ok(tx_rx) => tx_rx,
                 Err(err) => {
-                    let _ = tx.send(SendReq::new(Err(RecvError::RemoteListen(err)))).await;
+                    let _ = tx.send(SendReq::new(Err(RecvError::Listen(err)))).await;
                     return;
                 }
             };
@@ -690,7 +714,7 @@ where
             }
 
             super::recv_impl(
-                ErasedDeserializer::new::<Result<T, RecvError>, Codec>(),
+                ErasedDeserializer::new::<CompactResult<T, RecvError>, Codec>(),
                 &tx,
                 raw_tx,
                 raw_rxs,

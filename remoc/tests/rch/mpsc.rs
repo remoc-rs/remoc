@@ -598,7 +598,7 @@ async fn max_item_size_exceeded() {
     println!("Sending 1 element");
     let res = tx.send(vec![1]).await;
     println!("Send result: {res:?}");
-    assert!(matches!(res, Err(SendError::RemoteSend(SendErrorKind::MaxItemSizeExceeded))));
+    assert!(matches!(res, Err(SendError::Send(SendErrorKind::MaxItemSizeExceeded))));
     println!();
 
     println!("Verifying that sender is closed");

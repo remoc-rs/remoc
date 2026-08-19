@@ -402,6 +402,24 @@ macro_rules! impl_struct {
 ///
 /// At least one variant must have at least one field.
 ///
+/// ## Recovery
+///
+/// The optional `recover` clause makes deserialization recoverable: a value that
+/// cannot be deserialized, such as a variant only a newer version of the
+/// application knows, is replaced by the specified expression instead of making
+/// the enclosing value undecodable as well.
+///
+/// ```ignore
+/// impl_enum! {
+///     CallError,
+///     recover = CallError::Remote(None),
+///     variants {
+///         Dropped => "_0",
+///         Remote(err: Option<Box<CallError>>) => "_50",
+///     }
+/// }
+/// ```
+///
 /// # Example
 ///
 /// ```ignore
@@ -428,6 +446,7 @@ macro_rules! impl_enum {
     // All variants are unit variants: no references and thus no lifetime are required.
     (
         $name:ident $(< $( $gen:ident ),* $(,)? $(; $( const $cgen:ident : $cty:ty ),* $(,)? )? >)?,
+        $( recover = $recover:expr, )?
         variants {
             $( $(#[$vattr:meta])* $variant:ident => $rename:literal ),* $(,)?
         }
@@ -514,7 +533,8 @@ macro_rules! impl_enum {
             }
         }
 
-        $crate::impl_serde! { @raw
+        $crate::impl_serde! { @dispatch
+            recover = [ $($recover)? ]
             name = [$name]
             generic_decls = [$( $($gen ,)* $( $(const $cgen : $cty ,)* )? )?]
             generic_args = [$( $($gen ,)* $( $($cgen ,)* )? )?]
@@ -526,6 +546,7 @@ macro_rules! impl_enum {
     // General case: at least one variant carries data.
     (
         $name:ident $(< $( $gen:ident ),* $(,)? $(; $( const $cgen:ident : $cty:ty ),* $(,)? )? >)?,
+        $( recover = $recover:expr, )?
         variants { $($variants:tt)* }
         $( where $($wc:tt)* )?
     ) => {
@@ -534,6 +555,7 @@ macro_rules! impl_enum {
             generic_decls = [$( $($gen ,)* $( $(const $cgen : $cty ,)* )? )?]
             generic_args = [$( $($gen ,)* $( $($cgen ,)* )? )?]
             where_clause = [ $( where $($wc)* )? ]
+            recover = [ $($recover)? ]
             rest = [ $($variants)* ]
             current_ref_variants = []
             current_variants = []
@@ -552,6 +574,7 @@ macro_rules! impl_enum {
         generic_decls = [$($generic_decls:tt)*]
         generic_args = [$($generic_args:tt)*]
         where_clause = [$($wc:tt)*]
+        recover = [$($recover:tt)*]
         rest = []
         current_ref_variants = [$($current_ref_variants:tt)*]
         current_variants = [$($current_variants:tt)*]
@@ -649,7 +672,8 @@ macro_rules! impl_enum {
             }
         }
 
-        $crate::impl_serde! { @raw
+        $crate::impl_serde! { @dispatch
+            recover = [$($recover)*]
             name = [$name]
             generic_decls = [$($generic_decls)*]
             generic_args = [$($generic_args)*]
@@ -664,6 +688,7 @@ macro_rules! impl_enum {
         generic_decls = [$($generic_decls:tt)*]
         generic_args = [$($generic_args:tt)*]
         where_clause = [$($wc:tt)*]
+        recover = [$($recover:tt)*]
         rest = [ #[skip] $(#[$vattr:meta])* $variant:ident, $($rest:tt)* ]
         current_ref_variants = [$($current_ref_variants:tt)*]
         current_variants = [$($current_variants:tt)*]
@@ -679,6 +704,7 @@ macro_rules! impl_enum {
             generic_decls = [$($generic_decls)*]
             generic_args = [$($generic_args)*]
             where_clause = [$($wc)*]
+            recover = [$($recover)*]
             rest = [ $($rest)* ]
             current_ref_variants = [ $($current_ref_variants)* ]
             current_variants = [ $($current_variants)* ]
@@ -713,6 +739,7 @@ macro_rules! impl_enum {
         generic_decls = [$($generic_decls:tt)*]
         generic_args = [$($generic_args:tt)*]
         where_clause = [$($wc:tt)*]
+        recover = [$($recover:tt)*]
         rest = [
             $(#[$vattr:meta])*
             $variant:ident { $( $field:ident : $fty:ty ),+ $(,)? } => $rename:literal, $($rest:tt)*
@@ -731,6 +758,7 @@ macro_rules! impl_enum {
             generic_decls = [$($generic_decls)*]
             generic_args = [$($generic_args)*]
             where_clause = [$($wc)*]
+            recover = [$($recover)*]
             rest = [ $($rest)* ]
             current_ref_variants = [
                 $($current_ref_variants)*
@@ -779,6 +807,7 @@ macro_rules! impl_enum {
         generic_decls = [$($generic_decls:tt)*]
         generic_args = [$($generic_args:tt)*]
         where_clause = [$($wc:tt)*]
+        recover = [$($recover:tt)*]
         rest = [
             $(#[$vattr:meta])*
             $variant:ident ( $( $field:ident : $fty:ty ),+ $(,)? ) => $rename:literal, $($rest:tt)*
@@ -797,6 +826,7 @@ macro_rules! impl_enum {
             generic_decls = [$($generic_decls)*]
             generic_args = [$($generic_args)*]
             where_clause = [$($wc)*]
+            recover = [$($recover)*]
             rest = [ $($rest)* ]
             current_ref_variants = [
                 $($current_ref_variants)*
@@ -845,6 +875,7 @@ macro_rules! impl_enum {
         generic_decls = [$($generic_decls:tt)*]
         generic_args = [$($generic_args:tt)*]
         where_clause = [$($wc:tt)*]
+        recover = [$($recover:tt)*]
         rest = [ $(#[$vattr:meta])* $variant:ident => $rename:literal, $($rest:tt)* ]
         current_ref_variants = [$($current_ref_variants:tt)*]
         current_variants = [$($current_variants:tt)*]
@@ -860,6 +891,7 @@ macro_rules! impl_enum {
             generic_decls = [$($generic_decls)*]
             generic_args = [$($generic_args)*]
             where_clause = [$($wc)*]
+            recover = [$($recover)*]
             rest = [ $($rest)* ]
             current_ref_variants = [
                 $($current_ref_variants)*

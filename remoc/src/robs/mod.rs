@@ -79,32 +79,32 @@ use crate::prelude::*;
 #[derive(Clone, Debug)]
 pub enum SendError {
     /// Sending to a remote endpoint failed.
-    RemoteSend(rch::base::SendErrorKind),
+    Send(rch::base::SendErrorKind),
     /// Connecting a sent channel failed.
-    RemoteConnect(chmux::ConnectError),
+    Connect(chmux::ConnectError),
     /// Listening to a received channel failed.
-    RemoteListen(chmux::ListenerError),
+    Listen(chmux::ListenerError),
     /// Forwarding at a remote endpoint to another remote endpoint failed.
-    RemoteForward,
+    Forward,
 }
 
 crate::versioned::compact::impl_enum! {
     SendError,
     variants {
-        RemoteSend(err: rch::base::SendErrorKind) => "_0",
-        RemoteConnect(err: chmux::ConnectError) => "_1",
-        RemoteListen(err: chmux::ListenerError) => "_2",
-        RemoteForward => "_3",
+        Send(err: rch::base::SendErrorKind) => "_0",
+        Connect(err: chmux::ConnectError) => "_1",
+        Listen(err: chmux::ListenerError) => "_2",
+        Forward => "_3",
     }
 }
 
 impl fmt::Display for SendError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::RemoteSend(err) => write!(f, "send error: {err}"),
-            Self::RemoteConnect(err) => write!(f, "connect error: {err}"),
-            Self::RemoteListen(err) => write!(f, "listen error: {err}"),
-            Self::RemoteForward => write!(f, "forwarding error"),
+            Self::Send(err) => write!(f, "send error: {err}"),
+            Self::Connect(err) => write!(f, "connect error: {err}"),
+            Self::Listen(err) => write!(f, "listen error: {err}"),
+            Self::Forward => write!(f, "forwarding error"),
         }
     }
 }
@@ -116,10 +116,10 @@ impl<T> TryFrom<rch::broadcast::SendError<T>> for SendError {
 
     fn try_from(err: rch::broadcast::SendError<T>) -> Result<Self, Self::Error> {
         match err {
-            rch::broadcast::SendError::RemoteSend(err) => Ok(Self::RemoteSend(err)),
-            rch::broadcast::SendError::RemoteConnect(err) => Ok(Self::RemoteConnect(err)),
-            rch::broadcast::SendError::RemoteListen(err) => Ok(Self::RemoteListen(err)),
-            rch::broadcast::SendError::RemoteForward => Ok(Self::RemoteForward),
+            rch::broadcast::SendError::Send(err) => Ok(Self::Send(err)),
+            rch::broadcast::SendError::Connect(err) => Ok(Self::Connect(err)),
+            rch::broadcast::SendError::Listen(err) => Ok(Self::Listen(err)),
+            rch::broadcast::SendError::Forward => Ok(Self::Forward),
             other @ rch::broadcast::SendError::Closed(_) => Err(other),
         }
     }
@@ -130,10 +130,10 @@ impl<T> TryFrom<rch::mpsc::SendError<T>> for SendError {
 
     fn try_from(err: rch::mpsc::SendError<T>) -> Result<Self, Self::Error> {
         match err {
-            rch::mpsc::SendError::RemoteSend(err) => Ok(Self::RemoteSend(err)),
-            rch::mpsc::SendError::RemoteConnect(err) => Ok(Self::RemoteConnect(err)),
-            rch::mpsc::SendError::RemoteListen(err) => Ok(Self::RemoteListen(err)),
-            rch::mpsc::SendError::RemoteForward => Ok(Self::RemoteForward),
+            rch::mpsc::SendError::Send(err) => Ok(Self::Send(err)),
+            rch::mpsc::SendError::Connect(err) => Ok(Self::Connect(err)),
+            rch::mpsc::SendError::Listen(err) => Ok(Self::Listen(err)),
+            rch::mpsc::SendError::Forward => Ok(Self::Forward),
             other @ rch::mpsc::SendError::Closed(_) => Err(other),
         }
     }
@@ -152,25 +152,32 @@ pub enum RecvError {
     /// The maximum size of the mirrored collection has been reached.
     MaxSizeExceeded(usize),
     /// Receiving from a remote endpoint failed.
-    RemoteReceive(rch::base::RecvError),
+    Receive(rch::base::RecvError),
     /// Connecting a sent channel failed.
-    RemoteConnect(chmux::ConnectError),
+    Connect(chmux::ConnectError),
     /// Listening for a connection from a received channel failed.
-    RemoteListen(chmux::ListenerError),
+    Listen(chmux::ListenerError),
     /// Invalid index.
     InvalidIndex(usize),
+    /// Remote error.
+    ///
+    /// The error occurred at the endpoint the value was received from.
+    /// [`None`] if that endpoint reported an error this one does not know.
+    Remote(Option<Box<RecvError>>),
 }
 
 crate::versioned::compact::impl_enum! {
     RecvError,
+    recover = RecvError::Remote(None),
     variants {
         Closed => "_0",
         Lagged => "_1",
         MaxSizeExceeded(size: usize) => "_2",
-        RemoteReceive(err: rch::base::RecvError) => "_3",
-        RemoteConnect(err: chmux::ConnectError) => "_4",
-        RemoteListen(err: chmux::ListenerError) => "_5",
+        Receive(err: rch::base::RecvError) => "_3",
+        Connect(err: chmux::ConnectError) => "_4",
+        Listen(err: chmux::ListenerError) => "_5",
         InvalidIndex(idx: usize) => "_6",
+        Remote(err: Option<Box<RecvError>>) => "_50",
     }
 }
 
@@ -180,10 +187,12 @@ impl fmt::Display for RecvError {
             Self::Closed => write!(f, "observed collection was dropped"),
             Self::Lagged => write!(f, "observation lagged behind"),
             Self::MaxSizeExceeded(size) => write!(f, "mirrored collection reached it maximum size of {size}"),
-            Self::RemoteReceive(err) => write!(f, "receive error: {err}"),
-            Self::RemoteConnect(err) => write!(f, "connect error: {err}"),
-            Self::RemoteListen(err) => write!(f, "listen error: {err}"),
+            Self::Receive(err) => write!(f, "receive error: {err}"),
+            Self::Connect(err) => write!(f, "connect error: {err}"),
+            Self::Listen(err) => write!(f, "listen error: {err}"),
             Self::InvalidIndex(idx) => write!(f, "index {idx} is invalid"),
+            Self::Remote(Some(err)) => write!(f, "remote {err}"),
+            Self::Remote(None) => write!(f, "unknown remote error"),
         }
     }
 }
@@ -195,9 +204,10 @@ impl From<rch::broadcast::RecvError> for RecvError {
         match err {
             rch::broadcast::RecvError::Closed => Self::Closed,
             rch::broadcast::RecvError::Lagged => Self::Lagged,
-            rch::broadcast::RecvError::RemoteReceive(err) => Self::RemoteReceive(err),
-            rch::broadcast::RecvError::RemoteConnect(err) => Self::RemoteConnect(err),
-            rch::broadcast::RecvError::RemoteListen(err) => Self::RemoteListen(err),
+            rch::broadcast::RecvError::Receive(err) => Self::Receive(err),
+            rch::broadcast::RecvError::Connect(err) => Self::Connect(err),
+            rch::broadcast::RecvError::Listen(err) => Self::Listen(err),
+            rch::broadcast::RecvError::Remote(err) => Self::Remote(err.map(|err| Box::new(Self::from(*err)))),
         }
     }
 }
@@ -205,9 +215,10 @@ impl From<rch::broadcast::RecvError> for RecvError {
 impl From<rch::mpsc::RecvError> for RecvError {
     fn from(err: rch::mpsc::RecvError) -> Self {
         match err {
-            rch::mpsc::RecvError::RemoteReceive(err) => Self::RemoteReceive(err),
-            rch::mpsc::RecvError::RemoteConnect(err) => Self::RemoteConnect(err),
-            rch::mpsc::RecvError::RemoteListen(err) => Self::RemoteListen(err),
+            rch::mpsc::RecvError::Receive(err) => Self::Receive(err),
+            rch::mpsc::RecvError::Connect(err) => Self::Connect(err),
+            rch::mpsc::RecvError::Listen(err) => Self::Listen(err),
+            rch::mpsc::RecvError::Remote(err) => Self::Remote(err.map(|err| Box::new(Self::from(*err)))),
         }
     }
 }

@@ -96,9 +96,9 @@ pub enum FetchError {
     /// The size of the binary data exceeds [usize::MAX] on this platform.
     Size(UsizeExceeded),
     /// Receiving the binary data from the remote endpoint failed.
-    RemoteReceive(chmux::RecvError),
+    Receive(chmux::RecvError),
     /// Connecting a sent channel failed.
-    RemoteConnect(ConnectError),
+    Connect(ConnectError),
 }
 
 impl From<UsizeExceeded> for FetchError {
@@ -112,8 +112,8 @@ impl fmt::Display for FetchError {
         match self {
             Self::Dropped => write!(f, "provider was dropped"),
             Self::Size(err) => write!(f, "{err}"),
-            Self::RemoteReceive(err) => write!(f, "receive error: {}", err),
-            Self::RemoteConnect(err) => write!(f, "connect error: {}", err),
+            Self::Receive(err) => write!(f, "receive error: {}", err),
+            Self::Connect(err) => write!(f, "connect error: {}", err),
         }
     }
 }
@@ -276,9 +276,9 @@ where
                     match fw_rx.into_inner().await {
                         Some(fw_bin::InnerReceiver::Local(data)) => Ok(data.into()),
                         Some(fw_bin::InnerReceiver::Remote(bin_rx)) => {
-                            let mut rx = bin_rx.into_inner().await.map_err(FetchError::RemoteConnect)?;
+                            let mut rx = bin_rx.into_inner().await.map_err(FetchError::Connect)?;
                             rx.set_max_data_size(len);
-                            rx.recv().await.map_err(FetchError::RemoteReceive)?.ok_or(FetchError::Dropped)
+                            rx.recv().await.map_err(FetchError::Receive)?.ok_or(FetchError::Dropped)
                         }
                         None => Err(FetchError::Dropped),
                     }

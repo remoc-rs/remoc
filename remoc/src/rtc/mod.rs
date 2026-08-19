@@ -283,6 +283,11 @@
 
 pub mod monitor;
 
+mod reply;
+pub use reply::ReplySender;
+#[doc(hidden)]
+pub use reply::{IsReply, Reply, reply_channel};
+
 use futures::future::BoxFuture;
 use std::{
     error::Error,
@@ -397,27 +402,34 @@ pub enum CallError {
     /// the request may have been dropped by a client or server monitor.
     Dropped,
     /// Sending to a remote endpoint failed.
-    RemoteSend(base::SendErrorKind),
+    Send(base::SendErrorKind),
     /// Receiving from a remote endpoint failed.
-    RemoteReceive(base::RecvError),
+    Receive(base::RecvError),
     /// Connecting a sent channel failed.
-    RemoteConnect(chmux::ConnectError),
+    Connect(chmux::ConnectError),
     /// Listening for a received channel failed.
-    RemoteListen(chmux::ListenerError),
+    Listen(chmux::ListenerError),
     /// Forwarding at a remote endpoint to another remote endpoint failed.
-    RemoteForward,
+    Forward,
+    /// Remote error.
+    ///
+    /// The error occurred at the endpoint the value was received from.
+    /// [`None`] if that endpoint reported an error this one does not know.
+    Remote(Option<Box<CallError>>),
 }
 
 crate::versioned::compact::impl_enum! {
     CallError,
+    recover = CallError::Remote(None),
     variants {
         NotServed => "_0",
         Dropped => "_1",
-        RemoteSend(err: base::SendErrorKind) => "_2",
-        RemoteReceive(err: base::RecvError) => "_3",
-        RemoteConnect(err: chmux::ConnectError) => "_4",
-        RemoteListen(err: chmux::ListenerError) => "_5",
-        RemoteForward => "_6",
+        Send(err: base::SendErrorKind) => "_2",
+        Receive(err: base::RecvError) => "_3",
+        Connect(err: chmux::ConnectError) => "_4",
+        Listen(err: chmux::ListenerError) => "_5",
+        Forward => "_6",
+        Remote(err: Option<Box<CallError>>) => "_50",
     }
 }
 
@@ -426,11 +438,13 @@ impl fmt::Display for CallError {
         match self {
             Self::NotServed => write!(f, "the remote object is no longer served"),
             Self::Dropped => write!(f, "processing request failed"),
-            Self::RemoteSend(err) => write!(f, "send error: {err}"),
-            Self::RemoteReceive(err) => write!(f, "receive error: {err}"),
-            Self::RemoteConnect(err) => write!(f, "connect error: {err}"),
-            Self::RemoteListen(err) => write!(f, "listen error: {err}"),
-            Self::RemoteForward => write!(f, "forwarding error"),
+            Self::Send(err) => write!(f, "send error: {err}"),
+            Self::Receive(err) => write!(f, "receive error: {err}"),
+            Self::Connect(err) => write!(f, "connect error: {err}"),
+            Self::Listen(err) => write!(f, "listen error: {err}"),
+            Self::Forward => write!(f, "forwarding error"),
+            Self::Remote(Some(err)) => write!(f, "remote {err}"),
+            Self::Remote(None) => write!(f, "unknown remote error"),
         }
     }
 }
@@ -441,11 +455,11 @@ impl<T> From<mpsc::SendError<T>> for CallError {
     fn from(err: mpsc::SendError<T>) -> Self {
         match err {
             mpsc::SendError::Closed(_) => Self::NotServed,
-            mpsc::SendError::RemoteSend(err) if err.is_closed() => Self::NotServed,
-            mpsc::SendError::RemoteSend(err) => Self::RemoteSend(err),
-            mpsc::SendError::RemoteConnect(err) => Self::RemoteConnect(err),
-            mpsc::SendError::RemoteListen(err) => Self::RemoteListen(err),
-            mpsc::SendError::RemoteForward => Self::RemoteForward,
+            mpsc::SendError::Send(err) if err.is_closed() => Self::NotServed,
+            mpsc::SendError::Send(err) => Self::Send(err),
+            mpsc::SendError::Connect(err) => Self::Connect(err),
+            mpsc::SendError::Listen(err) => Self::Listen(err),
+            mpsc::SendError::Forward => Self::Forward,
         }
     }
 }
@@ -454,9 +468,10 @@ impl From<oneshot::RecvError> for CallError {
     fn from(err: oneshot::RecvError) -> Self {
         match err {
             oneshot::RecvError::Closed => Self::Dropped,
-            oneshot::RecvError::RemoteReceive(err) => Self::RemoteReceive(err),
-            oneshot::RecvError::RemoteConnect(err) => Self::RemoteConnect(err),
-            oneshot::RecvError::RemoteListen(err) => Self::RemoteListen(err),
+            oneshot::RecvError::Receive(err) => Self::Receive(err),
+            oneshot::RecvError::Connect(err) => Self::Connect(err),
+            oneshot::RecvError::Listen(err) => Self::Listen(err),
+            oneshot::RecvError::Remote(err) => Self::Remote(err.map(|err| Box::new(Self::from(*err)))),
         }
     }
 }
@@ -1337,7 +1352,7 @@ pub const fn missing_max_reply_size() -> usize {
 /// Send reply to request.
 #[doc(hidden)]
 pub async fn send_reply<T, E, Codec>(
-    reply_tx: oneshot::Sender<Result<T, E>, Codec>, err_tx: &ReplyErrorSender,
+    reply_tx: ReplySender<Result<T, E>, Codec>, err_tx: &ReplyErrorSender,
     mut dispatch_guard: Box<dyn DispatchGuard>, result: Result<T, E>,
 ) where
     T: RemoteSend,

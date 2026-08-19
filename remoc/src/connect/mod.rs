@@ -34,7 +34,7 @@ pub enum ConnectError<TransportSinkError, TransportStreamError> {
     /// Establishing [chmux](crate::chmux) connection failed.
     ChMux(ChMuxError<TransportSinkError, TransportStreamError>),
     /// Opening initial [remote](crate::rch::base) channel failed.
-    RemoteConnect(base::ConnectError),
+    Connect(base::ConnectError),
 }
 
 impl<TransportSinkError, TransportStreamError> fmt::Display
@@ -46,7 +46,7 @@ where
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::ChMux(err) => write!(f, "chmux error: {err}"),
-            Self::RemoteConnect(err) => write!(f, "channel connect failed: {err}"),
+            Self::Connect(err) => write!(f, "channel connect failed: {err}"),
         }
     }
 }
@@ -70,7 +70,7 @@ impl<TransportSinkError, TransportStreamError> From<base::ConnectError>
     for ConnectError<TransportSinkError, TransportStreamError>
 {
     fn from(err: base::ConnectError) -> Self {
-        Self::RemoteConnect(err)
+        Self::Connect(err)
     }
 }
 

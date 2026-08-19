@@ -64,8 +64,8 @@ use crate::{
         BACKCHANNEL_MSG_CLOSE, BACKCHANNEL_MSG_ERROR,
         base::{ErasedReceiver, ErasedSender},
     },
+    versioned::result::Result as CompactResult,
 };
-
 mod distributor;
 mod receiver;
 mod sender;
@@ -254,8 +254,8 @@ where
     T: Send + 'static,
 {
     fn take_value(&mut self) -> AnySend {
-        let value = mem::replace(&mut self.value, Err(RecvError::RemoteConnect(chmux::ConnectError::Rejected)));
-        Box::new(value)
+        let value = mem::replace(&mut self.value, Err(RecvError::Connect(chmux::ConnectError::Rejected)));
+        Box::new(CompactResult::from(value))
     }
 
     fn result_ok(&mut self) {
@@ -265,8 +265,8 @@ where
     }
 
     fn result_err(&mut self, err: base::SendError<AnySend>) -> Result<(), base::SendError<AnySend>> {
-        let item: Result<T, RecvError> = *err.item.downcast().expect("type mismatch in SendReq");
-        let Ok(item) = item else { return Ok(()) };
+        let item: CompactResult<T, RecvError> = *err.item.downcast().expect("type mismatch in SendReq");
+        let Ok(item) = Result::from(item) else { return Ok(()) };
         let err = base::SendError { kind: err.kind, item };
 
         // Report the error to the caller if nobody is awaiting the send result.
@@ -430,7 +430,8 @@ where
     T: Send + 'static,
 {
     fn send(&'_ self, value: AnySend) -> BoxFuture<'_, Result<(), ()>> {
-        let value: Result<T, RecvError> = *value.downcast().expect("type mismatch in mpsc receiver");
+        let value: CompactResult<T, RecvError> = *value.downcast().expect("type mismatch in mpsc receiver");
+        let value = Result::from(value).map_err(|err| RecvError::Remote(Some(Box::new(err))));
         async { self.send(SendReq::new(value)).await.map_err(|_| ()) }.boxed()
     }
 
@@ -540,7 +541,7 @@ async fn recv_impl(
                     Ok(None) => break,
                     Err(err) => {
                         let is_disconnected_err = err.is_disconnected();
-                        if tx.send_err(RecvError::RemoteReceive(err)).await.is_err() || is_disconnected_err {
+                        if tx.send_err(RecvError::Receive(err)).await.is_err() || is_disconnected_err {
                             break
                         }
                     }

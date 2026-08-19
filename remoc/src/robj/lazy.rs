@@ -64,20 +64,27 @@ pub enum FetchError {
     /// Provider dropped before getting the value.
     Dropped,
     /// Receiving from a remote endpoint failed.
-    RemoteReceive(base::RecvError),
+    Receive(base::RecvError),
     /// Connecting a sent channel failed.
-    RemoteConnect(chmux::ConnectError),
+    Connect(chmux::ConnectError),
     /// Listening for a connection from a received channel failed.
-    RemoteListen(chmux::ListenerError),
+    Listen(chmux::ListenerError),
+    /// Remote error.
+    ///
+    /// The error occurred at the endpoint the value was received from.
+    /// [`None`] if that endpoint reported an error this one does not know.
+    Remote(Option<Box<FetchError>>),
 }
 
 crate::versioned::compact::impl_enum! {
     FetchError,
+    recover = FetchError::Remote(None),
     variants {
         Dropped => "_0",
-        RemoteReceive(err: base::RecvError) => "_1",
-        RemoteConnect(err: chmux::ConnectError) => "_2",
-        RemoteListen(err: chmux::ListenerError) => "_3",
+        Receive(err: base::RecvError) => "_1",
+        Connect(err: chmux::ConnectError) => "_2",
+        Listen(err: chmux::ListenerError) => "_3",
+        Remote(err: Option<Box<FetchError>>) => "_50",
     }
 }
 
@@ -85,9 +92,11 @@ impl fmt::Display for FetchError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Dropped => write!(f, "lazy provider dropped"),
-            Self::RemoteReceive(err) => write!(f, "receive error: {err}"),
-            Self::RemoteConnect(err) => write!(f, "connect error: {err}"),
-            Self::RemoteListen(err) => write!(f, "listen error: {err}"),
+            Self::Receive(err) => write!(f, "receive error: {err}"),
+            Self::Connect(err) => write!(f, "connect error: {err}"),
+            Self::Listen(err) => write!(f, "listen error: {err}"),
+            Self::Remote(Some(err)) => write!(f, "remote {err}"),
+            Self::Remote(None) => write!(f, "unknown remote error"),
         }
     }
 }
@@ -96,9 +105,10 @@ impl From<oneshot::RecvError> for FetchError {
     fn from(err: oneshot::RecvError) -> Self {
         match err {
             oneshot::RecvError::Closed => Self::Dropped,
-            oneshot::RecvError::RemoteReceive(err) => Self::RemoteReceive(err),
-            oneshot::RecvError::RemoteConnect(err) => Self::RemoteConnect(err),
-            oneshot::RecvError::RemoteListen(err) => Self::RemoteListen(err),
+            oneshot::RecvError::Receive(err) => Self::Receive(err),
+            oneshot::RecvError::Connect(err) => Self::Connect(err),
+            oneshot::RecvError::Listen(err) => Self::Listen(err),
+            oneshot::RecvError::Remote(err) => Self::Remote(err.map(|err| Box::new(Self::from(*err)))),
         }
     }
 }

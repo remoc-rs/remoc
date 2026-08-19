@@ -415,7 +415,7 @@ impl TraitMethod {
             #[doc="The channel is closed when the calling async method is cancelled "]
             #[doc="or a connection error occurs."]
             #reply_tx_rename
-            __reply_tx: ::remoc::rch::oneshot::Sender<#ret_ty, Codec>,
+            __reply_tx: ::remoc::rtc::ReplySender<#ret_ty, Codec>,
         };
 
         for NamedArg { attrs, ident, ty } in &self.args {
@@ -512,8 +512,7 @@ impl TraitMethod {
 
         quote! {
             async fn #ident (#self_ref, #args) -> #ret_ty {
-                let (mut reply_tx, reply_rx) = ::remoc::rch::oneshot::channel();
-                reply_tx.set_max_item_size(self.max_reply_size);
+                let (reply_tx, reply_rx) = ::remoc::rtc::reply_channel(self.max_reply_size);
 
                 let req_value = #req_enum :: #req_case { __reply_tx: reply_tx, #entries };
                 let req = ::remoc::rtc::Req::#req_type(req_value);
@@ -528,6 +527,7 @@ impl TraitMethod {
 
                 match reply_rx.await {
                     Ok(reply) => {
+                        let reply: #ret_ty = ::std::convert::Into::into(reply);
                         if reply.is_err() {
                             guard.failed();
                         }

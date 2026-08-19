@@ -100,6 +100,7 @@ use crate::{
     RemoteSend, chmux,
     codec::{self, AnySend, ErasedDeserializer, ErasedSerializer},
     rch::{BACKCHANNEL_MSG_ERROR, BACKCHANNEL_MSG_RATE_LIMIT},
+    versioned::result::Result as CompactResult,
 };
 
 mod receiver;
@@ -348,7 +349,7 @@ where
     T: Clone + Send + Sync + 'static,
 {
     fn borrow_and_update_clone(&mut self) -> AnySend {
-        Box::new(self.borrow_and_update().clone())
+        Box::new(CompactResult::from(self.borrow_and_update().clone()))
     }
 
     fn changed<'a>(&'a mut self) -> BoxFuture<'a, Result<(), tokio::sync::watch::error::RecvError>> {
@@ -465,7 +466,8 @@ where
     T: Clone + Send + Sync + 'static,
 {
     fn send(&self, value: AnySend) -> Result<(), ()> {
-        let value: Result<T, RecvError> = *value.downcast().expect("type mismatch in watch receiver");
+        let value: CompactResult<T, RecvError> = *value.downcast().expect("type mismatch in watch receiver");
+        let value = Result::from(value).map_err(|err| RecvError::Remote(Some(Box::new(err))));
         self.send(value).map_err(|_| ())
     }
 
@@ -532,7 +534,7 @@ async fn recv_impl(
                     Ok(None) => break,
                     Err(err) => {
                         let is_disconnected_err = err.is_disconnected();
-                        if tx.send_err(RecvError::RemoteReceive(err)).is_err() {
+                        if tx.send_err(RecvError::Receive(err)).is_err() {
                             break
                         }
                         if is_disconnected_err {

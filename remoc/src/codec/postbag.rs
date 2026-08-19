@@ -57,7 +57,7 @@ pub mod compact {
 ///     c: C,
 /// }
 /// ```
-/// 
+///
 /// See [`postbag::recoverable`] for more details and options.
 pub mod recoverable {
     pub use postbag::recoverable::*;
@@ -231,11 +231,11 @@ impl<const WITH_IDENTS: bool, const DEPTH_LIMIT: usize> Codec for PostbagWith<WI
 /// | Rename a variant | **when numbered** | always |
 /// | Reorder variants | yes | no |
 /// | **Size** | **small** | even smaller |
-/// 
+///
 /// ## Recoverable deserialization
-/// 
+///
 /// Postbag can replace fields that failed to deserialize due to incompatible schema changes
-/// with their default values and continue deserializing the remaining fields. 
+/// with their default values and continue deserializing the remaining fields.
 /// See [`recoverable`] how to use this.
 ///
 /// ## Numerical Identifier Encoding

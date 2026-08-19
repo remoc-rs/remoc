@@ -292,6 +292,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de, ser};
 #[doc(hidden)]
 pub mod compact;
 
+#[doc(hidden)]
+pub mod result;
+
 #[doc(inline)]
 pub use crate::impl_serde;
 
@@ -442,6 +445,117 @@ macro_rules! impl_serde {
             generic_args = [$( $($gen ,)* $( $($cgen ,)* )? )?]
             where_clause = [ $( where $($wc)* )? ]
         }
+    };
+
+    // Dispatch on whether a recovery fallback was specified.
+    (@dispatch
+        recover = []
+        $($rest:tt)*
+    ) => {
+        $crate::impl_serde! { @raw $($rest)* }
+    };
+
+    (@dispatch
+        recover = [$($recover:tt)+]
+        $($rest:tt)*
+    ) => {
+        $crate::impl_serde! { @recoverable recover = [$($recover)+] $($rest)* }
+    };
+
+    // Implements Serialize and Deserialize so that a failure to deserialize the
+    // value is confined to it and replaced by the specified fallback.
+    //
+    // The wrapper cannot be applied to the type itself, since deserializing a
+    // recoverable value deserializes the contained type, which would lead back
+    // here and recurse without end. Thus it is applied to private types that
+    // perform the actual conversion.
+    (@recoverable
+        recover = [$($recover:tt)+]
+        name = [$name:ident]
+        generic_decls = [$($generic_decls:tt)*]
+        generic_args = [$($generic_args:tt)*]
+        where_clause = [$($wc:tt)*]
+    ) => {
+        const _: () = {
+            /// Serializes the value without the recovery wrapper.
+            struct PlainRef<'transport, $($generic_decls)*>(&'transport $name<$($generic_args)*>)
+            $($wc)*;
+
+            impl<'transport, $($generic_decls)*> ::serde::Serialize
+                for PlainRef<'transport, $($generic_args)*>
+            $($wc)*
+            {
+                fn serialize<Ser>(&self, serializer: Ser) -> ::std::result::Result<Ser::Ok, Ser::Error>
+                where
+                    Ser: ::serde::Serializer,
+                {
+                    $crate::versioned::serialize(self.0, serializer)
+                }
+            }
+
+            /// Deserializes the value without the recovery wrapper.
+            struct Plain<$($generic_decls)*>($name<$($generic_args)*>)
+            $($wc)*;
+
+            impl<'de, $($generic_decls)*> ::serde::Deserialize<'de> for Plain<$($generic_args)*>
+            $($wc)*
+            {
+                fn deserialize<De>(deserializer: De) -> ::std::result::Result<Self, De::Error>
+                where
+                    De: ::serde::Deserializer<'de>,
+                {
+                    ::std::result::Result::Ok(Plain($crate::versioned::deserialize(deserializer)?))
+                }
+            }
+
+            /// Provides the value to use when deserialization failed.
+            struct Fallback;
+
+            impl<$($generic_decls)*> $crate::codec::recoverable::Recover<Plain<$($generic_args)*>>
+                for Fallback
+            $($wc)*
+            {
+                fn recover<E>(_err: E) -> ::std::result::Result<Plain<$($generic_args)*>, E>
+                where
+                    E: ::serde::de::Error,
+                {
+                    ::std::result::Result::Ok(Plain($($recover)+))
+                }
+            }
+
+            impl<$($generic_decls)*> ::serde::Serialize for $name<$($generic_args)*>
+            $($wc)*
+            {
+                fn serialize<Ser>(&self, serializer: Ser) -> ::std::result::Result<Ser::Ok, Ser::Error>
+                where
+                    Ser: ::serde::Serializer,
+                {
+                    let value = $crate::codec::recoverable::Recoverable::<_, Fallback>::new(
+                        PlainRef(self)
+                    );
+                    ::serde::Serialize::serialize(&value, serializer)
+                }
+            }
+
+            impl<'de, $($generic_decls)*> ::serde::Deserialize<'de> for $name<$($generic_args)*>
+            $($wc)*
+            {
+                fn deserialize<De>(deserializer: De) -> ::std::result::Result<Self, De::Error>
+                where
+                    De: ::serde::Deserializer<'de>,
+                {
+                    type Wrapped<$($generic_decls)*> = $crate::codec::recoverable::Recoverable<
+                        Plain<$($generic_args)*>, Fallback
+                    >;
+                    let value = <Wrapped<$($generic_args)*> as ::serde::Deserialize>::deserialize(
+                        deserializer
+                    )?;
+                    ::std::result::Result::Ok(
+                        $crate::codec::recoverable::Recoverable::into_inner(value).0
+                    )
+                }
+            }
+        };
     };
 
     (@raw

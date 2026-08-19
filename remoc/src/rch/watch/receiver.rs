@@ -21,34 +21,44 @@ use super::{
 use crate::{
     RemoteSend, chmux,
     codec::{self, ErasedDeserializer, ErasedSerializer},
+    versioned::result::Result as CompactResult,
 };
 
 /// An error occurred during receiving over a watch channel.
 #[derive(Clone, Debug)]
 pub enum RecvError {
     /// Receiving from a remote endpoint failed.
-    RemoteReceive(base::RecvError),
+    Receive(base::RecvError),
     /// Connecting a sent channel failed.
-    RemoteConnect(chmux::ConnectError),
+    Connect(chmux::ConnectError),
     /// Listening for a connection from a received channel failed.
-    RemoteListen(chmux::ListenerError),
+    Listen(chmux::ListenerError),
+    /// Remote error.
+    ///
+    /// The error occurred at the endpoint the value was received from.
+    /// [`None`] if that endpoint reported an error this one does not know.
+    Remote(Option<Box<RecvError>>),
 }
 
 crate::versioned::compact::impl_enum! {
     RecvError,
+    recover = RecvError::Remote(None),
     variants {
-        RemoteReceive(err: base::RecvError) => "_0",
-        RemoteConnect(err: chmux::ConnectError) => "_1",
-        RemoteListen(err: chmux::ListenerError) => "_2",
+        Receive(err: base::RecvError) => "_0",
+        Connect(err: chmux::ConnectError) => "_1",
+        Listen(err: chmux::ListenerError) => "_2",
+        Remote(err: Option<Box<RecvError>>) => "_50",
     }
 }
 
 impl fmt::Display for RecvError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::RemoteReceive(err) => write!(f, "receive error: {err}"),
-            Self::RemoteConnect(err) => write!(f, "connect error: {err}"),
-            Self::RemoteListen(err) => write!(f, "listen error: {err}"),
+            Self::Receive(err) => write!(f, "receive error: {err}"),
+            Self::Connect(err) => write!(f, "connect error: {err}"),
+            Self::Listen(err) => write!(f, "listen error: {err}"),
+            Self::Remote(Some(err)) => write!(f, "remote {err}"),
+            Self::Remote(None) => write!(f, "unknown remote error"),
         }
     }
 }
@@ -59,8 +69,10 @@ impl RecvError {
     /// Returns whether the connection was rejected or failed.
     pub fn is_disconnected(&self) -> bool {
         match self {
-            Self::RemoteReceive(err) => err.is_disconnected(),
-            Self::RemoteConnect(_) | Self::RemoteListen(_) => true,
+            Self::Receive(err) => err.is_disconnected(),
+            Self::Connect(_) | Self::Listen(_) => true,
+            Self::Remote(Some(err)) => err.is_disconnected(),
+            Self::Remote(None) => false,
         }
     }
 }
@@ -281,7 +293,7 @@ impl<T, Codec, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, MAX_ITEM_SIZE> {
         Receiver {
             rx: mem::replace(
                 &mut self.rx,
-                tokio::sync::watch::channel(Err(RecvError::RemoteConnect(chmux::ConnectError::ChMux))).1,
+                tokio::sync::watch::channel(Err(RecvError::Connect(chmux::ConnectError::ChMux))).1,
             ),
             remote_send_err_tx: self.remote_send_err_tx.clone(),
             remote_max_item_size: self.remote_max_item_size,
@@ -366,7 +378,7 @@ where
             };
 
             super::send_impl(
-                ErasedSerializer::new::<Result<T, RecvError>, Codec>(),
+                ErasedSerializer::new::<CompactResult<T, RecvError>, Codec>(),
                 Box::new(rx),
                 raw_tx,
                 raw_rx,
@@ -414,6 +426,7 @@ where
         }
 
         // Create channels.
+        let data = data.map_err(|err| RecvError::Remote(Some(Box::new(err))));
         let (tx, rx) = tokio::sync::watch::channel(data);
         let (remote_send_err_tx, remote_send_err_rx) = tokio::sync::mpsc::unbounded_channel();
         let (receiver_rate_limit_tx, receiver_rate_limit_rx) = rate_limit_channel(receiver_rate_limit);
@@ -423,13 +436,13 @@ where
             let (raw_tx, raw_rx) = match request.accept().await {
                 Ok(tx_rx) => tx_rx,
                 Err(err) => {
-                    let _ = tx.send(Err(RecvError::RemoteListen(err)));
+                    let _ = tx.send(Err(RecvError::Listen(err)));
                     return;
                 }
             };
 
             super::recv_impl(
-                ErasedDeserializer::new::<Result<T, RecvError>, Codec>(),
+                ErasedDeserializer::new::<CompactResult<T, RecvError>, Codec>(),
                 Box::new(tx),
                 raw_tx,
                 raw_rx,

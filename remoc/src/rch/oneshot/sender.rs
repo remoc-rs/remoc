@@ -99,6 +99,9 @@ where
     Codec: codec::Codec,
 {
     /// Sends a value over this channel.
+    ///
+    /// `Ok` means that the value was queued for sending; the returned handle
+    /// reports whether it was sent.
     pub fn send(self, value: T) -> Result<Sending<T>, SendError<T>> {
         self.0.try_send(value).map_err(|err| err.into())
     }

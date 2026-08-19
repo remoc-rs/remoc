@@ -13,6 +13,7 @@ use super::{
 use crate::{
     RemoteSend, chmux,
     codec::{self, ErasedDeserializer, ErasedSerializer},
+    versioned::result::Result as CompactResult,
 };
 
 /// An error occurred during sending over an mpsc channel.
@@ -21,23 +22,23 @@ pub enum SendError {
     /// The receiver was dropped or the connection failed.
     Closed,
     /// Sending to a remote endpoint failed.
-    RemoteSend(base::SendErrorKind),
+    Send(base::SendErrorKind),
     /// Connecting a sent channel failed.
-    RemoteConnect(chmux::ConnectError),
+    Connect(chmux::ConnectError),
     /// Listening to a received channel failed.
-    RemoteListen(chmux::ListenerError),
+    Listen(chmux::ListenerError),
     /// Forwarding at a remote endpoint to another remote endpoint failed.
-    RemoteForward,
+    Forward,
 }
 
 crate::versioned::compact::impl_enum! {
     SendError,
     variants {
         Closed => "_0",
-        RemoteSend(err: base::SendErrorKind) => "_1",
-        RemoteConnect(err: chmux::ConnectError) => "_2",
-        RemoteListen(err: chmux::ListenerError) => "_3",
-        RemoteForward => "_4",
+        Send(err: base::SendErrorKind) => "_1",
+        Connect(err: chmux::ConnectError) => "_2",
+        Listen(err: chmux::ListenerError) => "_3",
+        Forward => "_4",
     }
 }
 
@@ -50,14 +51,14 @@ impl SendError {
     /// True, if the remote endpoint was dropped or the connection failed.
     pub fn is_disconnected(&self) -> bool {
         match self {
-            Self::RemoteSend(err) => err.is_disconnected(),
-            Self::Closed | Self::RemoteConnect(_) | Self::RemoteListen(_) | Self::RemoteForward => true,
+            Self::Send(err) => err.is_disconnected(),
+            Self::Closed | Self::Connect(_) | Self::Listen(_) | Self::Forward => true,
         }
     }
 
     /// Whether the error is caused by the item to be sent.
     pub fn is_item_specific(&self) -> bool {
-        matches!(self, Self::RemoteSend(err) if err.is_item_specific())
+        matches!(self, Self::Send(err) if err.is_item_specific())
     }
 }
 
@@ -79,10 +80,10 @@ impl fmt::Display for SendError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Closed => write!(f, "channel is closed"),
-            Self::RemoteSend(err) => write!(f, "send error: {err}"),
-            Self::RemoteConnect(err) => write!(f, "connect error: {err}"),
-            Self::RemoteListen(err) => write!(f, "listen error: {err}"),
-            Self::RemoteForward => write!(f, "forwarding error"),
+            Self::Send(err) => write!(f, "send error: {err}"),
+            Self::Connect(err) => write!(f, "connect error: {err}"),
+            Self::Listen(err) => write!(f, "listen error: {err}"),
+            Self::Forward => write!(f, "forwarding error"),
         }
     }
 }
@@ -92,10 +93,10 @@ impl Error for SendError {}
 impl From<RemoteSendError> for SendError {
     fn from(err: RemoteSendError) -> Self {
         match err {
-            RemoteSendError::Send(err) => Self::RemoteSend(err),
-            RemoteSendError::Connect(err) => Self::RemoteConnect(err),
-            RemoteSendError::Listen(err) => Self::RemoteListen(err),
-            RemoteSendError::Forward => Self::RemoteForward,
+            RemoteSendError::Send(err) => Self::Send(err),
+            RemoteSendError::Connect(err) => Self::Connect(err),
+            RemoteSendError::Listen(err) => Self::Listen(err),
+            RemoteSendError::Forward => Self::Forward,
             RemoteSendError::Closed => Self::Closed,
         }
     }
@@ -201,10 +202,10 @@ where
     ///
     /// This method fails if all receivers have been dropped or become disconnected.
     ///
+    /// `Ok` means that the value was queued for sending.
+    ///
     /// # Error reporting
-    /// Sending and error reporting are done asynchronously.
-    /// Thus, the reporting of an error may be delayed and this function may
-    /// return errors caused by previous invocations.
+    /// An error may be delayed and thus be caused by a previous invocation.
     pub fn send(&self, value: T) -> Result<(), SendError> {
         match self.inner.as_ref().unwrap().tx.send(Ok(value)) {
             Ok(()) => Ok(()),
@@ -442,13 +443,13 @@ where
             let (raw_tx, raw_rx) = match connect.await {
                 Ok(tx_rx) => tx_rx,
                 Err(err) => {
-                    let _ = tx.send(Err(RecvError::RemoteConnect(err)));
+                    let _ = tx.send(Err(RecvError::Connect(err)));
                     return;
                 }
             };
 
             super::recv_impl(
-                ErasedDeserializer::new::<Result<T, RecvError>, Codec>(),
+                ErasedDeserializer::new::<CompactResult<T, RecvError>, Codec>(),
                 Box::new(tx),
                 raw_tx,
                 raw_rx,
@@ -495,12 +496,12 @@ where
         } = TransportedSender::deserialize(deserializer)?;
         let max_item_size = usize::try_from(max_item_size).unwrap_or(usize::MAX);
         let (sender_rate_limit_tx, sender_rate_limit_rx) = tokio::sync::watch::channel(sender_rate_limit);
-        if data.is_err() {
+        let Ok(data) = data else {
             return Err(serde::de::Error::custom("received watch data with error"));
-        }
+        };
 
         // Create internal communication channels.
-        let (tx, rx) = tokio::sync::watch::channel(data);
+        let (tx, rx) = tokio::sync::watch::channel(Ok(data));
         let (remote_send_err_tx, remote_send_err_rx) = tokio::sync::mpsc::unbounded_channel();
         let remote_send_err_tx2 = remote_send_err_tx.clone();
         let sender_rate_limit_rx2 = sender_rate_limit_rx.clone();
@@ -520,7 +521,7 @@ where
             };
 
             super::send_impl(
-                ErasedSerializer::new::<Result<T, RecvError>, Codec>(),
+                ErasedSerializer::new::<CompactResult<T, RecvError>, Codec>(),
                 Box::new(rx),
                 raw_tx,
                 raw_rx,

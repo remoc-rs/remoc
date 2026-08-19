@@ -500,10 +500,10 @@ async fn max_item_size_exceeded() {
     println!("Sending one more element to obtain error");
     let res = tx.send(vec![1; 1]);
     println!("Result: {res:?}");
-    assert!(matches!(res, Err(SendError::RemoteSend(SendErrorKind::MaxItemSizeExceeded))));
+    assert!(matches!(res, Err(SendError::Send(SendErrorKind::MaxItemSizeExceeded))));
 
     // Test error clearing.
-    assert!(matches!(tx.error(), Some(SendError::RemoteSend(SendErrorKind::MaxItemSizeExceeded))));
+    assert!(matches!(tx.error(), Some(SendError::Send(SendErrorKind::MaxItemSizeExceeded))));
     tx.clear_error();
     assert!(tx.error().is_none());
     tx.check().unwrap();
@@ -569,7 +569,7 @@ async fn max_item_size_exceeded_check() {
     tx.closed().await;
     let res = tx.check();
     println!("Sender check result: {res:?}");
-    assert!(matches!(res, Err(SendError::RemoteSend(SendErrorKind::MaxItemSizeExceeded))));
+    assert!(matches!(res, Err(SendError::Send(SendErrorKind::MaxItemSizeExceeded))));
 
     println!("Waiting for receive task");
     assert!(matches!(recv_task.await.unwrap(), Err(ChangedError::Closed)));

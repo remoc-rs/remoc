@@ -95,7 +95,7 @@ async fn calling_an_unserved_object() {
     let client = b_rx.recv().await.unwrap().unwrap();
 
     // While it is served, calls work.
-    let serving = tokio::spawn(async move { server.serve(true).await });
+    let serving = wokio::spawn(async move { server.serve(true).await });
     assert_eq!(client.greet().await.unwrap(), "hello");
 
     // Once serving has finished, they are refused with a reason that says why.

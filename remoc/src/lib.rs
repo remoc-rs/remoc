@@ -111,12 +111,12 @@
 //! 5. Send additional channel halves, RTC clients, or remote objects wherever
 //!    they are needed.
 //!
-//! The complete [example](#example) below demonstrates the base-channel
-//! approach in one process. For separate client and server crates using remote
-//! trait calling, see the
+//! The [channel example](#channels) below demonstrates the base-channel approach
+//! in one process and the [RPC example](#remote-procedure-calls) the remote trait
+//! calling approach. For separate client and server crates, see the
 //! [RTC example](https://github.com/remoc-rs/remoc/tree/master/examples/rtc).
 //!
-//! # Connecting
+//! ## Connecting
 //!
 //! Remoc implements no transport itself and thus depends on no networking crate;
 //! it runs over any byte stream you already have.
@@ -138,7 +138,7 @@
 //! [Sink]: futures::Sink
 //! [Stream]: futures::Stream
 //!
-//! # Connection lifecycle
+//! ## Connection lifecycle
 //!
 //! [Connect::io] and [Connect::framed] return a dispatcher future alongside
 //! the base channel; nothing is sent or received until it is polled, usually
@@ -175,6 +175,19 @@
 //!
 //! These combine freely: an RTC method can take or return a channel, and a
 //! channel's item can contain a remote object.
+//!
+//! ## Local use
+//!
+//! The channels in [rch], [RTC](rtc) clients and [remote objects](robj) also work when
+//! both halves stay within one process, without establishing a connection at all.
+//! Values are then passed directly and are serialized only once a half has actually
+//! been sent to a remote endpoint, making local use nearly as cheap as the
+//! corresponding [tokio::sync] channel.
+//!
+//! Thus the same code can run in one process or split over a connection, making it a
+//! deployment decision whether a component is local or remote.
+//! It also allows a client and server design to be tested without any transport.
+//! The involved types must implement [RemoteSend] either way.
 //!
 //! # Forward and backward compatibility
 //!
@@ -227,8 +240,10 @@
 //!
 //! # Example
 //!
-//! This is a short example; for a fully worked remote trait calling (RTC) example
-//! see the [examples directory](https://github.com/remoc-rs/remoc/tree/master/examples).
+//! The following examples show the two most common styles: exchanging values over
+//! channels, and calling methods on a remote object.
+//!
+//! ## Channels
 //!
 //! In the following example the server listens on TCP port 9870 and the client connects to it.
 //! Then both ends establish a Remoc connection using [Connect::io] over the TCP connection.
@@ -343,6 +358,108 @@ async fn server(mut rx: rch::base::Receiver<CountReq>) {
 ```
 "##
 )]
+//!
+//! ## Remote procedure calls
+//!
+//! Channels are the foundation, but a remote endpoint that should expose several
+//! related methods is usually better served by [remote trait calling](rtc).
+//! Tagging a trait generates a client that implements it and servers that execute
+//! the calls on your object.
+//!
+//! In the following example the server listens on TCP port 9871 and sends the counter
+//! client to the client, which then calls the trait methods on it.
+//! Each call is transferred over the connection and executed on the counter object
+//! held by the server.
+//!
+#![cfg_attr(
+    feature = "rtc",
+    doc = r##"
+```
+use std::{net::Ipv4Addr, sync::Arc};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::RwLock;
+use remoc::prelude::*;
+use remoc::rtc::CallError;
+
+// Tagging the trait generates CounterClient and the CounterServer* types.
+#[rtc::remote]
+pub trait Counter {
+    async fn value(&self) -> Result<u32, CallError>;
+    async fn increase(&mut self, by: u32) -> Result<(), CallError>;
+}
+
+// Server implementation object.
+pub struct CounterObj {
+    value: u32,
+}
+
+impl Counter for CounterObj {
+    async fn value(&self) -> Result<u32, CallError> {
+        Ok(self.value)
+    }
+
+    async fn increase(&mut self, by: u32) -> Result<(), CallError> {
+        self.value += by;
+        Ok(())
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    // For demonstration we run both client and server in
+    // the same process.
+    tokio::join!(connect_client(), connect_server());
+}
+
+// This would be run on the server.
+async fn connect_server() {
+    // Accept TCP connection.
+    let listener =
+        TcpListener::bind((Ipv4Addr::LOCALHOST, 9871)).await.unwrap();
+    let (socket, _) = listener.accept().await.unwrap();
+    let (socket_rx, socket_tx) = socket.into_split();
+
+    // Create the server and its client for the counter object.
+    let counter_obj = Arc::new(RwLock::new(CounterObj { value: 0 }));
+    let (server, client) =
+        CounterServerSharedMut::<_, remoc::codec::Default>::new(counter_obj, 1);
+
+    // Establish the Remoc connection and send the client to the remote endpoint.
+    remoc::Connect::io(remoc::Cfg::default(), socket_rx, socket_tx)
+        .provide(client).await.unwrap();
+
+    // Execute the calls made by the remote endpoint on the counter object.
+    server.serve(true).await.unwrap();
+}
+
+// This would be run on the client.
+async fn connect_client() {
+    // Wait for server to be ready.
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+    // Establish TCP connection.
+    let socket =
+        TcpStream::connect((Ipv4Addr::LOCALHOST, 9871)).await.unwrap();
+    let (socket_rx, socket_tx) = socket.into_split();
+
+    // Establish the Remoc connection and receive the counter client.
+    let mut counter: CounterClient =
+        remoc::Connect::io(remoc::Cfg::default(), socket_rx, socket_tx)
+            .consume().await.unwrap();
+
+    // CounterClient implements Counter, so calling it looks like a local call,
+    // but is executed on the counter object located on the server.
+    counter.increase(5).await.unwrap();
+    assert_eq!(counter.value().await.unwrap(), 5);
+}
+```
+"##
+)]
+//!
+//! [ConnectExt::provide] and [ConnectExt::consume] establish the connection and
+//! transfer the client in one step.
+//! When a connection already exists, the client can be sent over any
+//! [channel](rch) instead, just like the channel halves above.
 //!
 //! # Next steps
 //!

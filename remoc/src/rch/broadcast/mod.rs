@@ -3,6 +3,7 @@
 //! Each sent value is seen by all consumers.
 //! The senders must be local, while the receivers can be sent to
 //! remote endpoints.
+//! The channel also works if every receiver stays local.
 //! Forwarding is supported.
 //!
 //! Its API follows [tokio::sync::broadcast], with receivers that can also be

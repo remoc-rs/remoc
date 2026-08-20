@@ -78,6 +78,9 @@
 //! Send the client to a remote endpoint and then call `serve()` on the server instance to
 //! start processing requests by the client.
 //!
+//! The client can also be used on the endpoint that created it, without a connection
+//! being involved at all; see [local use](crate#local-use).
+//!
 //! # Several calls at once
 //!
 //! A call is an ordinary future, so calls that do not depend on each other need not be

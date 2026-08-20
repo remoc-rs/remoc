@@ -273,7 +273,7 @@ channels a peer can make you open.
 [`Cfg`]: https://docs.rs/remoc/latest/remoc/chmux/struct.Cfg.html
 
 
-## Logging
+## Tracing
 
 Remoc uses the [tracing] crate for logging.
 Setting the log level to `TRACE` logs multiplexer lifetime events and
@@ -289,8 +289,10 @@ The minimum supported Rust version (MSRV) is 1.95.
 
 ## Example
 
-This is a short example; for a fully worked remote trait calling (RTC) example
-see the [examples directory](https://github.com/remoc-rs/remoc/tree/master/examples).
+The following examples show the two most common styles: exchanging values over
+channels, and calling methods on a remote object.
+
+### Channels
 
 In the following example the server listens on TCP port 9870 and the client connects to it.
 Then both ends establish a Remoc connection using `Connect::io()` over the TCP connection.
@@ -311,7 +313,7 @@ async fn main() {
     // For demonstration we run both client and server in
     // the same process. In real life connect_client() and
     // connect_server() would run on different machines.
-    futures::join!(connect_client(), connect_server());
+    tokio::join!(connect_client(), connect_server());
 }
 
 // This would be run on the client.
@@ -391,8 +393,7 @@ async fn client(mut tx: rch::base::Sender<CountReq>) {
 // as it is counted over the MPSC channel sender provided by the client.
 async fn server(mut rx: rch::base::Receiver<CountReq>) {
     // Receive count request and channel sender to use for counting.
-    while let Some(CountReq {up_to, seq_tx}) = rx.recv().await.unwrap()
-    {
+    while let Some(CountReq { up_to, seq_tx }) = rx.recv().await.unwrap() {
         for i in 0..up_to {
             // Send each counted number over provided channel.
             seq_tx.send(i).await.unwrap();
@@ -400,6 +401,103 @@ async fn server(mut rx: rch::base::Receiver<CountReq>) {
     }
 }
 ```
+
+### Remote procedure calls
+
+Channels are the foundation, but a remote endpoint that should expose several
+related methods is usually better served by remote trait calling.
+Tagging a trait generates a client that implements it and servers that execute
+the calls on your object.
+
+In the following example the server listens on TCP port 9871 and sends the counter
+client to the client, which then calls the trait methods on it.
+Each call is transferred over the connection and executed on the counter object
+held by the server.
+
+```rust
+use std::{net::Ipv4Addr, sync::Arc};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::RwLock;
+use remoc::prelude::*;
+use remoc::rtc::CallError;
+
+// Tagging the trait generates CounterClient and the CounterServer* types.
+#[rtc::remote]
+pub trait Counter {
+    async fn value(&self) -> Result<u32, CallError>;
+    async fn increase(&mut self, by: u32) -> Result<(), CallError>;
+}
+
+// Server implementation object.
+pub struct CounterObj {
+    value: u32,
+}
+
+impl Counter for CounterObj {
+    async fn value(&self) -> Result<u32, CallError> {
+        Ok(self.value)
+    }
+
+    async fn increase(&mut self, by: u32) -> Result<(), CallError> {
+        self.value += by;
+        Ok(())
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    // For demonstration we run both client and server in
+    // the same process.
+    tokio::join!(connect_client(), connect_server());
+}
+
+// This would be run on the server.
+async fn connect_server() {
+    // Accept TCP connection.
+    let listener =
+        TcpListener::bind((Ipv4Addr::LOCALHOST, 9871)).await.unwrap();
+    let (socket, _) = listener.accept().await.unwrap();
+    let (socket_rx, socket_tx) = socket.into_split();
+
+    // Create the server and its client for the counter object.
+    let counter_obj = Arc::new(RwLock::new(CounterObj { value: 0 }));
+    let (server, client) =
+        CounterServerSharedMut::<_, remoc::codec::Default>::new(counter_obj, 1);
+
+    // Establish the Remoc connection and send the client to the remote endpoint.
+    remoc::Connect::io(remoc::Cfg::default(), socket_rx, socket_tx)
+        .provide(client).await.unwrap();
+
+    // Execute the calls made by the remote endpoint on the counter object.
+    server.serve(true).await.unwrap();
+}
+
+// This would be run on the client.
+async fn connect_client() {
+    // Wait for server to be ready.
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+    // Establish TCP connection.
+    let socket =
+        TcpStream::connect((Ipv4Addr::LOCALHOST, 9871)).await.unwrap();
+    let (socket_rx, socket_tx) = socket.into_split();
+
+    // Establish the Remoc connection and receive the counter client.
+    let mut counter: CounterClient =
+        remoc::Connect::io(remoc::Cfg::default(), socket_rx, socket_tx)
+            .consume().await.unwrap();
+
+    // CounterClient implements Counter, so calling it looks like a local call,
+    // but is executed on the counter object located on the server.
+    counter.increase(5).await.unwrap();
+    assert_eq!(counter.value().await.unwrap(), 5);
+}
+```
+
+`ConnectExt::provide` and `ConnectExt::consume` establish the connection and
+transfer the client in one step.
+When a connection already exists, the client can be sent over any channel
+instead, just like the channel halves above.
 
 ## Development
 

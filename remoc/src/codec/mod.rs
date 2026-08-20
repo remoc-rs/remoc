@@ -48,26 +48,41 @@
 //!
 //! # Crate features
 //!
-//! Each codec is gated by the corresponding crate feature `codec-*`, i.e.
-//! the JSON codec is only available if the crate features `codec-json` is enabled.
-//! The crate feature `full-codecs` enables all codecs.
-//!
-//! The following features enable additional codecs:
-//!
-//!   * `codec-bincode` -- enables the Bincode 1 codec
-//!   * `codec-bincode2` -- enables the Bincode 2 codec
-//!   * `codec-ciborium` -- enables the CBOR codec
-//!   * `codec-json` -- enables the JSON codec
-//!   * `codec-message-pack` -- enables the MessagePack codec
-//!   * `codec-postcard` -- enables the Postcard codec
-//!
-//! The [Postbag codecs](Postbag) are always available.
+//! The [Postbag codecs](Postbag) are always available. Every other codec is gated by
+//! its own `codec-*` crate feature; `full-codecs` enables all of them at once.
 //!
 //! # Transferring binary data efficiently
 //!
-//! Serializing binary data as `Vec<u8>` is slow, since [serde] encodes it element by
-//! element. See the [rch module](crate::rch#transferring-binary-data-efficiently)
-//! documentation for how to avoid this.
+//! [Serde](serde) treats `Vec<u8>` and `[u8; N]` like any other sequence and thus
+//! serializes them element by element.
+//! This is much slower than handling the data as one contiguous block and easily
+//! becomes the bottleneck when transferring larger amounts of binary data.
+//! This applies to every value that Remoc transfers.
+//!
+//! The most straightforward remedy is to use [`bytes::Bytes`] instead of `Vec<u8>`,
+//! which serializes as a single byte block and additionally is cheap to clone:
+//!
+//! ```
+//! # use serde::{Serialize, Deserialize};
+//! use bytes::Bytes;
+//!
+//! #[derive(Serialize, Deserialize)]
+//! struct Message {
+//!     data: Bytes,
+//! }
+//! ```
+//!
+//! If you must keep a `Vec<u8>`, annotate the field with
+//! [`serde_bytes`](https://docs.rs/serde_bytes) to get the same wire format and speed:
+//!
+//! ```
+//! # use serde::{Serialize, Deserialize};
+//! #[derive(Serialize, Deserialize)]
+//! struct Message {
+//!     #[serde(with = "serde_bytes")]
+//!     data: Vec<u8>,
+//! }
+//! ```
 //!
 
 use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};

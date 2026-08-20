@@ -211,6 +211,34 @@ crate::versioned::compact::impl_enum! {
     }
 }
 
+impl ClosedReason {
+    /// The reason for closure reported by a send error over a chmux channel.
+    ///
+    /// Returns [`None`] if the error is specific to the sent item and thus does not
+    /// close the channel.
+    pub(crate) fn from_send_error_kind(err: &base::SendErrorKind) -> Option<Self> {
+        match err {
+            // The item can be sent again, thus the channel is still usable.
+            err if err.is_item_specific() => None,
+            // The remote endpoint dropped the receiving half of the channel or
+            // never took it over, because the message carrying it was dropped.
+            base::SendErrorKind::Send(
+                chmux::SendError::Closed { .. } | chmux::SendError::Rejected { no_ports: false },
+            ) => Some(Self::Dropped),
+            _ => Some(Self::Failed),
+        }
+    }
+
+    /// The reason for closure reported by a failed connect of a chmux channel.
+    pub(crate) fn from_connect_error(err: &chmux::ConnectError) -> Self {
+        match err {
+            // The remote endpoint never took the channel over.
+            chmux::ConnectError::Rejected => Self::Dropped,
+            _ => Self::Failed,
+        }
+    }
+}
+
 /// Back channel message that receiver has been closed.
 pub(crate) const BACKCHANNEL_MSG_CLOSE: u8 = 0x01;
 

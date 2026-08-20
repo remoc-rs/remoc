@@ -67,14 +67,14 @@ impl<T> SendError<T> {
 
     /// Returns the reason the channel was disconnected.
     ///
-    /// Returns [None] if the error is not due to the channel being disconnected.
-    /// Currently this can only happen if a serialization error occurred.
+    /// Returns [None] if the error is not due to the channel being disconnected,
+    /// i.e. if it is specific to the item that was sent.
     pub fn closed_reason(&self) -> Option<ClosedReason> {
         match self {
-            Self::Send(base::SendErrorKind::Serialize(_)) => None,
-            Self::Send(base::SendErrorKind::Send(chmux::SendError::Closed { .. })) => Some(ClosedReason::Dropped),
             Self::Closed(_) => Some(ClosedReason::Closed),
-            _ => Some(ClosedReason::Failed),
+            Self::Send(err) => ClosedReason::from_send_error_kind(err),
+            Self::Connect(err) => Some(ClosedReason::from_connect_error(err)),
+            Self::Listen(_) | Self::Forward => Some(ClosedReason::Failed),
         }
     }
 
@@ -575,7 +575,14 @@ where
     pub fn closed_reason(&self) -> Option<ClosedReason> {
         match (self.closed_rx.borrow().clone(), self.remote_send_err_rx.borrow().as_ref()) {
             (Some(reason), _) => Some(reason),
-            (None, Some(_)) => Some(ClosedReason::Failed),
+            (None, Some(err)) => Some(match err {
+                RemoteSendError::Closed => ClosedReason::Closed,
+                RemoteSendError::Send(err) => {
+                    ClosedReason::from_send_error_kind(err).unwrap_or(ClosedReason::Failed)
+                }
+                RemoteSendError::Connect(err) => ClosedReason::from_connect_error(err),
+                RemoteSendError::Listen(_) | RemoteSendError::Forward => ClosedReason::Failed,
+            }),
             (None, None) => None,
         }
     }

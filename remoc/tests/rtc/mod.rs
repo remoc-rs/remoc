@@ -6,6 +6,7 @@ mod assoc_qualified;
 mod assoc_simple;
 mod async_trait;
 mod default;
+mod disconnect;
 mod errors;
 mod generics;
 mod generics_non_clone;

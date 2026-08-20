@@ -1196,3 +1196,27 @@ async fn closed_reason_of_send_errors() {
         );
     }
 }
+
+/// Forwarding ends without error when the remote endpoint drops the receiver, even
+/// while no value is being forwarded.
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
+async fn forwarding_ends_when_remote_receiver_is_dropped() {
+    crate::init();
+    let ((mut a_tx, _a_rx), (_b_tx, mut b_rx)) = loop_channel::<watch::Receiver<i16>>().await;
+
+    println!("Forwarding a local channel to the remote endpoint");
+    let (local_tx, local_rx) = tokio::sync::watch::channel(1i16);
+    let (fwd, rx) = watch::forward(local_rx);
+    a_tx.send(rx).await.unwrap();
+
+    println!("Taking the receiver over and dropping it");
+    let remote_rx = b_rx.recv().await.unwrap().unwrap();
+    drop(remote_rx);
+
+    // No value is forwarded and the local sender is kept alive, thus forwarding can only
+    // end by noticing that the receiving endpoint went away.
+    println!("Waiting for forwarding to end");
+    fwd.await.expect("forwarding to a dropped receiver reported an error");
+    drop(local_tx);
+}

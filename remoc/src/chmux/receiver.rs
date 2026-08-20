@@ -619,7 +619,7 @@ impl Receiver {
             return Ok(None);
         }
 
-        // Chunk if chunked reception is in progress.
+        // Chunk if chunked reception is already in progress.
         if let Receiving::Chunks { chunks, completed } = &self.receiving {
             if !chunks.is_empty() || !*completed {
                 return Ok(Some(Received::Chunks));

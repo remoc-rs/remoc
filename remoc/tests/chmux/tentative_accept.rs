@@ -1,40 +1,12 @@
 //! Tentative acceptance of pre-connected connection requests.
 
-use futures::{future::try_join, stream::StreamExt};
 use std::time::Duration;
 
 #[cfg(all(target_family = "wasm", feature = "js"))]
 use wasm_bindgen_test::wasm_bindgen_test;
 
-use crate::loop_transport;
-use remoc::chmux::{
-    self, Client, Listener, OnPortsExhausted, Received, RecvError, SendError, TentativeAcceptError,
-};
-
-fn cfg() -> chmux::Cfg {
-    chmux::Cfg { connection_timeout: Some(Duration::from_secs(1)), connect_queue: 2, ..Default::default() }
-}
-
-/// Connects two multiplexers over an in-memory transport and runs them.
-async fn connected() -> (Client, Listener) {
-    connected_with_cfg(cfg(), cfg()).await
-}
-
-/// Connects two multiplexers with individual configurations and runs them.
-async fn connected_with_cfg(a_cfg: chmux::Cfg, b_cfg: chmux::Cfg) -> (Client, Listener) {
-    loop_transport!(0, a_tx, a_rx, b_tx, b_rx);
-    let ((a_mux, a_client, _a_server), (b_mux, _b_client, b_server)) =
-        try_join(chmux::ChMux::new(a_cfg, a_tx, a_rx), chmux::ChMux::new(b_cfg, b_tx, b_rx)).await.unwrap();
-
-    wokio::spawn(async move {
-        let _ = a_mux.run().await;
-    });
-    wokio::spawn(async move {
-        let _ = b_mux.run().await;
-    });
-
-    (a_client, b_server)
-}
+use super::{cfg, connected, connected_with_cfg, spawn_forwarder};
+use remoc::chmux::{self, OnPortsExhausted, Received, RecvError, SendError, TentativeAcceptError};
 
 /// A tentatively accepted port that is rejected afterwards is reported as rejected
 /// to the requester, even though data has already been exchanged over it.
@@ -147,20 +119,6 @@ async fn tentative_accept_requires_pre_connect() {
 
     // The request is rejected when it is dropped.
     assert!(matches!(connect.await, Err(chmux::ConnectError::Rejected)));
-}
-
-/// Forwards a channel between two multiplexers, so that ports sent over it are
-/// forwarded as well.
-fn spawn_forwarder(
-    (mut in_tx, mut in_rx): (chmux::Sender, chmux::Receiver),
-    (mut out_tx, mut out_rx): (chmux::Sender, chmux::Receiver),
-) {
-    wokio::spawn(async move {
-        let _ = in_rx.forward(&mut out_tx).await;
-    });
-    wokio::spawn(async move {
-        let _ = out_rx.forward(&mut in_tx).await;
-    });
 }
 
 /// A port that is rejected by the final endpoint is reported as rejected to the

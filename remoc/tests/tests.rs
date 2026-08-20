@@ -17,6 +17,9 @@ mod chmux;
 mod codec;
 
 #[cfg(feature = "rch")]
+mod connect;
+
+#[cfg(feature = "rch")]
 mod rch;
 
 #[cfg(feature = "rfn")]

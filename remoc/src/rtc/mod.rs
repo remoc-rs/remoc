@@ -471,6 +471,10 @@ impl From<oneshot::RecvError> for CallError {
     fn from(err: oneshot::RecvError) -> Self {
         match err {
             oneshot::RecvError::Closed => Self::Dropped,
+            oneshot::RecvError::Receive(base::RecvError::Receive(chmux::RecvError::Rejected {
+                no_ports: false,
+            })) => Self::NotServed,
+            oneshot::RecvError::Connect(chmux::ConnectError::Rejected) => Self::NotServed,
             oneshot::RecvError::Receive(err) => Self::Receive(err),
             oneshot::RecvError::Connect(err) => Self::Connect(err),
             oneshot::RecvError::Listen(err) => Self::Listen(err),

@@ -23,16 +23,16 @@ pub enum RecvError {
     ///
     /// Attempting to receive again will return the oldest message still retained by the channel.
     Lagged,
-    /// Receiving from a remote endpoint failed.
+    /// Receiving or decoding a value failed; see [`base::RecvError`].
     Receive(base::RecvError),
-    /// Connecting a sent channel failed.
+    /// Opening a channel contained in a received value failed; see [`chmux::ConnectError`].
     Connect(chmux::ConnectError),
-    /// Listening for a connection from a received channel failed.
+    /// Preparing a channel contained in a received value failed; see [`chmux::ListenerError`].
     Listen(chmux::ListenerError),
-    /// Remote error.
+    /// A failure was reported by an endpoint forwarding this channel.
     ///
-    /// The error occurred at the endpoint the value was received from.
-    /// [`None`] if that endpoint reported an error this one does not know.
+    /// The nested error is [`None`] when that endpoint reported a newer error
+    /// variant that this version of Remoc does not recognize.
     Remote(Option<Box<RecvError>>),
 }
 
@@ -115,7 +115,7 @@ impl TryFrom<TryRecvError> for RecvError {
 
 impl Error for RecvError {}
 
-/// An error occurred during trying to receive over a broadcast channel.
+/// An error returned when attempting to receive without waiting.
 #[derive(Clone, Debug)]
 pub enum TryRecvError {
     /// The channel is currently empty. There are still active sender, so data may yet become available.
@@ -126,16 +126,16 @@ pub enum TryRecvError {
     ///
     /// Attempting to receive again will return the oldest message still retained by the channel.
     Lagged,
-    /// Receiving from a remote endpoint failed.
+    /// Receiving or decoding a value failed; see [`base::RecvError`].
     Receive(base::RecvError),
-    /// Connecting a sent channel failed.
+    /// Opening a channel contained in a received value failed; see [`chmux::ConnectError`].
     Connect(chmux::ConnectError),
-    /// Listening for a connection from a received channel failed.
+    /// Preparing a channel contained in a received value failed; see [`chmux::ListenerError`].
     Listen(chmux::ListenerError),
-    /// Remote error.
+    /// A failure was reported by an endpoint forwarding this channel.
     ///
-    /// The error occurred at the endpoint the value was received from.
-    /// [`None`] if that endpoint reported an error this one does not know.
+    /// The nested error is [`None`] when that endpoint reported a newer error
+    /// variant that this version of Remoc does not recognize.
     Remote(Option<Box<RecvError>>),
 }
 
@@ -235,12 +235,14 @@ impl From<RecvError> for TryRecvError {
 
 impl Error for TryRecvError {}
 
-/// Receiving-half of the broadcast channel.
+/// The receiving half of a broadcast channel.
 ///
-/// Can be sent over a remote channel.
+/// Each receiver observes values sent after it subscribed. A slow receiver can
+/// fall behind; in that case [`recv`](Self::recv) returns [`RecvError::Lagged`]
+/// once and later calls resume with retained values.
 ///
-/// This can be converted into a [Stream](futures::Stream) of values by wrapping it into
-/// a [ReceiverStream].
+/// Receivers may be transferred to remote endpoints and adapted to
+/// [`Stream`](futures::Stream) with [`ReceiverStream`].
 pub struct Receiver<
     T,
     Codec = codec::Default,
@@ -276,6 +278,16 @@ where
     }
 
     /// Receives the next value for this receiver.
+    ///
+    /// Returns [`RecvError::Closed`] after all senders have been dropped and all
+    /// retained values have been received. If this receiver lagged behind far
+    /// enough to lose values, the next call returns [`RecvError::Lagged`] and a
+    /// later receive resumes at the oldest value still retained.
+    ///
+    /// # Cancel safety
+    ///
+    /// This method is cancel safe. If canceled before returning, no value is
+    /// consumed.
     pub async fn recv(&mut self) -> Result<T, RecvError> {
         match self.rx.recv().await {
             Ok(Some(BroadcastMsg::Value(value))) => Ok(value),
@@ -285,7 +297,12 @@ where
         }
     }
 
-    /// Attempts to return a pending value on this receiver without awaiting.
+    /// Attempts to receive the next value without waiting.
+    ///
+    /// Returns [`TryRecvError::Empty`] if no value is currently available but the
+    /// channel remains open. If lag was detected, this returns
+    /// [`TryRecvError::Lagged`] and the following receive resumes at the oldest
+    /// retained value.
     pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
         match self.rx.try_recv() {
             Ok(BroadcastMsg::Value(value)) => Ok(value),
@@ -323,16 +340,16 @@ pub enum StreamError {
     ///
     /// The next value will be the oldest message still retained by the channel.
     Lagged,
-    /// Receiving from a remote endpoint failed.
+    /// Receiving or decoding a value failed; see [`base::RecvError`].
     Receive(base::RecvError),
-    /// Connecting a sent channel failed.
+    /// Opening a channel contained in a received value failed; see [`chmux::ConnectError`].
     Connect(chmux::ConnectError),
-    /// Listening for a connection from a received channel failed.
+    /// Preparing a channel contained in a received value failed; see [`chmux::ListenerError`].
     Listen(chmux::ListenerError),
-    /// Remote error.
+    /// A failure was reported by an endpoint forwarding this channel.
     ///
-    /// The error occurred at the endpoint the value was received from.
-    /// [`None`] if that endpoint reported an error this one does not know.
+    /// The nested error is [`None`] when that endpoint reported a newer error
+    /// variant that this version of Remoc does not recognize.
     Remote(Option<Box<RecvError>>),
 }
 

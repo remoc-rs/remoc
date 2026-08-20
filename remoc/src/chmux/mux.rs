@@ -82,7 +82,7 @@ enum PortState {
         /// thus no more port credits can be returned.
         receiver_dropped: bool,
         /// Sender has been dropped and SendFinish message has been sent to remote endpoint,
-        /// thus no more data can be send from this port to remote endpoint.
+        /// thus no more data can be sent from this port to the remote endpoint.
         sender_dropped: bool,
         /// Remote receiver has been closed, thus no more data should be sent to remote port.
         remote_receiver_closed: Arc<AtomicBool>,

@@ -296,6 +296,9 @@ impl PortAllocator {
     }
 
     /// Allocates a port connection request.
+    ///
+    /// The request reserves a local port number until it is connected or dropped.
+    /// This fails when all local port numbers are currently in use.
     pub fn connect_req(&self) -> Result<ConnectReq, PortsExhausted> {
         ConnectReq::new(self.clone())
     }
@@ -795,6 +798,9 @@ impl ConnectReq {
     }
 
     /// Sets the id to the specified value.
+    ///
+    /// The remote endpoint can read this value using [`Request::id`](super::Request::id).
+    /// It does not affect port allocation or routing.
     #[must_use]
     pub fn with_id(mut self, id: u32) -> Self {
         self.opts.id = id;
@@ -812,11 +818,11 @@ impl ConnectReq {
         self
     }
 
-    /// Pre-connects the port before the remote endpoint accepts the connection request.
+    /// Provisionally opens the port before the remote endpoint accepts the connection request.
     ///
-    /// This allows sending data immediately over the port, even before the remote endpoint
-    /// replies to the connection request, thus saving the round-trip time between the local and
-    /// remote endpoint.    
+    /// A pre-connected port can carry data while acceptance is still pending, avoiding a
+    /// round trip before the first data is sent. The remote listener can still reject the
+    /// connection, in which case operations on the port fail.
     ///
     /// If the remote endpoint does not support pre-connection, this is ignored.
     ///
@@ -831,8 +837,8 @@ impl ConnectReq {
         self
     }
 
-    /// Pre-connects the port before the remote endpoint accepts the connection request,
-    /// if a slot in the connect queue is readily available.
+    /// Provisionally opens the port before the remote endpoint accepts the connection
+    /// request, if a slot in the connect queue is readily available.
     ///
     /// If no slot is available in the connect queue, the port is not pre-connected.
     ///

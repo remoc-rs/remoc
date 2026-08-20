@@ -4,8 +4,9 @@
 //! The channel also works if both halves are local.
 //! Forwarding over multiple connections is supported.
 //!
-//! This has similar functionality as [tokio::sync::oneshot] with the additional
-//! ability to work over remote connections.
+//! Its API follows [tokio::sync::oneshot], with channel halves that can also be
+//! transferred over Remoc connections. The [`Sender`] is consumed when sending,
+//! while the [`Receiver`] is a future that resolves to the transmitted value.
 //!
 //! # Example
 //!
@@ -57,7 +58,7 @@ mod sender;
 pub use receiver::{Receiver, RecvError, TryRecvError};
 pub use sender::{SendError, Sender};
 
-/// Create a new one-shot channel for sending single values across asynchronous tasks.
+/// Creates a one-shot channel for sending one value.
 ///
 /// The sender and receiver may be sent to remote endpoints via channels.
 pub fn channel<T, Codec>() -> (Sender<T, Codec>, Receiver<T, Codec>)
@@ -75,6 +76,9 @@ where
 ///
 /// The returned [`Forwarding`] future resolves once forwarding has completed or an error occurs.
 /// The returned receiver may be sent to remote endpoints via channels.
+///
+/// Dropping the [`Forwarding`] handle does not stop forwarding. Call
+/// [`Forwarding::stop`] to stop it explicitly.
 pub fn forward<T, Codec>(local_rx: tokio::sync::oneshot::Receiver<T>) -> (Forwarding, Receiver<T, Codec>)
 where
     T: RemoteSend,

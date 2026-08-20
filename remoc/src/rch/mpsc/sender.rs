@@ -27,18 +27,23 @@ use crate::{
     codec::{self, ErasedDeserializer, ErasedSerializer},
     versioned::result::Result as CompactResult,
 };
-/// An error occurred during sending over an mpsc channel.
+/// An error returned when a value cannot be queued for sending.
+///
+/// The [`Closed`](Self::Closed) variant contains the value that was not queued.
+/// Other variants can describe failures reported by an earlier asynchronous
+/// transfer; use [`is_item_specific`](Self::is_item_specific) to determine
+/// whether a failure applies to the value passed to the current operation.
 #[derive(Clone, custom_debug::Debug)]
 pub enum SendError<T> {
-    /// The remote end closed the channel.
+    /// The receiver closed the channel before this value could be queued.
     Closed(#[debug(skip)] T),
-    /// Sending to a remote endpoint failed.
+    /// Encoding or transferring a value failed; see [`base::SendErrorKind`].
     Send(base::SendErrorKind),
-    /// Connecting a sent channel failed.
+    /// Opening a channel carried by a value failed; see [`chmux::ConnectError`].
     Connect(chmux::ConnectError),
-    /// Listening for a received channel failed.
+    /// Preparing to receive a channel carried by a value failed; see [`chmux::ListenerError`].
     Listen(chmux::ListenerError),
-    /// Forwarding at a remote endpoint to another remote endpoint failed.
+    /// An endpoint forwarding this channel could not complete the transfer.
     Forward,
 }
 
@@ -55,12 +60,12 @@ crate::versioned::compact::impl_enum! {
 }
 
 impl<T> SendError<T> {
-    /// True, if the remote endpoint closed the channel.
+    /// Returns `true` if the receiver explicitly closed the channel.
     pub fn is_closed(&self) -> bool {
         matches!(self, Self::Closed(_))
     }
 
-    /// Returns the reason for why the channel has been disconnected.
+    /// Returns the reason the channel was disconnected.
     ///
     /// Returns [None] if the error is not due to the channel being disconnected.
     /// Currently this can only happen if a serialization error occurred.
@@ -73,7 +78,7 @@ impl<T> SendError<T> {
         }
     }
 
-    /// True, if the remote endpoint closed the channel, was dropped or the connection failed.
+    /// Returns `true` if the channel can no longer transfer values.
     pub fn is_disconnected(&self) -> bool {
         match self {
             Self::Send(err) => err.is_disconnected(),
@@ -81,12 +86,15 @@ impl<T> SendError<T> {
         }
     }
 
-    /// Whether the error is caused by the item to be sent.
+    /// Returns whether the error was caused by the value being sent.
+    ///
+    /// Serialization errors and size-limit errors are item-specific. Connection
+    /// failures and channel closure are not.
     pub fn is_item_specific(&self) -> bool {
         matches!(self, Self::Send(err) if err.is_item_specific())
     }
 
-    /// Returns the error without the contained item.
+    /// Discards the unsent value and returns the same error with `()` in its place.
     pub fn without_item(self) -> SendError<()> {
         match self {
             Self::Closed(_) => SendError::Closed(()),
@@ -138,21 +146,25 @@ impl<T> SendError<T> {
     }
 }
 
-/// An error occurred during trying to send over an mpsc channel.
+/// An error returned by [`Sender::try_send`].
+///
+/// [`Full`](Self::Full) is temporary and indicates that the channel currently
+/// has no capacity. The value is returned in both [`Full`](Self::Full) and
+/// [`Closed`](Self::Closed), allowing the caller to retry or recover it.
 #[derive(Clone, custom_debug::Debug)]
 pub enum TrySendError<T> {
-    /// The remote end closed the channel.
+    /// The receiver closed the channel before this value could be queued.
     Closed(#[debug(skip)] T),
     /// The data could not be sent on the channel because the channel
     /// is currently full and sending would require blocking.
     Full(#[debug(skip)] T),
-    /// Sending to a remote endpoint failed.
+    /// Encoding or transferring a value failed; see [`base::SendErrorKind`].
     Send(base::SendErrorKind),
-    /// Connecting a sent channel failed.
+    /// Opening a channel carried by a value failed; see [`chmux::ConnectError`].
     Connect(chmux::ConnectError),
-    /// Listening for a received channel failed.
+    /// Preparing to receive a channel carried by a value failed; see [`chmux::ListenerError`].
     Listen(chmux::ListenerError),
-    /// Forwarding at a remote endpoint to another remote endpoint failed.
+    /// An endpoint forwarding this channel could not complete the transfer.
     Forward,
 }
 
@@ -170,12 +182,14 @@ crate::versioned::compact::impl_enum! {
 }
 
 impl<T> TrySendError<T> {
-    /// True, if the remote endpoint closed the channel.
+    /// Returns `true` if the receiver explicitly closed the channel.
     pub fn is_closed(&self) -> bool {
         matches!(self, Self::Closed(_))
     }
 
-    /// True, if the remote endpoint closed the channel, was dropped or the connection failed.
+    /// Returns `true` if the channel can no longer transfer values.
+    ///
+    /// This returns `false` for [`Full`](Self::Full).
     pub fn is_disconnected(&self) -> bool {
         match self {
             Self::Send(err) => err.is_disconnected(),
@@ -184,7 +198,7 @@ impl<T> TrySendError<T> {
         }
     }
 
-    /// Whether the error is caused by the item to be sent.
+    /// Returns whether the error was caused by the value being sent.
     pub fn is_item_specific(&self) -> bool {
         matches!(self, Self::Send(err) if err.is_item_specific())
     }
@@ -257,11 +271,18 @@ impl<T> TryFrom<TrySendError<T>> for SendError<T> {
 
 impl<T> Error for TrySendError<T> where T: fmt::Debug {}
 
-/// Send values to the associated [Receiver](super::Receiver), which may be located on a remote endpoint.
+/// The sending half of a bounded MPSC channel.
 ///
-/// Instances are created by the [channel](super::channel) function.
+/// Senders are created by [`channel`](super::channel) and may be cloned or
+/// transferred to other endpoints. The channel remains open until every sender
+/// has been dropped or the receiver closes it.
 ///
-/// This can be converted into a [Sink] accepting values by wrapping it into a [SenderSink].
+/// Use [`send`](Self::send) to wait for buffer capacity or
+/// [`try_send`](Self::try_send) when waiting is not acceptable. Both methods
+/// queue a value for transfer; await the returned [`Sending`] handle to observe
+/// the outcome of that transfer.
+///
+/// A sender can be adapted to [`Sink`] with [`SenderSink`].
 pub struct Sender<T, Codec = codec::Default, const BUFFER: usize = DEFAULT_BUFFER> {
     tx: Weak<tokio::sync::mpsc::Sender<SendReq<T>>>,
     closed_rx: tokio::sync::watch::Receiver<Option<ClosedReason>>,
@@ -388,11 +409,22 @@ where
 
     /// Sends a value over this channel.
     ///
-    /// `Ok` means that the value was queued for sending; the returned handle
-    /// reports whether it was sent.
+    /// This method waits until the channel has capacity. `Ok` means that the value
+    /// was queued for transfer; await the returned [`Sending`] handle to learn
+    /// whether the transfer completed.
     ///
     /// # Error reporting
-    /// An error may be delayed and thus be caused by a previous invocation.
+    ///
+    /// Because transfer happens asynchronously, this method can report an error
+    /// caused by an earlier value. Use [`SendError::is_item_specific`] when the
+    /// distinction matters.
+    ///
+    /// # Cancel safety
+    ///
+    /// If this method is used in [`tokio::select!`] and another branch completes
+    /// first, the value is not queued. Because `send` owns the value, canceling the
+    /// future drops it. Use [`reserve`](Self::reserve) when the value must be
+    /// retained until capacity has been secured.
     pub async fn send(&self, value: T) -> Result<Sending<T>, SendError<T>> {
         if let Some(err) = self.remote_send_err_rx.borrow().as_ref() {
             return Err(SendError::from_remote_send_error(err.clone(), value));
@@ -412,11 +444,14 @@ where
 
     /// Attempts to immediately send a message over this channel.
     ///
-    /// `Ok` means that the value was queued for sending; the returned handle
-    /// reports whether it was sent.
+    /// This method never waits for capacity. If the channel is full, it returns
+    /// [`TrySendError::Full`] containing the value.
+    ///
+    /// `Ok` means that the value was queued for transfer; await the returned
+    /// [`Sending`] handle to learn whether the transfer completed.
     ///
     /// # Error reporting
-    /// An error may be delayed and thus be caused by a previous invocation.
+    /// An error may be delayed and therefore caused by a previous invocation.
     pub fn try_send(&self, value: T) -> Result<Sending<T>, TrySendError<T>> {
         if let Some(err) = self.remote_send_err_rx.borrow().as_ref() {
             return Err(TrySendError::from_remote_send_error(err.clone(), value));
@@ -439,27 +474,35 @@ where
         }
     }
 
-    /// Blocking send to call outside of asynchronous contexts.
+    /// Sends a value while blocking the current thread until capacity is available.
     ///
-    /// `Ok` means that the value was queued for sending; the returned handle
-    /// reports whether it was sent.
+    /// `Ok` means that the value was queued for transfer; the returned
+    /// [`Sending`] handle reports whether the transfer completed.
     ///
     /// # Error reporting
     /// An error may be delayed and thus be caused by a previous invocation.
     ///
     /// # Panics
-    /// This function panics if called within an asynchronous execution context.
+    ///
+    /// Panics if called from an asynchronous execution context.
     pub fn blocking_send(&self, value: T) -> Result<Sending<T>, SendError<T>> {
         wokio::task::block_on(self.send(value))
     }
 
-    /// Wait for channel capacity, returning an owned permit.
-    /// Once capacity to send one message is available, it is reserved for the caller.
+    /// Reserves capacity to send one value.
+    ///
+    /// Once this method returns, the reserved slot belongs to the returned
+    /// [`Permit`]. Dropping the permit without sending releases the capacity.
     ///
     /// # Error reporting
     /// Sending and error reporting are done asynchronously.
     /// Thus, the reporting of an error may be delayed and this function may
     /// return errors caused by previous invocations.
+    ///
+    /// # Cancel safety
+    ///
+    /// This method is cancel safe. If canceled before it returns, no capacity is
+    /// reserved.
     pub async fn reserve(&self) -> Result<Permit<T>, SendError<()>> {
         if let Some(err) = self.remote_send_err_rx.borrow().as_ref() {
             return Err(SendError::from_remote_send_error(err.clone(), ()));
@@ -477,9 +520,10 @@ where
         }
     }
 
-    /// Tries to acquire a slot in the channel without waiting for the slot to become available.
-    /// If capacity to send one message is available, it is reserved for the caller.
-    /// Otherwise an error is returned.
+    /// Tries to reserve capacity for one value without waiting.
+    ///
+    /// If a slot is available, it becomes owned by the returned [`Permit`].
+    /// Dropping that permit without sending releases the capacity again.
     ///
     /// # Error reporting
     /// Sending and error reporting are done asynchronously.
@@ -525,7 +569,7 @@ where
         }
     }
 
-    /// Returns the reason for why the channel has been closed.
+    /// Returns the reason the channel was closed.
     ///
     /// Returns [None] if the channel is not closed.
     pub fn closed_reason(&self) -> Option<ClosedReason> {
@@ -600,17 +644,21 @@ where
     }
 }
 
-/// Owned permit to send one value into the channel.
+/// Reserved capacity to send one value over an MPSC channel.
+///
+/// Permits are created by [`Sender::reserve`] and [`Sender::try_reserve`].
+/// Dropping a permit without calling [`send`](Self::send) releases its capacity.
 pub struct Permit<T>(tokio::sync::mpsc::OwnedPermit<SendReq<T>>);
 
 impl<T> Permit<T>
 where
     T: Send,
 {
-    /// Sends a value using the reserved capacity.
+    /// Queues a value using the reserved capacity.
     ///
-    /// The value is queued for sending; the returned handle reports whether it
-    /// was sent.
+    /// This consumes the permit and hands the value to the channel immediately,
+    /// but transfer still continues asynchronously. The returned [`Sending`]
+    /// handle reports whether that transfer completed.
     pub fn send(self, value: T) -> Sending<T> {
         let (req, sent) = send_req(Ok(value));
         self.0.send(req);

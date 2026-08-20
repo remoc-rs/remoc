@@ -21,13 +21,13 @@ use crate::{RemoteSend, chmux, codec};
 pub enum SendError<T> {
     /// All receivers have been dropped.
     Closed(#[debug(skip)] T),
-    /// Sending to a remote endpoint failed.
+    /// Encoding or transferring a value failed; see [`base::SendErrorKind`].
     Send(base::SendErrorKind),
-    /// Connecting a sent channel failed.
+    /// Opening a channel contained in a value failed; see [`chmux::ConnectError`].
     Connect(chmux::ConnectError),
     /// Listening to a received channel failed.
     Listen(chmux::ListenerError),
-    /// Forwarding at a remote endpoint to another remote endpoint failed.
+    /// An endpoint forwarding this channel could not complete the transfer.
     Forward,
 }
 
@@ -222,6 +222,10 @@ where
     }
 
     /// Creates a new receiver that will receive values sent after this call to subscribe.
+    ///
+    /// The receiver starts empty; previously broadcast values are not replayed.
+    /// `send_buffer` is that receiver's own retention window before it starts
+    /// reporting lagged messages.
     pub fn subscribe<const RECEIVE_BUFFER: usize>(
         &self, send_buffer: usize,
     ) -> Receiver<T, Codec, RECEIVE_BUFFER> {
@@ -235,6 +239,10 @@ where
     }
 
     /// Creates a new receiver with a custom maximum item size.
+    ///
+    /// As with [`subscribe`](Self::subscribe), the receiver sees only future
+    /// broadcasts. Receiving an item larger than `MAX_ITEM_SIZE` fails on that
+    /// receiver even if the broadcast itself was accepted.
     pub fn subscribe_with_max_item_size<const RECEIVE_BUFFER: usize, const MAX_ITEM_SIZE: usize>(
         &self, send_buffer: usize,
     ) -> Receiver<T, Codec, RECEIVE_BUFFER, MAX_ITEM_SIZE> {
@@ -337,7 +345,8 @@ impl<T> Sending<T> {
 
     /// Tries to obtain the result of the sending operation.
     ///
-    /// If the value is still queued for sending `None` is returned.
+    /// If the value is still queued for sending, `None` is returned. Once this
+    /// yields `Some`, the stored result for this receiver has been consumed.
     pub fn try_result(&mut self) -> Option<Result<(), SendingError<T>>> {
         self.0.try_result().map(Self::map_result)
     }

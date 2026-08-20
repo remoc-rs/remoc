@@ -9,9 +9,6 @@
 //! argument if you need more than that.
 //! The arguments and return type of the function must be [remote sendable](crate::RemoteSend).
 //!
-//! Each wrapper spawns an async tasks that processes function execution requests
-//! from the remote endpoint.
-//!
 //! # Usage
 //!
 //! Create a wrapper locally and send it to a remote endpoint, for example over a
@@ -21,8 +18,9 @@
 //! or enum.
 //! Then use the `call` method on the remote endpoint to remotely invoke the local function.
 //!
-//! Note that the function is executed locally.
-//! Only the arguments and return value are transmitted from and to the remote endpoint.
+//! The wrapped function executes on the endpoint where the wrapper was created.
+//! Arguments are transferred to that endpoint and the return value is transferred
+//! back to the caller.
 //!
 //! # Return type
 //!
@@ -74,18 +72,18 @@ use crate::{
 /// An error occurred during calling a remote function.
 #[derive(Clone, Debug)]
 pub enum CallError {
-    /// Provider was dropped or function panicked.
+    /// The provider was dropped before replying, or the remote function panicked.
     Dropped,
-    /// Receiving from a remote endpoint failed.
+    /// Receiving or decoding the result failed; see [`base::RecvError`].
     Receive(base::RecvError),
-    /// Connecting a sent channel failed.
+    /// Opening a channel contained in the result failed; see [`chmux::ConnectError`].
     Connect(chmux::ConnectError),
-    /// Listening for a connection from a received channel failed.
+    /// Preparing a channel contained in the result failed; see [`chmux::ListenerError`].
     Listen(chmux::ListenerError),
-    /// Remote error.
+    /// A failure was reported by an endpoint forwarding the call or result.
     ///
-    /// The error occurred at the endpoint the value was received from.
-    /// [`None`] if that endpoint reported an error this one does not know.
+    /// The nested error is [`None`] when that endpoint reported a newer error
+    /// variant that this version of Remoc does not recognize.
     Remote(Option<Box<CallError>>),
 }
 
@@ -137,7 +135,11 @@ macro_rules! arg_stub {
             R: RemoteSend,
             Codec: codec::Codec,
         {
-            /// Create a new remote function.
+            /// Creates a remote function backed by `fun`.
+            ///
+            /// The provider is retained automatically until the remote function
+            /// is no longer usable. Use the corresponding `provided_*` constructor
+            /// when its lifetime must be controlled explicitly.
             #[allow(unused_mut)]
             pub fn $new <F, Fut>(mut fun: F) -> Self
             where
@@ -147,7 +149,7 @@ macro_rules! arg_stub {
                 Self::new_int(move |( $($arg ,)* )| fun($($arg),*))
             }
 
-            /// Create a new remote function and return it with its provider.
+            /// Creates a remote function backed by `fun` and returns its provider.
             ///
             /// See the [module-level documentation](super) for details.
             #[allow(unused_mut)]
@@ -159,7 +161,11 @@ macro_rules! arg_stub {
                 Self::provided_int(move |( $($arg ,)* )| fun($($arg),*))
             }
 
-            /// Try to call the remote function.
+            /// Calls the remote function and reports transport failures separately.
+            ///
+            /// The returned [`CallError`] represents failure to deliver the call or
+            /// receive its result. Any application-level error contained in `R` is
+            /// returned unchanged.
             #[allow(clippy::too_many_arguments)]
             pub async fn try_call( $( $self_prefix )* self, $( $arg : $arg_type ),* ) -> Result<R, CallError> {
                 self.try_call_int(( $($arg ,)* )).await
@@ -173,9 +179,11 @@ macro_rules! arg_stub {
             RE: RemoteSend + From<CallError>,
             Codec: codec::Codec,
         {
-            /// Call the remote function.
+            /// Calls the remote function.
             ///
-            /// The [CallError] type must be convertible to the functions error type.
+            /// Transport failures are converted into the function's error type using
+            /// [`From<CallError>`](From). This lets callers handle application and
+            /// communication errors through one result.
             #[allow(clippy::too_many_arguments)]
             pub async fn call($( $self_prefix )* self, $( $arg : $arg_type ),*) -> Result<RT, RE> {
                 self.call_int(( $($arg ,)* )).await

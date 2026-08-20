@@ -16,9 +16,9 @@
 //!   * calling of [remote functions] and [trait methods] on a remote object (RPC),
 //!   * [remotely observable collections].
 //!
-//! Remoc is written in 100% safe Rust, builds upon [Tokio], works with any type
-//! and [data format] supported by [Serde] and does not depend on any particular
-//! [transport type].
+//! Remoc is written in 100% safe Rust, builds upon [Tokio], and uses [Serde]
+//! with the compact, forward- and backward-compatible [Postbag] binary codec.
+//! Remoc does not depend on any particular [transport type].
 //!
 //! [single underlying transport]: Connect
 //! [multiple channels]: rch
@@ -29,8 +29,8 @@
 //! [remote functions]: rfn
 //! [trait methods]: rtc
 //! [Tokio]: tokio
-//! [data format]: codec
 //! [Serde]: serde
+//! [Postbag]: codec::Postbag
 //! [transport type]: Connect
 //! [remotely observable collections]: robs
 //!
@@ -43,10 +43,12 @@
 //! Remoc extends this programming model to distributed systems by providing
 //! channels that work seamlessly over remote connections.
 //!
-//! For that it uses Serde to serialize and deserialize data as it gets transmitted
-//! over an underlying transport,
-//! which might be a [TCP network connection], a [WebSocket], [UNIX pipe],
-//! or even a [serial link].
+//! For that it uses Serde and the [Postbag] binary codec to
+//! serialize and deserialize data as it is transmitted over an underlying
+//! transport, which might be a [TCP network connection], a [WebSocket],
+//! [UNIX pipe], or even a [serial link].
+//! Postbag is designed for protocol evolution, allowing many changes to message
+//! types without requiring both endpoints to be upgraded at once.
 //!
 //! Opening a new [channel] is straightforward, just send the sender or receiver half
 //! of the new channel over an existing channel, like you would do between local
@@ -67,6 +69,52 @@
 //! [serial link]: https://docs.rs/tokio-serial
 //! [channel]: rch
 //! [remotely callable]: rtc
+//!
+//! # When to use Remoc
+//!
+//! Remoc is a good fit once two or more Rust programs need to interact and
+//! you would rather express that interaction as channels, function calls and
+//! trait objects than design and maintain a custom wire protocol.
+//! Typical uses include splitting an application into cooperating processes,
+//! talking to a sandboxed child process, connecting a UI to a backend it does
+//! not share memory with, or driving a service from Rust code compiled to
+//! WebAssembly. The processes can either run on the same machine or talk
+//! to each other via the network.
+//!
+//! Remoc is *not*:
+//!
+//!   * a service mesh -- it connects exactly two endpoints over one transport
+//!     connection that you provide; discovery, load balancing and routing
+//!     between more than two endpoints are outside its scope;
+//!   * a message broker -- channels and remote objects live only as long as
+//!     the connection and the process holding them; nothing is persisted or
+//!     replayed after a restart;
+//!   * a network security layer -- Remoc neither encrypts nor authenticates
+//!     the connection itself, see the security section below;
+//!   * a cross-language protocol -- both endpoints of a connection run Rust
+//!     code using Remoc.
+//!
+//! Remoc pays off once you want function calling, bidirectional streams,
+//! callbacks, or to pass live channels and objects between endpoints as
+//! naturally as you would locally.
+//!
+//! # Getting started
+//!
+//! A Remoc application normally follows these steps:
+//!
+//! 1. Establish an ordered, reliable transport, such as a TCP or TLS stream.
+//! 2. Call [Connect::io] for a byte stream or [Connect::framed] for a stream of
+//!    binary messages.
+//! 3. Spawn the returned connection future so it can drive all communication.
+//! 4. Use the returned [base channel](rch::base), or exchange one initial value
+//!    with [ConnectExt::provide] and [ConnectExt::consume].
+//! 5. Send additional channel halves, RTC clients, or remote objects wherever
+//!    they are needed.
+//!
+//! The complete [example](#example) below demonstrates the base-channel
+//! approach in one process. For separate client and server crates using remote
+//! trait calling, see the
+//! [RTC example](https://github.com/remoc-rs/remoc/tree/master/examples/rtc).
 //!
 //! # Connecting
 //!
@@ -90,34 +138,87 @@
 //! [Sink]: futures::Sink
 //! [Stream]: futures::Stream
 //!
+//! # Connection lifecycle
+//!
+//! [Connect::io] and [Connect::framed] return a dispatcher future alongside
+//! the base channel; nothing is sent or received until it is polled, usually
+//! by spawning it as shown in the example below.
+//! The dispatcher terminates, resolving that future, once the transport is
+//! closed or once every channel, sender and receiver derived from the
+//! connection on both endpoints has been dropped.
+//! Transport and protocol errors, including a connection timeout, terminate
+//! the connection early and cause pending channel operations on the affected
+//! endpoint to fail. Serialization and item-size errors are reported by the
+//! channel operation that encountered them.
+//!
+//! # Choosing channels, functions, objects or traits
+//!
+//! Everything in this crate builds on [remote channels](rch); which
+//! higher-level building block to reach for depends on how your interaction
+//! is shaped:
+//!
+//!   * a [remote channel](rch) directly, to stream a sequence of values in
+//!     one or both directions, for example events, log lines or a stream of
+//!     computed values;
+//!   * a [remote function](rfn), to expose a single async function or
+//!     closure without declaring a trait;
+//!   * [remote trait calling](rtc), when a remote endpoint should expose
+//!     several related methods, optionally backed by shared mutable state;
+//!     it generates a client and server for you from an ordinary trait;
+//!   * a [remote object](robj), when it is a value's identity, or its
+//!     lazily-fetched contents, that must cross the connection rather than a
+//!     stream of updates -- see its
+//!     [type-choosing table](crate::robj#choosing-an-object-type);
+//!   * an [observable collection](robs), when a remote endpoint needs a
+//!     live, read-only mirror of a map, set, list or vector that changes
+//!     over time.
+//!
+//! These combine freely: an RTC method can take or return a channel, and a
+//! channel's item can contain a remote object.
+//!
 //! # Forward and backward compatibility
 //!
 //! Distributed systems often require that endpoints running different software
 //! versions interact.
-//! By utilizing a data format like [Postbag](postbag) for encoding of your data
-//! for transport, you can ensure a high level of backward and forward compatibility.
+//! Remoc therefore uses the full [Postbag codec](codec::Postbag) by default.
+//! It includes field and variant identifiers and the encoded length of each
+//! value, allowing a receiver to skip data it does not know.
 //!
-//! It is always possible to add new fields to enums and struct and utilize the
-//! `#[serde(default)]` attribute to provide default values for that field if it
-//! was sent by an older client that has no knowledge of it.
-//! Likewise additional, unknown fields are silently ignored when received,
-//! allowing you to extend the data format without disturbing legacy endpoints.
+//! With suitable Serde attributes, Postbag supports common schema changes:
 //!
-//! Check the documentation of the employed data format for details.
+//!   * fields can be added, removed, or reordered; whenever a receiver expects
+//!     a field that the sender omits, that field needs `#[serde(default)]`;
+//!   * enum variants can be added, removed, or reordered; an older receiver
+//!     needs a `#[serde(other)]` variant to accept an unknown one;
+//!   * fields and variants can be renamed without breaking compatibility when
+//!     they use stable numbered identifiers such as `#[serde(rename = "_0")]`.
 //!
-//! # Crate features
+//! An identifier is part of the protocol: changing it is breaking, and an
+//! identifier retired from one field or variant must not later be reused for
+//! another. Changes to a field's type and other structural transformations are
+//! not automatically compatible.
 //!
-//! The modules of Remoc are gated by crate features, as shown in the reference below.
-//! For ease of use all features are enabled by default.
-//! See the [codec module](codec) documentation on how to select a default codec.
+//! Use [`codec::recoverable`] to confine an
+//! incompatible field to its default value, or the [versioned] module when the
+//! old representation must be transformed explicitly.
 //!
-//! ### JavaScript and web support
+//! See [`codec::Postbag`] and the [Postbag documentation](postbag) for the
+//! complete compatibility table and format limitations.
 //!
-//! Remoc supports compiling to the WebAssembly targets `wasm32-unknown-unknown`,
-//! `wasm32-wasip1` and `wasm32-wasip1-threads`. If you are targeting a JavaScript
-//! execution environment (like a web browser) you must enable the `js` crate feature.
-//! This will enable JavaScript promises support and spawn tasks onto the browser's
-//! native event queue.
+//! # Security
+//!
+//! Remoc neither encrypts nor authenticates the connection; it is designed
+//! to run on top of a transport that already provides the properties you
+//! need. If a connection crosses a trust boundary, wrap the transport in TLS
+//! (see [transports::tls]) or another secure channel before passing it to
+//! [Connect::io] or [Connect::framed].
+//!
+//! When exchanging data with an untrusted or unauthenticated endpoint, also
+//! review the [size considerations](crate::rch#size-considerations) in the
+//! remote channel module and the
+//! [`Cfg::max_ports`](crate::Cfg::max_ports) and
+//! [`Cfg::connect_queue`](crate::Cfg::connect_queue) settings, which
+//! bound how many channels a peer can make you open.
 //!
 //! # Tracing
 //!
@@ -242,6 +343,17 @@ async fn server(mut rx: rch::base::Receiver<CountReq>) {
 ```
 "##
 )]
+//!
+//! # Next steps
+//!
+//! * Browse the [transports] module for adaptable TCP, TLS, WebSocket and
+//!   child-process examples, including a resilient, reconnecting transport
+//!   for unreliable networks.
+//! * Read the [rtc] module documentation, and the fully worked
+//!   [RTC example](https://github.com/remoc-rs/remoc/tree/master/examples/rtc)
+//!   with client and server split into separate crates, if a remote endpoint
+//!   should expose more than a handful of functions.
+//!
 
 pub mod prelude;
 

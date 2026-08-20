@@ -163,8 +163,8 @@ fn cfg<const WITH_IDENTS: bool, const DEPTH_LIMIT: usize>() -> std::io::Result<p
 
 /// [Postbag codec](postbag) with the specified configuration.
 ///
-/// Postbag is a high-performance binary codec that provides efficient data encoding
-/// with configurable levels of forward and backward compatibility.
+/// Postbag is Remoc's default and recommended codec. It is a compact binary
+/// format with configurable levels of forward and backward compatibility.
 ///
 /// Normally you do not need to name this type directly; use the [`Postbag`] and
 /// [`PostbagSlim`] type aliases instead, which also allow the nesting depth limit
@@ -206,10 +206,12 @@ impl<const WITH_IDENTS: bool, const DEPTH_LIMIT: usize> Codec for PostbagWith<WI
     }
 }
 
-/// [Postbag codec](postbag) for compact binary encoding with full forwards and backwards compatibility.
+/// Remoc's default and recommended codec.
 ///
-/// [`Postbag`] is a compact binary [serde] codec for Rust that keeps the Rust type system
-/// fully intact and has full support for backwards and forwards compatibility.
+/// [`Postbag`] uses the Postbag Full format: a compact binary [Serde](serde)
+/// codec for Rust with support for forward and backward compatibility.
+/// Field and variant identifiers preserve the shape of Rust data types, while
+/// encoded value lengths allow unknown data to be skipped.
 ///
 /// ## Forward and Backward Compatibility
 ///
@@ -282,7 +284,14 @@ impl<const WITH_IDENTS: bool, const DEPTH_LIMIT: usize> Codec for PostbagWith<WI
 ///
 /// Names that do not have the form `_n`, as well as ids of 60 and above, are encoded as
 /// regular strings. Since the identifier determines compatibility, changing the id of a
-/// field or variant is a breaking change, but fields and variants can be reordered freely.
+/// field or variant is a breaking change, and an id that has been retired must never be
+/// assigned to another field or variant. Fields and variants can otherwise be reordered
+/// freely.
+///
+/// ## Serde limitations
+///
+/// As a binary format, Postbag does not support Serde's `untagged`, internally
+/// tagged, or `flatten` attributes.
 ///
 /// #### Use with `std` types
 ///

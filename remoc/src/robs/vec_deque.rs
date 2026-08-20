@@ -1153,6 +1153,9 @@ where
     }
 
     /// Stops updating the VecDeque and returns its current contents.
+    ///
+    /// The returned deque contains all updates applied before this method
+    /// acquired the mirror state. It does not wait for additional remote updates.
     pub async fn detach(self) -> VecDeque<T> {
         let mut inner = self.inner.write().await;
         inner.take().unwrap().v

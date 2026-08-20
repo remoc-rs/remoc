@@ -97,7 +97,7 @@ pub enum FetchError {
     Size(UsizeExceeded),
     /// Receiving the binary data from the remote endpoint failed.
     Receive(chmux::RecvError),
-    /// Connecting a sent channel failed.
+    /// Opening the channel used to transfer the data failed; see [`ConnectError`].
     Connect(ConnectError),
 }
 
@@ -135,6 +135,9 @@ impl fmt::Debug for Provider {
 
 impl Provider {
     /// Keeps the provider alive until it is not required anymore.
+    ///
+    /// This consumes the provider. The data remains available until every
+    /// associated [`LazyBlob`] has fetched it or been dropped.
     pub fn keep(mut self) {
         let _ = self.keep_tx.take().unwrap().send(());
     }

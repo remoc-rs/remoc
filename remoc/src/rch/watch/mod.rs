@@ -4,8 +4,9 @@
 //! The channel also works if both halves are local.
 //! Forwarding over multiple connections is supported.
 //!
-//! This has similar functionality as [tokio::sync::watch] with the additional
-//! ability to work over remote connections.
+//! Its API follows [tokio::sync::watch], with channel halves that can also be
+//! transferred over Remoc connections. Receivers observe the most recent value;
+//! intermediate values may be skipped.
 //!
 //! ### Rate limiting
 //!
@@ -109,7 +110,10 @@ mod sender;
 pub use receiver::{ChangedError, Receiver, ReceiverStream, RecvError};
 pub use sender::{SendError, Sender};
 
-/// Returns a reference to the inner value.
+/// A read guard for the current value in a watch channel.
+///
+/// Like [`tokio::sync::watch::Ref`], this guard holds a read lock. Keep it
+/// short-lived and do not hold it across an `.await`.
 pub struct Ref<'a, T>(tokio::sync::watch::Ref<'a, Result<T, RecvError>>);
 
 impl<T> Deref for Ref<'_, T> {
@@ -131,7 +135,9 @@ where
 
 /// Creates a new watch channel, returning the sender and receiver.
 ///
-/// The sender and receiver may be sent to remote endpoints via channels.
+/// The sender and receiver may be sent to remote endpoints via channels or used
+/// locally. The initial value is immediately available to receivers, and later
+/// updates may be coalesced so receivers observe only the newest value.
 pub fn channel<T, Codec>(init: T) -> (Sender<T, Codec>, Receiver<T, Codec>)
 where
     T: RemoteSend,
@@ -165,8 +171,12 @@ where
 
 /// Makes a local watch receiver forwardable to remote endpoints.
 ///
-/// The returned [`Forwarding`] future resolves once forwarding has completed or an error occurs.
-/// The returned receiver may be sent to remote endpoints via channels.
+/// The current value is copied into the returned receiver immediately, and later
+/// updates are forwarded as they arrive from the local receiver. The returned
+/// receiver may be sent to remote endpoints via channels.
+///
+/// The returned [`Forwarding`] future resolves once forwarding has completed or
+/// an error occurs.
 pub fn forward<T, Codec>(mut local_rx: tokio::sync::watch::Receiver<T>) -> (Forwarding, Receiver<T, Codec>)
 where
     T: RemoteSend + Sync + Clone,

@@ -28,24 +28,31 @@ use super::{
 };
 use wokio::{self, runtime};
 
-/// An error occurred during sending of a message.
+/// An error returned when a message cannot be sent over a multiplexed channel.
+///
+/// Most applications encounter this type wrapped by
+/// [`rch::base::SendErrorKind`](crate::rch::base::SendErrorKind).
+///
+/// A pre-connected port is provisionally opened so that data can be sent while
+/// the remote listener's acceptance is still pending. The listener can still
+/// reject the connection.
 #[derive(Debug, Clone)]
 pub enum SendError {
-    /// The multiplexer terminated.
+    /// The underlying multiplexer terminated before the message was sent.
     ChMux,
-    /// Other side closed receiving end of channel.
+    /// The remote endpoint closed the receiving half of this channel.
     Closed {
-        /// True, if remote endpoint still processes messages that were already sent.
+        /// Whether the remote endpoint will still process messages sent before closure.
         gracefully: bool,
     },
-    /// Pre-connected port was rejected.
+    /// The remote listener rejected this port's pre-connection.
     Rejected {
-        /// Remote endpoint had not ports available.
+        /// Whether the rejection occurred because the remote endpoint had no free ports.
         no_ports: bool,
     },
-    /// All local ports are in use.
+    /// No local port is available for a channel carried by the message.
     LocalPortsExhausted,
-    /// Too many pre-connection requests are pending.
+    /// The configured limit for pending pre-connection requests was reached.
     TooManyPendingPreConnectReqs,
 }
 
@@ -121,14 +128,14 @@ impl From<SendError> for std::io::Error {
     }
 }
 
-/// An error occurred during sending of a message.
+/// An error returned when a message cannot be sent without waiting.
 #[derive(Debug)]
 pub enum TrySendError {
-    /// Channel queue is full.
+    /// The channel queue currently has no capacity.
     ///
     /// Sending should be retried.
     Full,
-    /// Send error.
+    /// Sending failed for a reason other than temporary queue capacity.
     Send(SendError),
 }
 
@@ -412,6 +419,9 @@ impl Sender {
     }
 
     /// Streams a message by sending individual chunks.
+    ///
+    /// Call [`ChunkSender::finish`] or [`ChunkSender::send_final`] to complete
+    /// the message. Dropping the returned chunk sender first cancels the message.
     pub fn send_chunks(&mut self) -> ChunkSender<'_> {
         ChunkSender { sender: self, credits: MixedAssignedCredits::default(), first: true }
     }
@@ -502,6 +512,10 @@ impl Sender {
     }
 
     /// Allocates a port connection request.
+    ///
+    /// The returned [`ConnectReq`] reserves a local port number and can be
+    /// configured before it is passed to [`connect`](Self::connect).
+    /// This fails when all local port numbers are in use.
     pub fn connect_req(&self) -> Result<ConnectReq, PortsExhausted> {
         self.port_allocator.connect_req()
     }
@@ -510,6 +524,8 @@ impl Sender {
     ///
     /// The receiver limits the number of ports sendable per call, see
     /// [Receiver::max_ports](super::Receiver::max_ports).
+    /// Each returned [`Connect`] corresponds to the request at the same position
+    /// and can be awaited for the remote endpoint's acceptance.
     pub async fn connect(&mut self, connects: Vec<ConnectReq>) -> Result<Vec<Connect>, SendError> {
         let res = self.do_connect(connects).await;
         self.handle_pre_connect_result(res).await
@@ -582,12 +598,18 @@ impl Sender {
         Ok(connects)
     }
 
-    /// True, once the remote endpoint has closed its receiver.
+    /// Returns `true` once the remote endpoint has closed its receiver.
+    ///
+    /// A `false` result is only a snapshot and does not guarantee that a
+    /// subsequent send will succeed.
     pub fn is_closed(&self) -> bool {
         self.hangup_recved.upgrade().map(|hr| hr.load(Ordering::Relaxed)).unwrap_or_default()
     }
 
     /// Returns a future that will resolve when the remote endpoint closes its receiver.
+    ///
+    /// The future also resolves if the connection is lost. It can be created
+    /// repeatedly and does not consume the sender.
     pub fn closed(&self) -> Closed {
         Closed::new(&self.hangup_notify)
     }
@@ -626,7 +648,10 @@ impl Sender {
         AllReceived(task.boxed())
     }
 
-    /// Returns whehter the remote endpoint supports calling [all_received](Self::all_received).
+    /// Returns whether the remote endpoint supports [`all_received`](Self::all_received).
+    ///
+    /// If this returns `false`, [`all_received`](Self::all_received) completes
+    /// immediately without confirming receipt.
     pub fn is_all_received_supported(&self) -> bool {
         self.all_received_supported
     }
@@ -673,7 +698,9 @@ impl Sender {
         self.credits.port.override_graceful_close = override_graceful_close;
     }
 
-    /// Convert this into a sink.
+    /// Converts this sender into a [`Sink`](futures::Sink) of byte messages.
+    ///
+    /// The sink retains the same port and flow-control behavior as this sender.
     pub fn into_sink(self) -> SenderSink {
         SenderSink::new(self)
     }
@@ -776,6 +803,10 @@ impl<'a> ChunkSender<'a> {
     }
 
     /// Finishes the message.
+    ///
+    /// This sends an empty final chunk. The remote
+    /// [`Receiver::recv_chunk`](super::Receiver::recv_chunk) then returns
+    /// [`None`] after all preceding chunks have been received.
     pub async fn finish(mut self) -> Result<(), SendError> {
         self.send_int(Bytes::new(), true).await
     }

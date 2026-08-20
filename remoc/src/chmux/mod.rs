@@ -8,6 +8,31 @@
 //! Instead use methods from [Connect](crate::Connect) to establish a connection over
 //! a physical transport and work with high-level [remote channels](crate::rch).
 //!
+//! # Opening ports
+//!
+//! Each port is a bidirectional binary channel represented by a [`Sender`] and
+//! [`Receiver`]. [`ChMux::new`] returns a [`Client`] for opening ports and a
+//! [`Listener`] for accepting them:
+//!
+//! - [`Client::connect_port`] is the convenient way to open a port. The remote
+//!   endpoint receives it through [`Listener::accept`].
+//! - For more control, create a [`ConnectReq`] with [`Client::connect_req`],
+//!   configure it, and pass it to [`Client::connect`].
+//! - A port can itself carry requests for additional ports. Use
+//!   [`Sender::connect_req`] and [`Sender::connect`]; the peer receives
+//!   [`Received::Requests`] from [`Receiver::recv_any`] and can
+//!   [`accept`](Request::accept) or [`reject`](Request::reject) each request.
+//!
+//! A [`pre-connected`](ConnectReq::pre_connect) port is provisionally opened so
+//! data can flow while the remote listener's acceptance is still pending. This
+//! avoids waiting for a round trip before sending the first data, but the listener
+//! can still reject the connection. [`Client::connect_port`] attempts this
+//! optimization automatically.
+//!
+//! The high-level [`rch`](crate::rch) channels use these mechanisms internally,
+//! including when channels are sent inside other values. Applications using
+//! `rch` do not need to open or pre-connect ports themselves.
+//!
 //! Data is sent in chunks and every port is subject to credit-based flow control, which is
 //! what provides [back pressure](crate::rch#flow-control-and-back-pressure) to the remote
 //! channels built on top of this module.
@@ -62,7 +87,7 @@ pub enum ChMuxError<SinkError, StreamError> {
     StreamClosed,
     /// The connection was reset by the remote endpoint.
     Reset,
-    /// No messages where received over the configured connection timeout.
+    /// No messages were received within the configured connection timeout.
     Timeout,
     /// A multiplex protocol error occurred.
     Protocol(String),

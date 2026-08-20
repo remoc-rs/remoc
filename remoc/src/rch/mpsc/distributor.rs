@@ -157,6 +157,9 @@ where
     }
 
     /// Creates a new subscribed receiver and returns it along with its handle.
+    ///
+    /// Each subscribed receiver obtains a disjoint share of future items from the
+    /// upstream channel; items already distributed are not replayed.
     pub async fn subscribe(
         &self,
     ) -> Option<(Receiver<T, Codec, BUFFER, MAX_ITEM_SIZE>, DistributedReceiverHandle)> {

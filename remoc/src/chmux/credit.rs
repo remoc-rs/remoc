@@ -38,7 +38,7 @@ pub(crate) enum CreditPool {
 /// Assigned credits.
 ///
 /// The credits can be used to send data.
-/// Unused dropped credits are returned to the the credit providers.
+/// Unused dropped credits are returned to the credit providers.
 #[derive(Debug)]
 pub(crate) struct AssignedCredits {
     pool: CreditPool,

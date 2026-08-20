@@ -21,7 +21,11 @@ pub(super) enum LocalConnect {
     Requested(tokio::sync::oneshot::Receiver<chmux::Sender>),
 }
 
-/// A binary channel sender.
+/// The sending half of a binary channel.
+///
+/// Call [`get`](Self::get) to access the byte-oriented
+/// [`chmux::Sender`](crate::chmux::Sender). The channel connection is established
+/// lazily on first access.
 pub struct Sender {
     pub(super) sender: Option<Result<chmux::Sender, ConnectError>>,
     pub(super) sender_rx: tokio::sync::mpsc::UnboundedReceiver<Result<chmux::Sender, ConnectError>>,
@@ -84,15 +88,18 @@ impl Sender {
         }
     }
 
-    /// Establishes the connection and returns a reference to the chmux sender channel
-    /// to the remote endpoint.
+    /// Establishes the channel connection and returns its byte sender.
+    ///
+    /// Subsequent calls return the same sender. This method also works when both
+    /// binary channel halves remain on the local endpoint.
     pub async fn get(&mut self) -> Result<&mut chmux::Sender, ConnectError> {
         self.connect().await;
         self.sender.as_mut().unwrap().as_mut().map_err(|err| err.clone())
     }
 
-    /// Establishes the connection and returns the chmux sender channel
-    /// to the remote endpoint.
+    /// Establishes the channel connection and unwraps its byte sender.
+    ///
+    /// Use this when ownership of the underlying [`chmux::Sender`] is needed.
     pub async fn into_inner(mut self) -> Result<chmux::Sender, ConnectError> {
         self.connect().await;
         self.sender.take().unwrap()

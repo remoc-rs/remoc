@@ -20,16 +20,16 @@ use crate::{
 pub enum LockError {
     /// The [owner](super::Owner) has been dropped.
     Dropped,
-    /// Receiving from a remote endpoint failed.
+    /// Receiving or decoding the lock response failed; see [`base::RecvError`].
     Receive(base::RecvError),
-    /// Connecting a sent channel failed.
+    /// Opening a channel contained in the response failed; see [`chmux::ConnectError`].
     Connect(chmux::ConnectError),
-    /// Listening for a connection from a received channel failed.
+    /// Preparing a channel contained in the response failed; see [`chmux::ListenerError`].
     Listen(chmux::ListenerError),
-    /// Remote error.
+    /// A failure was reported by an endpoint forwarding the lock request or response.
     ///
-    /// The error occurred at the endpoint the value was received from.
-    /// [`None`] if that endpoint reported an error this one does not know.
+    /// The nested error is [`None`] when that endpoint reported a newer error
+    /// variant that this version of Remoc does not recognize.
     Remote(Option<Box<LockError>>),
 }
 
@@ -77,7 +77,7 @@ impl Error for LockError {}
 pub enum CommitError {
     /// The [owner](super::Owner) has been dropped.
     Dropped,
-    /// Commit failed.
+    /// The updated value could not be returned to the owner.
     Failed,
 }
 
@@ -245,6 +245,25 @@ where
     /// As long as the guard is held the shared value will not be changed.
     ///
     /// This also returns when the owner is dropped or a connection error occurs.
+    ///
+    /// # Example
+    ///
+    /// The following function keeps a locally cached view of the shared value
+    /// without blocking other endpoints from writing to it.
+    ///
+    /// ```
+    /// # use remoc::robj::rw_lock::RwLock;
+    /// # async fn observe(rw_lock: &RwLock<u32>) {
+    /// loop {
+    ///     let read = rw_lock.read().await.unwrap();
+    ///     println!("value is {}", *read);
+    ///
+    ///     // Once a write is requested the guard is dropped by the end of the
+    ///     // loop body and the next iteration reads the updated value.
+    ///     read.invalidated().await;
+    /// }
+    /// # }
+    /// ```
     pub async fn invalidated(&self) {
         let mut invalid_rx = self.0.invalid_rx.clone();
         while !invalid_rx.borrow_and_update().map(|v| *v).unwrap_or_default() {
@@ -254,7 +273,10 @@ where
         }
     }
 
-    /// Returns true, if the shared value has been invalidated.
+    /// Returns `true` if the shared value has been invalidated.
+    ///
+    /// This also returns `true` if the owner was dropped or the invalidation
+    /// state can no longer be received.
     pub fn is_invalidated(&self) -> bool {
         self.0.invalid_rx.borrow().map(|v| *v).unwrap_or(true)
     }
@@ -381,6 +403,10 @@ where
     Codec: codec::Codec,
 {
     /// Consumes the guard and commits the changes to the shared value.
+    ///
+    /// This waits until the owner has accepted the updated value. If the owner
+    /// was dropped or the value could not be transferred, the changes are not
+    /// known to have been committed.
     pub async fn commit(mut self) -> Result<(), CommitError> {
         let new_value = self.value.take().unwrap();
 

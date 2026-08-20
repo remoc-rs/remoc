@@ -755,6 +755,9 @@ where
     }
 
     /// Stops updating the hash set and returns its current contents.
+    ///
+    /// The returned set contains all updates applied before this method acquired
+    /// the mirror state. It does not wait for additional remote updates.
     pub async fn detach(self) -> HashSet<T> {
         let mut inner = self.inner.write().await;
         inner.take().unwrap().hs

@@ -11,21 +11,21 @@ use std::{
 use super::super::{DEFAULT_MAX_ITEM_SIZE, base, mpsc};
 use crate::{RemoteSend, chmux, codec};
 
-/// An error occurred during receiving over an oneshot channel.
+/// An error returned while receiving from a one-shot channel.
 #[derive(Clone, Debug)]
 pub enum RecvError {
-    /// Sender dropped without sending a value.
+    /// The sender was dropped without sending a value.
     Closed,
-    /// Receiving from a remote endpoint failed.
+    /// Receiving or decoding the value failed; see [`base::RecvError`].
     Receive(base::RecvError),
-    /// Connecting a sent channel failed.
+    /// Opening a channel contained in the value failed; see [`chmux::ConnectError`].
     Connect(chmux::ConnectError),
-    /// Listening for a connection from a received channel failed.
+    /// Preparing a channel contained in the value failed; see [`chmux::ListenerError`].
     Listen(chmux::ListenerError),
-    /// Remote error.
+    /// A failure was reported by an endpoint forwarding this channel.
     ///
-    /// The error occurred at the endpoint the value was received from.
-    /// [`None`] if that endpoint reported an error this one does not know.
+    /// The nested error is [`None`] when that endpoint reported a newer error
+    /// variant that this version of Remoc does not recognize.
     Remote(Option<Box<RecvError>>),
 }
 
@@ -94,23 +94,23 @@ impl RecvError {
     }
 }
 
-/// An error occurred during trying to receive over an oneshot channel.
+/// An error returned by [`Receiver::try_recv`].
 #[derive(Clone, Debug)]
 pub enum TryRecvError {
     /// No value has been received yet.
     Empty,
-    /// Sender dropped without sending a value.
+    /// The sender was dropped without sending a value.
     Closed,
-    /// Receiving from a remote endpoint failed.
+    /// Receiving or decoding the value failed; see [`base::RecvError`].
     Receive(base::RecvError),
-    /// Connecting a sent channel failed.
+    /// Opening a channel contained in the value failed; see [`chmux::ConnectError`].
     Connect(chmux::ConnectError),
-    /// Listening for a connection from a received channel failed.
+    /// Preparing a channel contained in the value failed; see [`chmux::ListenerError`].
     Listen(chmux::ListenerError),
-    /// Remote error.
+    /// A failure was reported by an endpoint forwarding this channel.
     ///
-    /// The error occurred at the endpoint the value was received from.
-    /// [`None`] if that endpoint reported an error this one does not know.
+    /// The nested error is [`None`] when that endpoint reported a newer error
+    /// variant that this version of Remoc does not recognize.
     Remote(Option<Box<RecvError>>),
 }
 
@@ -168,9 +168,10 @@ impl From<RecvError> for TryRecvError {
 
 impl Error for TryRecvError {}
 
-/// Receive a value from the associated sender.
+/// The receiving half of a one-shot channel.
 ///
-/// Await this future to receive the value.
+/// Await this future to receive the value. Dropping it prevents the sender from
+/// successfully transferring a value.
 #[derive(Serialize, Deserialize)]
 #[serde(bound(serialize = "T: RemoteSend, Codec: codec::Codec"))]
 #[serde(bound(deserialize = "T: RemoteSend, Codec: codec::Codec"))]
@@ -206,12 +207,19 @@ where
     T: DeserializeOwned + Send + 'static,
     Codec: codec::Codec,
 {
-    /// Prevents the associated sender from sending a value.
+    /// Closes the channel without receiving a value.
+    ///
+    /// Any subsequent send fails. A value that has already been received can still
+    /// be obtained with [`try_recv`](Self::try_recv) or by awaiting this receiver.
     pub fn close(&mut self) {
         self.0.close()
     }
 
-    /// Attempts to receive a value transmitted by the sender.
+    /// Attempts to receive the value without waiting.
+    ///
+    /// Returns [`TryRecvError::Empty`] if the sender has not sent a value yet.
+    /// Once this returns `Ok(_)`, the channel is consumed; if the sender closed or
+    /// transfer failed before a value arrived, an error is returned instead.
     pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
         Ok(self.0.try_recv()?)
     }

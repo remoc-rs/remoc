@@ -18,18 +18,25 @@ use super::{
 };
 use wokio::runtime;
 
-/// An error occurred during receiving a data message.
+/// An error returned when a data message cannot be received.
+///
+/// Most applications encounter this type wrapped by
+/// [`rch::base::RecvError`](crate::rch::base::RecvError).
+///
+/// A pre-connected port is provisionally opened so that data can arrive while
+/// the remote listener's acceptance is still pending. The listener can still
+/// reject the connection.
 #[derive(Debug, Clone)]
 pub enum RecvError {
-    /// Multiplexer terminated.
+    /// The underlying multiplexer terminated before the message was received.
     ChMux,
-    /// Data exceeds maximum size.
+    /// The message exceeds the configured data-size limit.
     ExceedsMaxDataSize(usize),
-    /// Received ports exceed maximum count.
+    /// The message carries more ports than the configured limit permits.
     ExceedsMaxPortCount(usize),
-    /// Pre-connected port was rejected.
+    /// The remote listener rejected this port's pre-connection.
     Rejected {
-        /// Remote endpoint had not ports available.
+        /// Whether the rejection occurred because the remote endpoint had no free ports.
         no_ports: bool,
     },
 }
@@ -86,14 +93,14 @@ impl From<RecvError> for std::io::Error {
     }
 }
 
-/// An error occurred during receiving a message.
+/// An error returned while receiving from a multiplexed channel.
 #[derive(Debug, Clone)]
 pub enum RecvAnyError {
-    /// Multiplexer terminated.
+    /// The underlying multiplexer terminated.
     ChMux,
-    /// Pre-connected port was rejected.
+    /// The remote listener rejected this port's pre-connection.
     Rejected {
-        /// Remote endpoint had not ports available.
+        /// Whether the rejection occurred because the remote endpoint had no free ports.
         no_ports: bool,
     },
 }
@@ -125,12 +132,12 @@ impl fmt::Display for RecvAnyError {
 
 impl Error for RecvAnyError {}
 
-/// An error occurred during receiving chunks of a message.
+/// An error returned while receiving the remaining chunks of a message.
 #[derive(Debug, Clone)]
 pub enum RecvChunkError {
-    /// Multiplexer terminated.
+    /// The underlying multiplexer terminated before the message completed.
     ChMux,
-    /// Remote endpoint cancelled transmission.
+    /// The remote endpoint cancelled this message before it completed.
     Cancelled,
 }
 
@@ -421,6 +428,9 @@ impl Receiver {
     }
 
     /// Set maximum port count per message.
+    ///
+    /// Receiving a larger group of port requests fails with
+    /// [`RecvError::ExceedsMaxPortCount`].
     pub fn set_max_ports(&mut self, max_ports: usize) {
         self.max_ports = max_ports;
     }
@@ -581,6 +591,10 @@ impl Receiver {
     }
 
     /// Receives data or ports over the channel.
+    ///
+    /// Returns binary data, a marker for chunked data, or port-opening requests;
+    /// see [`Received`]. [`None`] indicates that the remote sender finished the
+    /// channel and no further messages will arrive.
     pub async fn recv_any(&mut self) -> Result<Option<Received>, RecvError> {
         self.wait_pre_connect_done().await?;
 
@@ -664,7 +678,9 @@ impl Receiver {
     }
 
     /// Closes the sender at the remote endpoint, preventing it from sending new data.
-    /// Already sent message will still be received.
+    ///
+    /// Messages sent before the close is processed can still be received.
+    /// Calling this method again has no additional effect.
     pub async fn close(&mut self) {
         if !self.closed {
             let _ = self.tx.send(PortEvt::ReceiverClosed { local_port: self.local_port }).await;
@@ -672,7 +688,10 @@ impl Receiver {
         }
     }
 
-    /// Convert this into a stream.
+    /// Converts this receiver into a stream of binary messages.
+    ///
+    /// Port-opening requests are rejected by the stream, as they are by
+    /// [`recv`](Self::recv).
     pub fn into_stream(self) -> ReceiverStream {
         ReceiverStream::new(self)
     }

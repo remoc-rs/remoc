@@ -1,4 +1,39 @@
-//! Initial connection functions.
+//! Establishing the initial Remoc connection.
+//!
+//! Remoc runs over an ordered, reliable transport supplied by the application:
+//!
+//! * use [`Connect::io`] for byte streams implementing [`AsyncRead`] and
+//!   [`AsyncWrite`], such as TCP, TLS, Unix sockets, or process pipes;
+//! * use [`Connect::framed`] for a [`Sink`] and [`Stream`] of binary messages,
+//!   such as a WebSocket.
+//!
+//! Both methods return a [`Connect`] future and the two halves of a
+//! [base channel](crate::rch::base). The future drives the entire connection and
+//! must be polled, usually by spawning it:
+//!
+//! ```no_run
+//! # use tokio::io::{AsyncRead, AsyncWrite};
+//! # async fn connect<R, W>(reader: R, writer: W)
+//! # where R: AsyncRead + Send + Unpin + 'static,
+//! #       W: AsyncWrite + Send + Unpin + 'static {
+//! let (connection, tx, rx) =
+//!     remoc::Connect::io(remoc::Cfg::default(), reader, writer).await.unwrap();
+//! tokio::spawn(connection);
+//! # let _: remoc::rch::base::Sender<()> = tx;
+//! # let _: remoc::rch::base::Receiver<()> = rx;
+//! # }
+//! ```
+//!
+//! The types sent in each direction are independent: the local sender's item type
+//! must match the remote receiver's, and vice versa. Once connected, additional
+//! channels and remote objects are created by sending them over the base channel.
+//!
+//! For the common case where the connection only bootstraps one value—often an
+//! [RTC client](crate::rtc)—[`ConnectExt::provide`](crate::ConnectExt::provide)
+//! and [`ConnectExt::consume`](crate::ConnectExt::consume) exchange that value and
+//! spawn the connection automatically.
+//!
+//! See [`transports`] for complete transport-specific examples.
 
 use bytes::Bytes;
 use futures::{
@@ -28,12 +63,15 @@ mod io_transport;
 #[cfg(doc)]
 pub mod transports;
 
-/// Error occurred during establishing a connection over a physical transport.
+/// An error returned while establishing a Remoc connection.
 #[derive(Debug, Clone)]
 pub enum ConnectError<TransportSinkError, TransportStreamError> {
-    /// Establishing [chmux](crate::chmux) connection failed.
+    /// Starting the multiplexer over the transport failed.
+    ///
+    /// The nested error identifies whether the transport's sending or receiving
+    /// side failed; see [`ChMuxError`].
     ChMux(ChMuxError<TransportSinkError, TransportStreamError>),
-    /// Opening initial [remote](crate::rch::base) channel failed.
+    /// Opening the initial [`base`](crate::rch::base) channel failed.
     Connect(base::ConnectError),
 }
 

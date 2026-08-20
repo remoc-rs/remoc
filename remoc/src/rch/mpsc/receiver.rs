@@ -22,19 +22,23 @@ use crate::{
     codec::{self, ErasedDeserializer, ErasedSerializer},
     versioned::result::Result as CompactResult,
 };
-/// An error occurred during receiving over an mpsc channel.
+/// An error returned while receiving from an MPSC channel.
+///
+/// Channel closure is represented by `Ok(None)` from [`Receiver::recv`], not by
+/// this type. These variants describe failures while connecting or transferring
+/// values.
 #[derive(Clone, Debug)]
 pub enum RecvError {
-    /// Receiving from a remote endpoint failed.
+    /// Receiving or decoding a value failed; see [`base::RecvError`].
     Receive(base::RecvError),
-    /// Connecting a sent channel failed.
+    /// Opening a channel contained in a received value failed; see [`chmux::ConnectError`].
     Connect(chmux::ConnectError),
-    /// Listening for a connection from a received channel failed.
+    /// Preparing a channel contained in a received value failed; see [`chmux::ListenerError`].
     Listen(chmux::ListenerError),
-    /// Remote error.
+    /// A failure was reported by an endpoint forwarding this channel.
     ///
-    /// The error occurred at the endpoint the value was received from.
-    /// [`None`] if that endpoint reported an error this one does not know.
+    /// The nested error is [`None`] when that endpoint reported a newer error
+    /// variant that this version of Remoc does not recognize.
     Remote(Option<Box<RecvError>>),
 }
 
@@ -90,7 +94,7 @@ impl RecvError {
     }
 }
 
-/// An error occurred during trying to receive over an mpsc channel.
+/// An error returned when attempting to receive without waiting.
 #[derive(Clone, Debug)]
 pub enum TryRecvError {
     /// All channel senders have been dropped.
@@ -98,16 +102,16 @@ pub enum TryRecvError {
     /// Currently no value is ready to receive, but values may still arrive
     /// in the future.
     Empty,
-    /// Receiving from a remote endpoint failed.
+    /// Receiving or decoding a value failed; see [`base::RecvError`].
     Receive(base::RecvError),
-    /// Connecting a sent channel failed.
+    /// Opening a channel contained in a received value failed; see [`chmux::ConnectError`].
     Connect(chmux::ConnectError),
-    /// Listening for a connection from a received channel failed.
+    /// Preparing a channel contained in a received value failed; see [`chmux::ListenerError`].
     Listen(chmux::ListenerError),
-    /// Remote error.
+    /// A failure was reported by an endpoint forwarding this channel.
     ///
-    /// The error occurred at the endpoint the value was received from.
-    /// [`None`] if that endpoint reported an error this one does not know.
+    /// The nested error is [`None`] when that endpoint reported a newer error
+    /// variant that this version of Remoc does not recognize.
     Remote(Option<Box<RecvError>>),
 }
 
@@ -164,10 +168,14 @@ impl TryRecvError {
     }
 }
 
-/// Receive values from the associated [Sender](super::Sender),
-/// which may be located on a remote endpoint.
+/// The receiving half of a bounded MPSC channel.
 ///
-/// Instances are created by the [channel](super::channel) function.
+/// Receivers are created by [`channel`](super::channel) and can be transferred
+/// to another endpoint. There is only one receiver, but any number of cloned or
+/// transferred [`Sender`](super::Sender)s may feed it.
+///
+/// Dropping the receiver closes the channel. Call [`close`](Self::close) instead
+/// when queued values should still be drained.
 pub struct Receiver<
     T,
     Codec = codec::Default,
@@ -262,13 +270,15 @@ impl<T, Codec, const BUFFER: usize, const MAX_ITEM_SIZE: usize> Receiver<T, Code
 
     /// Receives the next value for this receiver.
     ///
-    /// This function returns `Ok(None)` when all channel senders have been dropped.
+    /// Returns `Ok(None)` after all senders have been dropped and all queued values
+    /// have been received.
     ///
     /// When a receive error occurs due to a connection failure and other senders are still
     /// present, it is held back and returned after all other senders have been dropped or failed.
     /// Use [error](Self::error) to check if such an error is present.
     ///
-    /// ### Cancel safety
+    /// # Cancel safety
+    ///
     /// This method is cancel safe.
     /// If it is cancelled, it is guaranteed that no messages were received on this channel.
     pub async fn recv(&mut self) -> Result<Option<T>, RecvError> {
@@ -326,10 +336,10 @@ impl<T, Codec, const BUFFER: usize, const MAX_ITEM_SIZE: usize> Receiver<T, Code
         }
     }
 
-    /// Tries to receive the next message on this channel, if one is immediately available.
+    /// Tries to receive the next value without waiting.
     ///
-    /// This function returns `Err(RecvError::Closed)` when all channel senders have been dropped
-    /// and `Err(RecvError::Empty)` if no value to receive is currently available.
+    /// Returns [`TryRecvError::Closed`] when all senders have been dropped and the
+    /// queue is empty, or [`TryRecvError::Empty`] if a value may still arrive.
     ///
     /// When a receive error occurs due to a connection failure and other senders are still
     /// present, it is held back and returned after all other senders have been dropped or failed.
@@ -359,12 +369,14 @@ impl<T, Codec, const BUFFER: usize, const MAX_ITEM_SIZE: usize> Receiver<T, Code
         }
     }
 
-    /// Blocking receive to call outside of asynchronous contexts.
+    /// Receives a value while blocking the current thread.
     ///
-    /// This function returns `Ok(None)` when the channel sender has been dropped.
+    /// Returns `Ok(None)` after all senders have been dropped and all queued values
+    /// have been received.
     ///
     /// # Panics
-    /// This function panics if called within an asynchronous execution context.
+    ///
+    /// Panics if called from an asynchronous execution context.
     pub fn blocking_recv(&mut self) -> Result<Option<T>, RecvError> {
         wokio::task::block_on(self.recv())
     }
@@ -384,10 +396,11 @@ impl<T, Codec, const BUFFER: usize, const MAX_ITEM_SIZE: usize> Receiver<T, Code
     /// yet been closed, this method will sleep until a message is sent or the channel is closed.
     ///
     /// If a non-final receive error occurs (for example due to a message being not
-    /// deserializable), the error is reported but alreadyed buffered messages from the
+    /// deserializable), the error is reported but already buffered messages from the
     /// same batch are lost.
     ///
-    /// ### Cancel safety
+    /// # Cancel safety
+    ///
     /// This method is cancel safe.
     /// If it is cancelled, it is guaranteed that no messages were received on this channel.
     pub async fn recv_many(&mut self, buffer: &mut Vec<T>, limit: usize) -> Result<usize, RecvError> {
@@ -429,7 +442,7 @@ impl<T, Codec, const BUFFER: usize, const MAX_ITEM_SIZE: usize> Receiver<T, Code
 
     /// Returns the number of values available for receiving.
     ///
-    /// This might be over-estimated in case a receive error occured.
+    /// This might be overestimated if a receive error occurred.
     /// However, in this case the receive functions will return an error.
     pub fn len(&self) -> usize {
         self.inner.as_ref().unwrap().rx.len()
@@ -442,8 +455,9 @@ impl<T, Codec, const BUFFER: usize, const MAX_ITEM_SIZE: usize> Receiver<T, Code
 
     /// Closes the receiving half of a channel without dropping it.
     ///
-    /// This allows to process outstanding values while stopping the sender from
-    /// sending new values.
+    /// Outstanding queued values can still be received afterwards, but further
+    /// send attempts fail and senders observe the channel as closed. This is
+    /// useful when shutdown should stop new work while draining accepted items.
     pub fn close(&mut self) {
         let inner = self.inner.as_mut().unwrap();
         let _ = inner.closed_tx.send(Some(ClosedReason::Closed));
@@ -543,12 +557,60 @@ where
     T: RemoteSend + Clone,
     Codec: codec::Codec,
 {
-    /// Distribute received items over multiple receivers.
+    /// Distributes received items over multiple subscribed receivers.
     ///
-    /// Each value is received by one of the receivers.
+    /// Each value is delivered to exactly one subscribed receiver. If
+    /// `wait_on_empty` is `true`, the distributor stays alive while no
+    /// subscribers are present and resumes delivery once a new subscriber is
+    /// added; otherwise it terminates as soon as the last subscriber goes away.
     ///
-    /// If `wait_on_empty` is true, the distributor waits if all subscribers are closed.
-    /// Otherwise it terminates.
+    /// # Example
+    ///
+    /// In the following example the server distributes a work queue over two
+    /// workers running on the client.
+    ///
+    /// ```
+    /// use remoc::prelude::*;
+    ///
+    /// // This would be run on the server.
+    /// async fn server(mut tx: rch::base::Sender<rch::mpsc::Receiver<u32>>) {
+    ///     let (work_tx, work_rx) = rch::mpsc::channel(1);
+    ///     let distributor = work_rx.distribute(false);
+    ///
+    ///     // Each subscribed receiver can be sent to another endpoint.
+    ///     for _ in 0..2 {
+    ///         let (worker_rx, _handle) = distributor.subscribe().await.unwrap();
+    ///         tx.send(worker_rx).await.unwrap();
+    ///     }
+    ///
+    ///     for i in 1..=10 {
+    ///         work_tx.send(i).await.unwrap();
+    ///     }
+    ///
+    ///     // Keep the distributor alive until all work has been handed out.
+    ///     drop(work_tx);
+    ///     distributor.closed().await;
+    /// }
+    ///
+    /// // This would be run on the client.
+    /// async fn client(mut rx: rch::base::Receiver<rch::mpsc::Receiver<u32>>) {
+    ///     let worker = |mut work_rx: rch::mpsc::Receiver<u32>| async move {
+    ///         let mut sum = 0;
+    ///         while let Some(work) = work_rx.recv().await.unwrap() {
+    ///             sum += work;
+    ///         }
+    ///         sum
+    ///     };
+    ///
+    ///     let first = rx.recv().await.unwrap().unwrap();
+    ///     let second = rx.recv().await.unwrap().unwrap();
+    ///
+    ///     // Each value is processed by exactly one worker.
+    ///     let (a, b) = tokio::join!(worker(first), worker(second));
+    ///     assert_eq!(a + b, 55);
+    /// }
+    /// # tokio_test::block_on(remoc::doctest::client_server(server, client));
+    /// ```
     pub fn distribute(self, wait_on_empty: bool) -> Distributor<T, Codec, BUFFER, MAX_ITEM_SIZE> {
         Distributor::new(self, wait_on_empty)
     }

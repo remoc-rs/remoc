@@ -165,9 +165,10 @@ pub struct Cfg {
     pub transport_receive_queue: usize,
     /// Maximum number of outstanding connection requests and pre-connected ports.
     ///
-    /// A pre-connected port carries data before your code has accepted it, so this is the
-    /// one port limit that does not depend on the application: the remote endpoint can make
-    /// this endpoint hold `connect_queue` times
+    /// A pre-connected port allows its remote endpoint to start sending data before the
+    /// local listener accepts the connection request. Therefore, this is the one port limit
+    /// that does not depend on the application: the remote endpoint can make this endpoint hold
+    /// `connect_queue` times
     /// [port_receive_buffer](Self::port_receive_buffer) bytes for ports that have not been
     /// accepted yet.
     ///

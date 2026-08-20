@@ -23,6 +23,9 @@ impl fmt::Debug for RFnMutProvider {
 
 impl RFnMutProvider {
     /// Keeps the provider alive until it is not required anymore.
+    ///
+    /// This consumes the provider and keeps the function available until all
+    /// corresponding [`RFnMut`] handles have been dropped.
     pub fn keep(mut self) {
         let _ = self.keep_tx.take().unwrap().send(());
     }

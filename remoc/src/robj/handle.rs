@@ -20,7 +20,7 @@
 //!
 //! When sending a handle an UUID is generated, associated with the object and send to the
 //! remote endpoint.
-//! Since the object itself is never send, there is no risk that private data within the object
+//! Since the object itself is never sent, there is no risk that private data within the object
 //! may be accessed remotely.
 //!
 //! The UUID is associated with the [channel multiplexer](crate::chmux) over which the
@@ -90,13 +90,13 @@ use crate::{
     },
 };
 
-/// An error during getting the value of a handle.
+/// An error returned when accessing the value behind a [`Handle`].
 #[derive(Clone, Debug)]
 pub enum HandleError {
     /// The value of the handle is not stored locally or it has already
     /// been taken.
     Unknown,
-    /// The values of the handle is of another type.
+    /// The handle's value has a different concrete type.
     MismatchedType(String),
 }
 
@@ -119,10 +119,11 @@ impl fmt::Display for HandleError {
 
 impl std::error::Error for HandleError {}
 
-/// Provider for a handle.
+/// Controls how long a handle's locally stored value remains available.
 ///
 /// Dropping the provider causes all corresponding handles to become
-/// invalid and the underlying object to be dropped.
+/// invalid and the underlying value to be dropped. Use [`keep`](Self::keep)
+/// when the value should instead remain available until every handle is gone.
 pub struct Provider {
     keep_tx: Option<tokio::sync::watch::Sender<bool>>,
 }
@@ -134,14 +135,17 @@ impl fmt::Debug for Provider {
 }
 
 impl Provider {
-    /// Keeps the provider alive until the handle is dropped.
+    /// Keeps the value available until every corresponding handle is dropped.
+    ///
+    /// This consumes the provider and cannot be undone.
     pub fn keep(mut self) {
         let _ = self.keep_tx.take().unwrap().send(true);
     }
 
-    /// Waits until the handle provider can be safely dropped.
+    /// Waits until all corresponding handles have been dropped.
     ///
-    /// This is the case when the handle is dropped.
+    /// The value remains available while this method waits. Once it returns,
+    /// dropping the provider does not invalidate a live handle.
     pub async fn done(&mut self) {
         self.keep_tx.as_mut().unwrap().closed().await
     }
@@ -198,8 +202,13 @@ impl<Codec> fmt::Debug for State<Codec> {
 
 /// A handle to a value that is possibly stored on a remote endpoint.
 ///
-/// If the value is stored locally, the handle can be used to obtain the value
-/// or a (mutable) reference to it.
+/// Handles are cloneable and can be sent between endpoints without transferring
+/// the value itself. A handle can be dereferenced only on the endpoint that
+/// currently stores its value; access elsewhere returns [`HandleError::Unknown`].
+///
+/// If the value is local, [`as_ref`](Self::as_ref) and
+/// [`as_mut`](Self::as_mut) borrow it, while [`into_inner`](Self::into_inner)
+/// takes it and invalidates every clone.
 ///
 /// See [module-level documentation](self) for details.
 #[derive(Clone)]
@@ -222,7 +231,10 @@ where
     /// Creates a new handle for the value.
     ///
     /// There is *no* requirement on `T` to be [remote sendable](crate::RemoteSend), since
-    /// it is never send to a remote endpoint.
+    /// the value itself is never sent to a remote endpoint.
+    ///
+    /// The value remains available until all handles are dropped. Use
+    /// [`provided`](Self::provided) when its lifetime must be controlled explicitly.
     pub fn new(value: T) -> Self {
         let (handle, provider) = Self::provided(value);
         provider.keep();
@@ -252,11 +264,11 @@ where
         (handle, provider)
     }
 
-    /// Takes the value of the handle and returns it, if it is stored locally.
+    /// Takes and returns the value if it is stored on this endpoint.
     ///
     /// The handle and all its clones become invalid.
     ///
-    /// This blocks until all existing read and write reference have been released.
+    /// This waits until all existing read and write references have been released.
     pub async fn into_inner(mut self) -> Result<T, HandleError> {
         let entry = match mem::take(&mut self.state) {
             State::LocalCreated { entry, .. } => entry,
@@ -274,9 +286,10 @@ where
         }
     }
 
-    /// Returns a reference to the value of the handle, if it is stored locally.
+    /// Borrows the value if it is stored on this endpoint.
     ///
-    /// This blocks until all existing write reference have been released.
+    /// This waits until any existing mutable reference has been released. The
+    /// returned [`Ref`] keeps the read lock held until it is dropped.
     pub async fn as_ref(&self) -> Result<Ref<T>, HandleError> {
         let entry = match &self.state {
             State::LocalCreated { entry, .. } | State::LocalReceived { entry, .. } => entry.clone(),
@@ -298,9 +311,10 @@ where
         }
     }
 
-    /// Returns a mutable reference to the value of the handle, if it is stored locally.
+    /// Mutably borrows the value if it is stored on this endpoint.
     ///
-    /// This blocks until all existing read and write reference have been released.
+    /// This waits until all existing references have been released. The returned
+    /// [`RefMut`] keeps the write lock held until it is dropped.
     pub async fn as_mut(&mut self) -> Result<RefMut<T>, HandleError> {
         let entry = match &self.state {
             State::LocalCreated { entry, .. } | State::LocalReceived { entry, .. } => entry.clone(),

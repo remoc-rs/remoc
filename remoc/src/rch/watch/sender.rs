@@ -16,18 +16,21 @@ use crate::{
     versioned::result::Result as CompactResult,
 };
 
-/// An error occurred during sending over an mpsc channel.
+/// An error returned when a watch value cannot be queued for transfer.
+///
+/// Because remote updates are transferred asynchronously, an error can describe
+/// an earlier update rather than the value passed to the current call.
 #[derive(Clone, Debug)]
 pub enum SendError {
     /// The receiver was dropped or the connection failed.
     Closed,
-    /// Sending to a remote endpoint failed.
+    /// Encoding or transferring an update failed; see [`base::SendErrorKind`].
     Send(base::SendErrorKind),
-    /// Connecting a sent channel failed.
+    /// Opening a channel contained in an update failed; see [`chmux::ConnectError`].
     Connect(chmux::ConnectError),
     /// Listening to a received channel failed.
     Listen(chmux::ListenerError),
-    /// Forwarding at a remote endpoint to another remote endpoint failed.
+    /// An endpoint forwarding this channel could not complete the transfer.
     Forward,
 }
 
@@ -43,12 +46,12 @@ crate::versioned::compact::impl_enum! {
 }
 
 impl SendError {
-    /// True, if the remote endpoint closed the channel.
+    /// Returns `true` if no receiver remains available.
     pub fn is_closed(&self) -> bool {
         matches!(self, Self::Closed)
     }
 
-    /// True, if the remote endpoint was dropped or the connection failed.
+    /// Returns `true` if the channel can no longer transfer updates.
     pub fn is_disconnected(&self) -> bool {
         match self {
             Self::Send(err) => err.is_disconnected(),
@@ -56,7 +59,7 @@ impl SendError {
         }
     }
 
-    /// Whether the error is caused by the item to be sent.
+    /// Returns whether the error was caused by the value being transferred.
     pub fn is_item_specific(&self) -> bool {
         matches!(self, Self::Send(err) if err.is_item_specific())
     }
@@ -102,9 +105,13 @@ impl From<RemoteSendError> for SendError {
     }
 }
 
-/// Send values to the associated [Receiver](super::Receiver), which may be located on a remote endpoint.
+/// The sending half of a watch channel.
 ///
-/// Instances are created by the [channel](super::channel) function.
+/// A sender publishes replacements for a single watched value. Receivers always
+/// observe the newest value and may skip intermediate updates. The sender may be
+/// transferred to another endpoint but is not cloneable; receivers can be cloned.
+///
+/// Instances are created by [`channel`](super::channel).
 pub struct Sender<T, Codec = codec::Default> {
     pub(super) inner: Option<SenderInner<T, Codec>>,
     successor_tx: Mutex<Option<tokio::sync::oneshot::Sender<SenderInner<T, Codec>>>>,
@@ -200,12 +207,15 @@ where
 
     /// Sends a value over this channel, notifying all receivers.
     ///
-    /// This method fails if all receivers have been dropped or become disconnected.
+    /// The new value replaces the previous one. Receivers that have not yet
+    /// observed the previous value may see only this value.
     ///
-    /// `Ok` means that the value was queued for sending.
+    /// `Ok` means that the update was accepted for transfer. This method fails if
+    /// all receivers have been dropped or disconnected.
     ///
     /// # Error reporting
-    /// An error may be delayed and thus be caused by a previous invocation.
+    ///
+    /// An error may be delayed and therefore caused by a previous invocation.
     pub fn send(&self, value: T) -> Result<(), SendError> {
         match self.inner.as_ref().unwrap().tx.send(Ok(value)) {
             Ok(()) => Ok(()),
@@ -219,7 +229,8 @@ where
     /// Modifies the watched value and notifies all receivers.
     ///
     /// This method never fails, even if all receivers have been dropped or become
-    /// disconnected.
+    /// disconnected. The closure runs synchronously while the value is write-locked;
+    /// keep it short and do not perform blocking work in it.
     ///
     /// # Panics
     /// This method panics if calling `func` results in a panic.
@@ -283,6 +294,9 @@ where
     }
 
     /// Returns a reference to the most recently sent value.
+    ///
+    /// The returned [`Ref`] holds a read lock on the local watch state. Keep it
+    /// short-lived and do not hold it across an `.await`.
     pub fn borrow(&self) -> Ref<'_, T> {
         Ref(self.inner.as_ref().unwrap().tx.borrow())
     }
@@ -298,6 +312,9 @@ where
     }
 
     /// Creates a new receiver subscribed to this sender.
+    ///
+    /// The new receiver starts with the sender's current value and will observe
+    /// only subsequent notifications after that point.
     pub fn subscribe(&self) -> Receiver<T, Codec> {
         let inner = self.inner.as_ref().unwrap();
         Receiver::new(

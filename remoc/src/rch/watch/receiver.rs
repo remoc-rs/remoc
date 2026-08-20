@@ -24,19 +24,19 @@ use crate::{
     versioned::result::Result as CompactResult,
 };
 
-/// An error occurred during receiving over a watch channel.
+/// An error returned while receiving updates from a watch channel.
 #[derive(Clone, Debug)]
 pub enum RecvError {
-    /// Receiving from a remote endpoint failed.
+    /// Receiving or decoding an update failed; see [`base::RecvError`].
     Receive(base::RecvError),
-    /// Connecting a sent channel failed.
+    /// Opening a channel contained in an update failed; see [`chmux::ConnectError`].
     Connect(chmux::ConnectError),
-    /// Listening for a connection from a received channel failed.
+    /// Preparing a channel contained in an update failed; see [`chmux::ListenerError`].
     Listen(chmux::ListenerError),
-    /// Remote error.
+    /// A failure was reported by an endpoint forwarding this channel.
     ///
-    /// The error occurred at the endpoint the value was received from.
-    /// [`None`] if that endpoint reported an error this one does not know.
+    /// The nested error is [`None`] when that endpoint reported a newer error
+    /// variant that this version of Remoc does not recognize.
     Remote(Option<Box<RecvError>>),
 }
 
@@ -77,7 +77,7 @@ impl RecvError {
     }
 }
 
-/// An error occurred during waiting for a change on a watch channel.
+/// An error returned by [`Receiver::changed`] or [`Receiver::has_changed`].
 #[derive(Clone, Debug)]
 pub enum ChangedError {
     /// The sender has been dropped.
@@ -95,7 +95,7 @@ crate::versioned::compact::impl_enum! {
 }
 
 impl ChangedError {
-    /// True, if remote endpoint has closed the channel.
+    /// Returns `true` if the sender has been dropped.
     pub fn is_closed(&self) -> bool {
         matches!(self, Self::Closed)
     }
@@ -118,13 +118,17 @@ impl fmt::Display for ChangedError {
 
 impl Error for ChangedError {}
 
-/// Receive values from the associated [Sender](super::Sender),
-/// which may be located on a remote endpoint.
+/// The receiving half of a watch channel.
 ///
-/// Instances are created by the [channel](super::channel) function.
+/// A receiver retains the newest value. It can be cloned or transferred to other
+/// endpoints; each clone independently tracks whether it has seen the current
+/// value.
 ///
-/// This can be converted into a [Stream](futures::Stream) of values by wrapping it into
-/// a [ReceiverStream].
+/// Use [`borrow`](Self::borrow) to inspect the current value without marking it
+/// seen, or [`borrow_and_update`](Self::borrow_and_update) to mark it seen.
+/// [`changed`](Self::changed) waits until an unseen value is available.
+///
+/// A receiver can be adapted to [`Stream`](futures::Stream) with [`ReceiverStream`].
 #[derive(Clone)]
 pub struct Receiver<T, Codec = codec::Default, const MAX_ITEM_SIZE: usize = DEFAULT_MAX_ITEM_SIZE> {
     rx: tokio::sync::watch::Receiver<Result<T, RecvError>>,
@@ -209,7 +213,13 @@ impl<T, Codec, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, MAX_ITEM_SIZE> {
         }
     }
 
-    /// Returns a reference to the most recently received value.
+    /// Borrows the most recently received value.
+    ///
+    /// This does not mark the value as seen. A subsequent call to
+    /// [`changed`](Self::changed) may therefore return immediately.
+    ///
+    /// The returned [`Ref`] holds a read lock. Keep it short-lived and do not hold
+    /// it across an `.await`.
     pub fn borrow(&self) -> Result<Ref<'_, T>, RecvError> {
         let ref_res = self.rx.borrow();
         match &*ref_res {
@@ -218,7 +228,10 @@ impl<T, Codec, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, MAX_ITEM_SIZE> {
         }
     }
 
-    /// Returns a reference to the most recently received value and mark that value as seen.
+    /// Borrows the most recently received value and marks it as seen.
+    ///
+    /// The returned [`Ref`] holds a read lock. Keep it short-lived and do not hold
+    /// it across an `.await`.
     pub fn borrow_and_update(&mut self) -> Result<Ref<'_, T>, RecvError> {
         let ref_res = self.rx.borrow_and_update();
         match &*ref_res {
@@ -227,8 +240,11 @@ impl<T, Codec, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, MAX_ITEM_SIZE> {
         }
     }
 
-    /// Checks if this channel contains a message that this receiver has not yet seen.
-    /// The current value will not be marked as seen.
+    /// Returns whether this receiver has an unseen value.
+    ///
+    /// This does not mark the current value as seen. If the sender has been
+    /// dropped, the method can still return `Ok(true)` while an unseen final value
+    /// remains.
     pub fn has_changed(&self) -> Result<bool, ChangedError> {
         if let Err(err) = &*self.rx.borrow()
             && err.is_disconnected()
@@ -238,7 +254,33 @@ impl<T, Codec, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, MAX_ITEM_SIZE> {
         self.rx.has_changed().map_err(|_| ChangedError::Closed)
     }
 
-    /// Wait for a change notification, then mark the newest value as seen.
+    /// Waits for an unseen value and marks the newest value as seen.
+    ///
+    /// Several updates may be coalesced into one notification. After this method
+    /// returns, use [`borrow`](Self::borrow) to access the newest value.
+    ///
+    /// # Cancel safety
+    ///
+    /// This method is cancel safe. If canceled before returning, the current value
+    /// is not marked as seen.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use remoc::rch;
+    ///
+    /// # tokio_test::block_on(async {
+    /// let (tx, mut rx): (_, rch::watch::Receiver<u32>) = rch::watch::channel(1);
+    ///
+    /// // The initial value has not been marked as seen yet.
+    /// rx.borrow_and_update().unwrap();
+    /// assert!(!rx.has_changed().unwrap());
+    ///
+    /// tx.send(2).unwrap();
+    /// rx.changed().await.unwrap();
+    /// assert_eq!(*rx.borrow().unwrap(), 2);
+    /// # });
+    /// ```
     pub async fn changed(&mut self) -> Result<(), ChangedError> {
         if let Err(err) = &*self.rx.borrow()
             && err.is_disconnected()
@@ -254,17 +296,29 @@ impl<T, Codec, const MAX_ITEM_SIZE: usize> Receiver<T, Codec, MAX_ITEM_SIZE> {
         Ok(())
     }
 
-    /// Marks the state as changed.
+    /// Marks the current value as unseen.
+    ///
+    /// After calling this, [`has_changed`](Self::has_changed) returns `Ok(true)`
+    /// and [`changed`](Self::changed) can complete immediately even if no sender
+    /// published a new value.
     pub fn mark_changed(&mut self) {
         self.rx.mark_changed();
     }
 
-    /// Marks the state as unchanged.
+    /// Marks the current value as seen.
+    ///
+    /// This suppresses an immediate wake-up from [`changed`](Self::changed)
+    /// until a later update arrives or [`mark_changed`](Self::mark_changed) is
+    /// called.
     pub fn mark_unchanged(&mut self) {
         self.rx.mark_unchanged();
     }
 
     /// Waits for a value that satisfies the provided condition.
+    ///
+    /// If the current value already matches, this returns immediately with a
+    /// borrow of that value. Values examined while waiting are marked as seen, so
+    /// a later call to [`changed`](Self::changed) waits for a newer update.
     pub async fn wait_for(&mut self, mut f: impl FnMut(&T) -> bool) -> Result<Ref<'_, T>, ChangedError> {
         let res = self
             .rx

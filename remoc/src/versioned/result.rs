@@ -1,6 +1,13 @@
-//! Compact serialized representation of [`std::result::Result`].
+//! A compact, version-tolerant representation of [`std::result::Result`].
+//!
+//! This type is used by Remoc's protocols. Application code should normally use
+//! [`std::result::Result`] and convert with [`From`] only when defining a compact
+//! wire representation.
 
-/// Compact representation of [`std::result::Result`].
+/// A compact, version-tolerant representation of [`std::result::Result`].
+///
+/// The variants have stable compact identifiers in their serialized form. Convert
+/// to and from the standard result type with [`From`].
 pub enum Result<T, E> {
     /// Contains the success value.
     Ok(T),

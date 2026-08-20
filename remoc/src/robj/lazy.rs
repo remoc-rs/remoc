@@ -61,18 +61,18 @@ use crate::{
 /// An error occurred during fetching a lazily transmitted value.
 #[derive(Clone, Debug)]
 pub enum FetchError {
-    /// Provider dropped before getting the value.
+    /// The provider was dropped before it supplied the value.
     Dropped,
-    /// Receiving from a remote endpoint failed.
+    /// Receiving or decoding the value failed; see [`base::RecvError`].
     Receive(base::RecvError),
-    /// Connecting a sent channel failed.
+    /// Opening a channel contained in the value failed; see [`chmux::ConnectError`].
     Connect(chmux::ConnectError),
-    /// Listening for a connection from a received channel failed.
+    /// Preparing a channel contained in the value failed; see [`chmux::ListenerError`].
     Listen(chmux::ListenerError),
-    /// Remote error.
+    /// A failure was reported by an endpoint forwarding the request or value.
     ///
-    /// The error occurred at the endpoint the value was received from.
-    /// [`None`] if that endpoint reported an error this one does not know.
+    /// The nested error is [`None`] when that endpoint reported a newer error
+    /// variant that this version of Remoc does not recognize.
     Remote(Option<Box<FetchError>>),
 }
 
@@ -115,7 +115,7 @@ impl From<oneshot::RecvError> for FetchError {
 
 impl Error for FetchError {}
 
-/// Lazy provider.
+/// Controls whether a [`Lazy`] value remains available before it is requested.
 ///
 /// Stores a value and sends it to the [lazy consumer](Lazy)
 /// when it requests the value.
@@ -135,6 +135,9 @@ impl fmt::Debug for Provider {
 impl Provider {
     /// Keeps the provider alive until the value is requested
     /// or not required anymore.
+    ///
+    /// This consumes the provider. The stored value remains available until the
+    /// corresponding [`Lazy`] requests it or is dropped.
     pub fn keep(mut self) {
         let _ = self.keep_tx.take().unwrap().send(());
     }
@@ -154,9 +157,10 @@ impl Drop for Provider {
     }
 }
 
-/// Lazy value.
+/// A value transferred from its provider only when first requested.
 ///
-/// Allow the reception of a value when requested.
+/// A `Lazy` performs at most one fetch and caches the received value. Calling
+/// [`get`](Self::get) again does not perform another transfer.
 ///
 /// See [module-level documentation](self) for details.
 pub struct Lazy<T, Codec = codec::Default> {
@@ -188,7 +192,7 @@ where
     /// Creates a new lazy value that will receive the specified value.
     ///
     /// The value is stored locally until [get](Self::get) is called or this
-    /// object is dropped.
+    /// object is dropped. The provider is retained automatically until then.
     pub fn new(value: T) -> Self {
         Self::new_future(async move { value })
     }
@@ -208,12 +212,19 @@ where
     }
 
     /// Creates a new pair of lazy value and provider with the specified value.
+    ///
+    /// Dropping the returned [`Provider`] before the value is requested makes
+    /// the lazy value unavailable. This is useful when the provider's lifetime
+    /// must not be controlled by a remote endpoint.
     pub fn provided(value: T) -> (Self, Provider) {
         Self::provided_future(async move { value })
     }
 
     /// Creates a new pair of lazy value and provider with the value returned by
     /// the specified future.
+    ///
+    /// The future is not polled until the value is requested. Dropping the
+    /// provider before that point drops the future without polling it.
     pub fn provided_future<F>(value_fut: F) -> (Self, Provider)
     where
         F: Future<Output = T> + Send + 'static,
@@ -262,7 +273,7 @@ where
         fetch_task.as_mut().unwrap().await;
     }
 
-    /// Requests the value and returns a reference to it.
+    /// Requests the value and returns a reference to the cached result.
     ///
     /// The value is stored locally once received and subsequent
     /// invocations of this function will return a reference to
@@ -277,7 +288,9 @@ where
         }
     }
 
-    /// Consumes this object and returns the value.
+    /// Consumes this object and returns the fetched value.
+    ///
+    /// If the value has not been requested yet, this method requests it first.
     pub async fn into_inner(self) -> Result<T, FetchError> {
         self.fetch().await;
 

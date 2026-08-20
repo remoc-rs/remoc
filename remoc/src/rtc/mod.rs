@@ -5,7 +5,7 @@
 //! By tagging a trait with the [remote attribute](remote), server, client and request receiver
 //! types are generated for that trait.
 //! The client type contains an automatically generated implementation of the trait.
-//! Each call is encoded into a request and send to the server.
+//! Each call is encoded into a request and sent to the server.
 //! The server accepts requests from the client and calls the requested trait method on an object
 //! implementing that trait located on the server.
 //! It then transmits the result back to the client.
@@ -132,7 +132,7 @@
 //!
 //! Also, new functions can be added to the trait without breaking backward compatibility.
 //! Calling a non-existent function (for example when the client is newer than the server) will
-//! result in a error, but the server will continue serving.
+//! result in an error, but the server will continue serving.
 //! It is thus safe to just attempt to call a server function to see if it is available.
 //!
 //! # Compact representation
@@ -380,7 +380,7 @@ use crate::{
 /// All [serde field attributes](https://serde.rs/field-attrs.html) `#[serde(...)]`
 /// are allowed on the arguments of the functions.
 /// They will be transferred to the respective field of the request struct that will
-/// be send to the server when the method is called by the client.
+/// be sent to the server when the method is called by the client.
 /// This can be used to customize serialization and provide defaults for forward and backward
 /// compatibility.
 ///
@@ -401,20 +401,20 @@ pub enum CallError {
     /// while handling it, sending the reply may have failed on the server side, or
     /// the request may have been dropped by a client or server monitor.
     Dropped,
-    /// Sending to a remote endpoint failed.
+    /// Encoding or transferring the request failed; see [`base::SendErrorKind`].
     Send(base::SendErrorKind),
-    /// Receiving from a remote endpoint failed.
+    /// Receiving or decoding the reply failed; see [`base::RecvError`].
     Receive(base::RecvError),
-    /// Connecting a sent channel failed.
+    /// Opening a channel carried by the request or reply failed; see [`chmux::ConnectError`].
     Connect(chmux::ConnectError),
-    /// Listening for a received channel failed.
+    /// Preparing a channel carried by the request or reply failed; see [`chmux::ListenerError`].
     Listen(chmux::ListenerError),
-    /// Forwarding at a remote endpoint to another remote endpoint failed.
+    /// An endpoint forwarding the call or reply could not complete the transfer.
     Forward,
-    /// Remote error.
+    /// A failure was reported by an endpoint forwarding the call or reply.
     ///
-    /// The error occurred at the endpoint the value was received from.
-    /// [`None`] if that endpoint reported an error this one does not know.
+    /// The nested error is [`None`] when that endpoint reported a newer error
+    /// variant that this version of Remoc does not recognize.
     Remote(Option<Box<CallError>>),
 }
 
@@ -753,12 +753,22 @@ pub trait ServerBase {
     type Client: Client;
 }
 
-/// A server of a remotable trait taking the target object by value.
+/// A server that owns the target of a remotely callable trait.
+///
+/// This variant processes calls one at a time and supports methods that consume
+/// `self`. The future returned by [`serve`](Self::serve) must be polled for calls
+/// to be processed.
 pub trait Server<Target, Codec>: ServerBase
 where
     Self: Sized,
 {
-    /// Creates a new server instance for the target object.
+    /// Creates a server and the client connected to it.
+    ///
+    /// `request_buffer` bounds the number of calls that can wait to be processed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `request_buffer` is zero.
     fn new(target: Target, request_buffer: usize) -> (Self, Self::Client);
 
     /// Serves the target object.
@@ -769,12 +779,21 @@ where
     fn serve(self) -> impl Future<Output = (Option<Target>, Result<(), ServeError>)>;
 }
 
-/// A server of a remotable trait taking the target object by reference.
+/// A server that borrows the target of a remotely callable trait.
+///
+/// Calls are processed one at a time. The server cannot outlive the borrowed
+/// target, and its [`serve`](Self::serve) future must be polled.
 pub trait ServerRef<'target, Target, Codec>: ServerBase
 where
     Self: Sized,
 {
-    /// Creates a new server instance for the target object.
+    /// Creates a server and the client connected to it.
+    ///
+    /// `request_buffer` bounds the number of calls that can wait to be processed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `request_buffer` is zero.
     fn new(target: &'target Target, request_buffer: usize) -> (Self, Self::Client);
 
     /// Serves the target object.
@@ -783,12 +802,21 @@ where
     fn serve(self) -> impl Future<Output = Result<(), ServeError>>;
 }
 
-/// A server of a remotable trait taking the target object by mutable reference.
+/// A server that mutably borrows the target of a remotely callable trait.
+///
+/// Calls are processed one at a time. The server cannot outlive the borrowed
+/// target, and its [`serve`](Self::serve) future must be polled.
 pub trait ServerRefMut<'target, Target, Codec>: ServerBase
 where
     Self: Sized,
 {
-    /// Creates a new server instance for the target object.
+    /// Creates a server and the client connected to it.
+    ///
+    /// `request_buffer` bounds the number of calls that can wait to be processed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `request_buffer` is zero.
     fn new(target: &'target mut Target, request_buffer: usize) -> (Self, Self::Client);
 
     /// Serves the target object.
@@ -797,13 +825,22 @@ where
     fn serve(self) -> impl Future<Output = Result<(), ServeError>>;
 }
 
-/// A server of a remotable trait taking the target object by shared reference.
+/// A server that shares ownership of an immutable target.
+///
+/// The target is held in an [`Arc`]. Calls can be processed concurrently when
+/// [`serve`](Self::serve) is invoked with `spawn` set to `true`.
 pub trait ServerShared<Target, Codec>: ServerBase
 where
     Self: Sized,
     Self::Client: Clone,
 {
-    /// Creates a new server instance for a shared reference to the target object.
+    /// Creates a server and the client connected to it.
+    ///
+    /// `request_buffer` bounds the number of calls that can wait to be processed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `request_buffer` is zero.
     fn new(target: Arc<Target>, request_buffer: usize) -> (Self, Self::Client);
 
     /// Serves the target object.
@@ -814,12 +851,21 @@ where
     fn serve(self, spawn: bool) -> impl Future<Output = Result<(), ServeError>>;
 }
 
-/// A server of a remotable trait taking the target object by shared mutable reference.
+/// A server that shares ownership of a mutable target.
+///
+/// The target is held in a Tokio [`RwLock`](tokio::sync::RwLock). Immutable calls
+/// may run concurrently, while mutable calls acquire the write lock.
 pub trait ServerSharedMut<Target, Codec>: ServerBase
 where
     Self: Sized,
 {
-    /// Creates a new server instance for a shared mutable reference to the target object.
+    /// Creates a server and the client connected to it.
+    ///
+    /// `request_buffer` bounds the number of calls that can wait to be processed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `request_buffer` is zero.
     fn new(target: Arc<tokio::sync::RwLock<Target>>, request_buffer: usize) -> (Self, Self::Client);
 
     /// Serves the target object.
@@ -832,7 +878,55 @@ where
     fn serve(self, spawn: bool) -> impl Future<Output = Result<(), ServeError>>;
 }
 
-/// A receiver of requests made by the client of a remotable trait.
+/// Receives remote method calls as values instead of dispatching them to a target.
+///
+/// This is useful when requests need custom scheduling, routing, persistence, or
+/// authorization. Every request contains a one-shot reply sender that must be used
+/// to complete the corresponding client call.
+///
+/// # Example
+///
+/// In the following example the server handles the calls of the client as messages
+/// instead of implementing the `Counter` trait.
+///
+/// ```
+/// use remoc::prelude::*;
+/// use remoc::rtc::{CallError, Req};
+///
+/// #[rtc::remote]
+/// pub trait Counter {
+///     async fn value(&self) -> Result<u32, CallError>;
+///     async fn increase(&mut self, by: u32) -> Result<(), CallError>;
+/// }
+///
+/// // This would be run on the server.
+/// async fn server(mut tx: rch::base::Sender<CounterClient>) {
+///     let (mut req_rx, client) = CounterReqReceiver::new(1);
+///     tx.send(client).await.unwrap();
+///
+///     let mut value = 0;
+///     while let Some(req) = req_rx.recv().await.unwrap() {
+///         match req {
+///             Req::Ref(CounterReqRef::Value { __reply_tx }) => {
+///                 let _ = __reply_tx.send(Ok(value));
+///             }
+///             Req::RefMut(CounterReqRefMut::Increase { __reply_tx, by }) => {
+///                 value += by;
+///                 let _ = __reply_tx.send(Ok(()));
+///             }
+///             _ => (),
+///         }
+///     }
+/// }
+///
+/// // This would be run on the client.
+/// async fn client(mut rx: rch::base::Receiver<CounterClient>) {
+///     let mut counter = rx.recv().await.unwrap().unwrap();
+///     counter.increase(10).await.unwrap();
+///     assert_eq!(counter.value().await.unwrap(), 10);
+/// }
+/// # tokio_test::block_on(remoc::doctest::client_server(server, client));
+/// ```
 pub trait ReqReceiver<Codec>: ServerBase
 where
     Self: Sized,
@@ -844,7 +938,13 @@ where
     /// Type of request by mutable reference (`&mut self`).
     type RefMut: ReqEnum;
 
-    /// Creates a new request receiver instance together with its associated client.
+    /// Creates a request receiver and the client connected to it.
+    ///
+    /// `request_buffer` bounds the number of calls that can wait to be received.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `request_buffer` is zero.
     fn new(request_buffer: usize) -> (Self, Self::Client);
 
     /// Receives the next request, i.e. method call, from the client.
@@ -854,6 +954,14 @@ where
     /// `self`, and then on the variants of the contained per-kind request enum,
     /// one per method. Reply with the result on the oneshot sender provided in
     /// the `__reply_tx` field of each method variant.
+    ///
+    /// Returns `Ok(None)` after all clients have been dropped and all queued
+    /// requests have been received.
+    ///
+    /// # Cancel safety
+    ///
+    /// This method is cancel safe. If canceled before returning, no request is
+    /// consumed.
     #[allow(clippy::type_complexity)]
     fn recv(
         &mut self,
@@ -1266,7 +1374,10 @@ pub struct DefaultGuard;
 impl CallGuard for DefaultGuard {}
 impl DispatchGuard for DefaultGuard {}
 
-/// RTC serving failed.
+/// An error that terminates an RTC server.
+///
+/// Individual application errors returned by trait methods are sent to the
+/// caller and do not terminate serving.
 #[derive(Debug)]
 pub enum ServeError {
     /// Receiving a request from the client failed.

@@ -608,6 +608,10 @@ where
     }
 
     /// Receives the next change event.
+    ///
+    /// Returns [`None`] after the observed list has been marked as done and all
+    /// preceding events have been received. Transfer failures are reported as
+    /// [`RecvError`].
     pub async fn recv(&mut self) -> Result<Option<ListEvent<T>>, RecvError> {
         // Provide initial value complete event.
         if self.len == self.initial_len && !self.complete {
@@ -778,6 +782,8 @@ where
     /// Stops updating the list and returns its current contents.
     ///
     /// If clones of this mirrored list exist, the cloned contents are returned.
+    /// The result includes updates already applied to the mirror but this method
+    /// does not wait for additional remote updates.
     pub async fn detach(mut self) -> Vec<T> {
         match Arc::try_unwrap(self.inner.take().unwrap()) {
             Ok(inner) => inner.into_inner().v,

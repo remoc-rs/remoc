@@ -5,6 +5,18 @@
 //! where it can be either processed event-wise or a mirrored collection can
 //! be built from it.
 //!
+//! Observable collections are useful when a remote endpoint needs a local,
+//! read-only view that changes over time. If it only needs occasional snapshots,
+//! sending ordinary collections may be simpler. If several endpoints must mutate
+//! one value, consider [`robj::rw_lock`] instead.
+//!
+//! # Collection types
+//!
+//! The module provides observable versions of [`HashMap`](hash_map),
+//! [`HashSet`](hash_set), [`Vec`](mod@vec), [`VecDeque`](vec_deque), and a stable-key
+//! [`List`](list). Each collection has its own event, subscription, and mirror
+//! types.
+//!
 //! # Basic use
 //!
 //! Create an observable collection, for example an
@@ -16,6 +28,20 @@
 //!
 //! Call `done` on the observed collection when no further changes will be made.
 //! Subscribers are notified of this and can distinguish it from a lost connection.
+//! Dropping a collection without calling `done` is reported as
+//! [`RecvError::Closed`].
+//!
+//! # Buffering and lag
+//!
+//! `subscribe` takes a send-buffer size. Changes are broadcast without applying
+//! back pressure to the observed collection, so a subscriber that falls behind
+//! can lose events and receives [`RecvError::Lagged`]. A mirror cannot recover
+//! missing changes by itself; choose a buffer large enough for expected bursts or
+//! send a fresh subscription to resynchronize it.
+//!
+//! Mirrors also take a maximum collection size. This protects the receiving
+//! endpoint from unbounded growth and is reported as
+//! [`RecvError::MaxSizeExceeded`] if reached.
 //!
 //! # Example
 //!
@@ -78,13 +104,13 @@ use crate::prelude::*;
 /// An error occurred during sending an event for an observable collection.
 #[derive(Clone, Debug)]
 pub enum SendError {
-    /// Sending to a remote endpoint failed.
+    /// Encoding or transferring an update failed; see [`rch::base::SendErrorKind`].
     Send(rch::base::SendErrorKind),
-    /// Connecting a sent channel failed.
+    /// Opening a channel contained in an update failed; see [`chmux::ConnectError`].
     Connect(chmux::ConnectError),
-    /// Listening to a received channel failed.
+    /// Preparing a channel contained in an update failed; see [`chmux::ListenerError`].
     Listen(chmux::ListenerError),
-    /// Forwarding at a remote endpoint to another remote endpoint failed.
+    /// An endpoint forwarding the subscription could not complete the transfer.
     Forward,
 }
 
@@ -144,25 +170,25 @@ impl<T> TryFrom<rch::mpsc::SendError<T>> for SendError {
 pub enum RecvError {
     /// The observed collection was dropped before `done` was called on it.
     Closed,
-    /// The receiver lagged behind, so that the the send buffer size has reached its limit.
+    /// The receiver lagged behind because the send buffer reached its limit.
     ///
     /// Try increasing the send buffer specified when calling `subscribe` on the
     /// observed collection.
     Lagged,
     /// The maximum size of the mirrored collection has been reached.
     MaxSizeExceeded(usize),
-    /// Receiving from a remote endpoint failed.
+    /// Receiving or decoding an update failed; see [`rch::base::RecvError`].
     Receive(rch::base::RecvError),
-    /// Connecting a sent channel failed.
+    /// Opening a channel contained in an update failed; see [`chmux::ConnectError`].
     Connect(chmux::ConnectError),
-    /// Listening for a connection from a received channel failed.
+    /// Preparing a channel contained in an update failed; see [`chmux::ListenerError`].
     Listen(chmux::ListenerError),
-    /// Invalid index.
+    /// An update referred to an index that is invalid for the mirrored collection.
     InvalidIndex(usize),
-    /// Remote error.
+    /// A failure was reported by an endpoint forwarding the subscription.
     ///
-    /// The error occurred at the endpoint the value was received from.
-    /// [`None`] if that endpoint reported an error this one does not know.
+    /// The nested error is [`None`] when that endpoint reported a newer error
+    /// variant that this version of Remoc does not recognize.
     Remote(Option<Box<RecvError>>),
 }
 
@@ -295,12 +321,24 @@ impl fmt::Debug for ChangeNotifier {
 impl ChangeNotifier {
     /// Returns when the collection has been changed and marks the
     /// newest value as seen.
+    ///
+    /// Multiple changes may be coalesced into one notification. [`DroppedError`]
+    /// is returned when the observable collection and all of its notification
+    /// senders have been dropped.
+    ///
+    /// # Cancel safety
+    ///
+    /// This method is cancel safe. Cancelling it does not mark a pending
+    /// notification as seen.
     pub async fn changed(&mut self) -> Result<(), DroppedError> {
         self.0.changed().await.map_err(|_| DroppedError)
     }
 
     /// Marks the current value as seen, so that [changed](Self::changed)
     /// will not return immediately.
+    ///
+    /// Changes that occur after this call remain observable through
+    /// [`changed`](Self::changed).
     pub fn update(&mut self) {
         self.0.borrow_and_update();
     }

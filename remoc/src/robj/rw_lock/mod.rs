@@ -4,7 +4,7 @@
 //! that can be read and written by each endpoint.
 //! Multiple endpoints can acquire simultaneous read access to the value.
 //! Write access is exclusive and can only be held by one endpoint at a time.
-//! This ensures that all endpoints always have a consist view of the shared value.
+//! This ensures that all endpoints always have a consistent view of the shared value.
 //! The shared value is always stored on the endpoint that created the
 //! [RwLock owner](Owner).
 //!
@@ -25,7 +25,7 @@
 //! # Usage
 //!
 //! [Create an RwLock owner](Owner::new) and use [Owner::rw_lock] to acquire
-//! read/write locks that can be send to remote endpoints, for example over a
+//! read/write locks that can be sent to remote endpoints, for example over a
 //! [remote channel](crate::rch).
 //! The remote endpoints can then use [RwLock::read] and [RwLock::write] to obtain
 //! read or write access respectively.

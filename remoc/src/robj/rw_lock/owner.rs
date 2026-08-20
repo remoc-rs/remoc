@@ -141,6 +141,9 @@ where
     }
 
     /// Makes all acquired locks invalid and returns the shared value.
+    ///
+    /// Existing lock handles can no longer acquire the value after this method
+    /// completes. Any uncommitted changes held by a write guard are not applied.
     pub async fn into_inner(mut self) -> T {
         let _ = self.term_tx.take().unwrap().send(());
         self.task.take().unwrap().await.unwrap()

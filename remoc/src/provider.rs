@@ -1,4 +1,4 @@
-//! Provider for any remote object.
+//! Type-erased ownership of remote object providers.
 
 #[cfg(feature = "rfn")]
 use crate::rfn;
@@ -8,10 +8,12 @@ use crate::robj;
 
 /// A provider for any remote object.
 ///
-/// This helps to store providers of different remote object types together.
-/// For example, you can keep providers of different types in a single vector.
+/// This enum allows providers of different remote object types to be stored
+/// together, for example in a single collection.
 ///
-/// Dropping the provider will stop making the object available remotely.
+/// Dropping a provider stops serving its remote object. Existing users observe
+/// the object as unavailable; use [`done`](Self::done) before dropping when the
+/// object should remain available until all remote references are gone.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Provider {
@@ -78,8 +80,10 @@ impl From<robj::lazy_blob::Provider> for Provider {
 }
 
 impl Provider {
-    /// Releases the provider while keeping the remote object alive
-    /// until it is dropped.
+    /// Keeps serving the remote object without retaining a provider handle.
+    ///
+    /// After this call the object remains available until all remote references
+    /// to it have been dropped. This operation cannot be undone.
     pub fn keep(self) {
         match self {
             #[cfg(feature = "rfn")]
@@ -97,8 +101,10 @@ impl Provider {
         }
     }
 
-    /// Waits until the provider can be safely dropped because it is not
-    /// needed anymore.
+    /// Waits until no remote references need this provider.
+    ///
+    /// The provider continues serving while this method waits. Once it returns,
+    /// dropping the provider does not interrupt a remote user.
     pub async fn done(&mut self) {
         match self {
             #[cfg(feature = "rfn")]

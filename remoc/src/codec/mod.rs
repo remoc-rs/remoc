@@ -1,14 +1,50 @@
 //! Codecs for transforming values into and from binary wire format.
 //!
-//! All codecs in this module are wrappers around the [serde] crates implementing the
-//! data representations.
-//! Thus you should refer to the corresponding crate documentation for information
-//! about limitations and backward as well as forward compatibility.
+//! Remoc uses the full **[Postbag codec](postbag::Postbag)** by default. It is
+//! the recommended codec for most applications: it provides compact binary
+//! encoding while allowing fields and enum variants to be added, removed, and
+//! reordered as a protocol evolves.
 //!
-//! By default the **[Postbag codec](postbag::Postbag)** is used, which is highly efficient as well as
-//! forward and backward compatible.
-//! Unless you have specific requirements, it is *not recommended* to change the default
-//! codec.
+//! Other codecs are available for specialized requirements, such as
+//! interoperating with an existing wire format, producing human-readable data,
+//! or making a different size or performance trade-off. Selecting another codec
+//! also selects its compatibility model; refer to that codec's documentation
+//! before using it in a protocol that must evolve across software versions.
+//!
+//! All codecs implement [`Codec`] on top of [Serde](serde). A codec is part of
+//! the wire protocol, so both endpoints must use the same one for a channel.
+//!
+//! # Selecting a codec
+//!
+//! The codec is a type parameter that defaults to [`Default`]. Specify another
+//! one when creating a channel or [connection](crate::Connect):
+//!
+//! ```
+//! # use remoc::{codec, rch};
+//! # tokio_test::block_on(async {
+//! let (tx, rx) = rch::mpsc::channel::<u32, codec::PostbagSlim>(1);
+//! # let _ = (tx, rx);
+//! # });
+//! ```
+//!
+//! Each channel carries its own codec, so channels over the same connection may
+//! use different ones. [`set_codec`](crate::rch::mpsc::Sender::set_codec) changes
+//! the codec of a channel half before it is sent to a remote endpoint.
+//!
+//! # Postbag compatibility
+//!
+//! Postbag Full includes identifiers and encoded lengths for fields and enum
+//! variants. This lets a receiver skip unknown data and supports common schema
+//! changes when the appropriate Serde attributes are used:
+//!
+//! * use `#[serde(default)]` whenever a receiver may expect a field that the
+//!   sender omits;
+//! * use `#[serde(other)]` to accept enum variants unknown to an older receiver;
+//! * use stable numbered identifiers such as `#[serde(rename = "_0")]` when a
+//!   field or variant may later be renamed.
+//!
+//! See [`Postbag`] for the complete compatibility table, recoverable fields,
+//! numbered identifiers, and format limitations.
 //!
 //! # Crate features
 //!
@@ -44,7 +80,7 @@ use std::{
     sync::Arc,
 };
 
-/// Reference counted error that is send, sync, static and clone.
+/// A cloneable, reference-counted error that is safe to share between tasks.
 pub type ArcError = Arc<dyn Error + Send + Sync + 'static>;
 
 /// An error consisting of a string message.

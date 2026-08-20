@@ -20,18 +20,22 @@ use super::{
     sender::Sender,
 };
 
-/// An error occurred during connecting to a remote service.
+/// An error returned when a multiplexed channel cannot be opened.
+///
+/// Most applications encounter this type through a higher-level channel error.
+/// Port and pending-request limits are configured resource limits; rejection
+/// indicates that the requested service was not accepted by the remote endpoint.
 #[derive(Debug, Clone)]
 pub enum ConnectError {
-    /// All local ports are in use.
+    /// No local port is currently available for the new channel.
     LocalPortsExhausted,
-    /// All remote ports are in use.
+    /// The remote endpoint reported that no port is available.
     RemotePortsExhausted,
-    /// Too many connection requests are pending.
+    /// The configured limit for pending connection requests was reached.
     TooManyPendingConnectReqs,
-    /// Connection has been rejected by server.
+    /// The remote listener rejected the requested channel.
     Rejected,
-    /// A multiplexer error has occurred or it has been terminated.
+    /// The underlying multiplexer failed or terminated.
     ChMux,
 }
 
@@ -204,6 +208,10 @@ impl Client {
     }
 
     /// Allocates a port connection request.
+    ///
+    /// The returned [`ConnectReq`] reserves a local port number and can be
+    /// configured before it is passed to [`connect`](Self::connect).
+    /// This fails when all local port numbers are in use.
     pub fn connect_req(&self) -> Result<ConnectReq, PortsExhausted> {
         self.port_allocator.connect_req()
     }
@@ -270,14 +278,19 @@ impl Client {
 
     /// Connects to a newly allocated remote port from a newly allocated local port.
     ///
-    /// This function waits until a local and remote port become available and tries
-    /// to pre-connect the port if possible.
+    /// This function waits until a local and remote port become available. When
+    /// possible, it provisionally opens the port so data can be sent while the
+    /// remote listener's acceptance is still pending; see
+    /// [`ConnectReq::try_pre_connect`].
     pub async fn connect_port(&self) -> Result<(Sender, Receiver), ConnectError> {
         let req = self.connect_req().map_err(|_| ConnectError::LocalPortsExhausted)?;
         self.connect(req.try_pre_connect()).await
     }
 
     /// Terminates the multiplexer, forcibly closing all open ports.
+    ///
+    /// This also prevents new ports from being opened. Existing senders,
+    /// receivers, and listeners subsequently observe termination.
     pub fn terminate(&self) {
         let _ = self.terminate_tx.send(());
     }

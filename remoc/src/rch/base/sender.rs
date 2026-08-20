@@ -30,12 +30,15 @@ use crate::{
 
 pub use crate::chmux::Closed;
 
-/// An error that occurred during remote sending.
+/// An error returned when a base-channel value cannot be sent.
+///
+/// The original value is retained in [`item`](Self::item), allowing the caller
+/// to recover ownership after a failed send.
 #[derive(Clone, custom_debug::Debug)]
 pub struct SendError<T> {
-    /// Error kind.
+    /// The reason the value could not be sent.
     pub kind: SendErrorKind,
-    /// Item that could not be sent.
+    /// The value that could not be sent.
     #[debug(skip)]
     pub item: T,
 }
@@ -57,14 +60,14 @@ impl<T: 'static> SendError<T> {
     }
 }
 
-/// Error kind that occurred during remote sending.
+/// The reason a base-channel send failed.
 #[derive(Debug, Clone)]
 pub enum SendErrorKind {
-    /// Serialization of the item failed.
+    /// The codec could not encode the value.
     Serialize(SerializationError),
-    /// Sending of the serialized item over the chmux channel failed.
+    /// Transferring the encoded value failed; see [`chmux::SendError`].
     Send(chmux::SendError),
-    /// Maximum item size was exceeded.
+    /// The encoded value exceeds the channel's configured item-size limit.
     MaxItemSizeExceeded,
 }
 
@@ -78,12 +81,12 @@ crate::versioned::compact::impl_enum! {
 }
 
 impl SendErrorKind {
-    /// True, if the remote endpoint closed the channel.
+    /// Returns `true` if the remote receiver explicitly closed the channel.
     pub fn is_closed(&self) -> bool {
         matches!(self, Self::Send(err) if err.is_closed())
     }
 
-    /// True, if the remote endpoint closed the channel, was dropped or the connection failed.
+    /// Returns `true` if the channel can no longer transfer values.
     pub fn is_disconnected(&self) -> bool {
         matches!(self, Self::Send(err) if err.is_disconnected())
     }
@@ -99,22 +102,22 @@ impl<T> SendError<T> {
         Self { kind, item }
     }
 
-    /// Returns true, if error it due to channel being closed.
+    /// Returns `true` if the remote receiver explicitly closed the channel.
     pub fn is_closed(&self) -> bool {
         self.kind.is_closed()
     }
 
-    /// True, if the remote endpoint closed the channel, was dropped or the connection failed.
+    /// Returns `true` if the channel can no longer transfer values.
     pub fn is_disconnected(&self) -> bool {
         self.kind.is_disconnected()
     }
 
-    /// Returns whether the error is caused by the item to be sent.
+    /// Returns whether the error was caused by the value being sent.
     pub fn is_item_specific(&self) -> bool {
         self.kind.is_item_specific()
     }
 
-    /// Returns the error without the contained item.
+    /// Discards the unsent value and returns the same error with `()` in its place.
     pub fn without_item(self) -> SendError<()> {
         SendError { kind: self.kind, item: () }
     }
@@ -222,8 +225,10 @@ impl PortSerializer {
 
     /// Open a chmux port to the remote endpoint using the specified connection request.
     ///
-    /// This function waits until a local and remote port become available and tries
-    /// to pre-connect the port if possible.
+    /// This function waits until a local and remote port become available. When
+    /// possible, it provisionally opens the port so data can be sent while the
+    /// remote listener's acceptance is still pending; see
+    /// [`ConnectReq::try_pre_connect`].
     ///
     /// Returns the local port number and calls the specified function with the connect object.    
     pub fn connect_port<E, C, F>(callback: C) -> Result<u32, E>
@@ -270,9 +275,15 @@ impl PortSerializer {
     }
 }
 
-/// Sends arbitrary values to a remote endpoint.
+/// The sending half of a connection's base channel.
 ///
-/// Values may be or contain any channel from this crate.
+/// A base channel is created together with a Remoc [`Connect`](crate::Connect)
+/// future and provides the first typed channel between two endpoints. Values may
+/// contain other Remoc channel halves or remote objects, which establishes those
+/// objects on the receiving endpoint.
+///
+/// The base sender is not cloneable. To add independently owned producers, send
+/// an [`mpsc::Sender`](crate::rch::mpsc::Sender) over it.
 pub struct Sender<T, Codec = codec::Default> {
     erased: ErasedSender,
     _phantom: fn(T, Codec),
@@ -326,9 +337,13 @@ where
         self.erased.storage()
     }
 
-    /// Sends an item over the channel.
+    /// Sends one value to the remote endpoint.
     ///
-    /// The item may contain ports that will be serialized and connected as well.
+    /// Any Remoc channels or remote objects contained in the value are connected
+    /// as part of the send. A successful return means the value was handed to the
+    /// connection; it does not mean the remote application has processed it.
+    ///
+    /// If sending fails, the returned [`SendError`] contains the original value.
     pub async fn send(&mut self, item: T) -> Result<(), SendError<T>> {
         self.erased.send_erased(Box::new(item)).await.map_err(SendError::<T>::from_any)
     }
@@ -616,17 +631,19 @@ impl ErasedSender {
         self.max_item_size = max_item_size;
     }
 
-    /// Returns whehter the remote endpoint supports calling [all_received](Self::all_received).
+    /// Returns whether the remote endpoint supports calling [all_received](Self::all_received).
     ///
     /// See [chmux::Sender::is_all_received_supported](crate::chmux::Sender::is_all_received_supported) for details.
     pub fn is_all_received_supported(&self) -> bool {
         self.sender.is_all_received_supported()
     }
 
-    /// Returns a future that will resolve when the remote endpoints has received all
-    /// items sent on this channel up to now.    
+    /// Returns a future that resolves once the remote channel layer has received
+    /// all encoded items sent on this channel up to this call.
     ///
-    /// See [chmux::Sender::all_received](crate::chmux::Sender::all_received) for details.
+    /// This does not mean the remote application has decoded or processed those
+    /// items yet. See
+    /// [chmux::Sender::all_received](crate::chmux::Sender::all_received) for details.
     pub fn all_received(&self) -> AllReceived {
         self.sender.all_received()
     }

@@ -26,16 +26,19 @@ use crate::{
     codec::{self, AnySend, DeserializationError, ErasedDeserializer, StreamingUnavailable},
 };
 
-/// An error that occurred during receiving from a remote endpoint.
+/// An error returned while receiving from a base channel.
 #[derive(Clone, Debug)]
 pub enum RecvError {
-    /// Receiving data over the chmux channel failed.
+    /// Transferring the encoded value failed; see [`chmux::RecvError`].
     Receive(chmux::RecvError),
-    /// Deserialization of received data failed.
+    /// The codec could not decode the received value.
     Deserialize(DeserializationError),
-    /// Chmux ports required for deserialization of received channels were not received.
+    /// One or more channels referenced by the value were not received.
+    ///
+    /// The contained numbers identify the missing multiplexed ports. This usually
+    /// indicates a peer or protocol failure rather than an application-level error.
     MissingPorts(Vec<u32>),
-    /// Maximum item size was exceeded.
+    /// The received value exceeds the channel's configured item-size limit.
     MaxItemSizeExceeded,
 }
 
@@ -176,9 +179,15 @@ impl PortDeserializer {
     }
 }
 
-/// Receives arbitrary values from a remote endpoint.
+/// The receiving half of a connection's base channel.
 ///
-/// Values may be or contain any channel from this crate.
+/// A base channel is created together with a Remoc [`Connect`](crate::Connect)
+/// future and receives the first typed values exchanged by the endpoints.
+/// Received values may contain other Remoc channel halves or remote objects.
+///
+/// The base receiver is not cloneable. To distribute values to several
+/// consumers, receive or create a suitable channel such as
+/// [`broadcast`](crate::rch::broadcast).
 pub struct Receiver<T, Codec = codec::Default> {
     erased: ErasedReceiver,
     _phantom: fn(T, Codec),
@@ -237,7 +246,10 @@ where
         *item
     }
 
-    /// Receive an item from the remote endpoint.
+    /// Receives the next value from the remote endpoint.
+    ///
+    /// Returns `Ok(None)` after the remote sender has been dropped and all
+    /// previously sent values have been received.
     pub async fn recv(&mut self) -> Result<Option<T>, RecvError> {
         self.erased.recv_erased().await.map(|opt| opt.map(Self::from_any))
     }
@@ -292,7 +304,7 @@ impl ErasedReceiver {
         }
     }
 
-    /// Creates a type-erased base remote receiver for the specfied type `T` and codec from a [chmux] receiver.
+    /// Creates a type-erased base remote receiver for the specified type `T` and codec from a [chmux] receiver.
     pub fn typed<T, Codec>(receiver: chmux::Receiver) -> Self
     where
         T: DeserializeOwned + Send + 'static,
@@ -498,10 +510,10 @@ impl ErasedReceiver {
         }
     }
 
-    /// Close the channel.
+    /// Closes the channel without dropping the receiver.
     ///
-    /// This stops the remote endpoint from sending more data, but allows already sent data
-    /// to be received.
+    /// This stops the remote endpoint from sending more values, while allowing
+    /// values already in transit to be received.
     pub async fn close(&mut self) {
         self.receiver.close().await
     }

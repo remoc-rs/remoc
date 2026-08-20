@@ -18,14 +18,16 @@ use super::{
 };
 use wokio::runtime;
 
-/// An multiplexer listener error.
+/// An error returned when a multiplexed channel listener cannot be created.
+///
+/// Most applications encounter this type through a higher-level channel error.
 #[derive(Debug, Clone)]
 pub enum ListenerError {
-    /// All local ports are in use.
+    /// No local port is currently available for the listener.
     LocalPortsExhausted,
-    /// The requested remote port number has alredy been allocated.
+    /// The requested remote port is already assigned to another channel.
     RemotePortAlreadyAllocated(u32),
-    /// A multiplexer error has occurred or it has been terminated.
+    /// The underlying multiplexer failed or terminated.
     ChMux,
 }
 
@@ -134,7 +136,10 @@ impl Request {
         self.wait
     }
 
-    /// Whether the channel is pre-connected.
+    /// Returns whether the remote endpoint provisionally opened this channel.
+    ///
+    /// A pre-connected channel may already carry data even though this request has not
+    /// yet been accepted. Rejecting the request also rejects that provisional channel.
     pub fn is_pre_connected(&self) -> bool {
         self.pre_connected.is_some()
     }
@@ -160,6 +165,10 @@ impl Request {
     }
 
     /// Accepts the request.
+    ///
+    /// This consumes the request and returns the sender and receiver for the new
+    /// bidirectional port. It may wait for a local port number when the requester
+    /// permits waiting.
     pub async fn accept(mut self) -> Result<(Sender, Receiver), ListenerError> {
         if let Some(tx_rx) = self.accept_pre_connected().await? {
             return Ok(tx_rx);
@@ -350,12 +359,18 @@ impl Listener {
         }
     }
 
-    /// Convert this into a listener stream.
+    /// Converts this listener into a stream of incoming connection requests.
+    ///
+    /// The stream ends when the remote client is dropped and no more requests
+    /// can arrive. Each yielded [`Request`] must be accepted or rejected.
     pub fn into_stream(self) -> ListenerStream {
         ListenerStream::new(self)
     }
 
     /// Terminates the multiplexer, forcibly closing all open ports.
+    ///
+    /// This also prevents new ports from being opened. Existing senders,
+    /// receivers, and clients subsequently observe termination.
     pub fn terminate(&self) {
         let _ = self.terminate_tx.send(());
     }

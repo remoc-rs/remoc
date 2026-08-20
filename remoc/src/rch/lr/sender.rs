@@ -21,12 +21,15 @@ use crate::{
 
 pub use super::super::base::Closed;
 
-/// An error that occurred during remote sending.
+/// An error returned when a value cannot be sent.
+///
+/// The original value is retained in [`item`](Self::item), allowing the caller
+/// to retry it elsewhere or recover ownership.
 #[derive(Clone, custom_debug::Debug)]
 pub struct SendError<T> {
-    /// Error kind.
+    /// The reason the value could not be sent.
     pub kind: SendErrorKind,
-    /// Item that could not be sent.
+    /// The value that could not be sent.
     #[debug(skip)]
     pub item: T,
 }
@@ -40,16 +43,16 @@ crate::versioned::compact::impl_struct! {
     where T: crate::RemoteSend
 }
 
-/// Error kind that occurred during remote sending.
+/// The reason a local/remote channel send failed.
 #[derive(Debug, Clone)]
 pub enum SendErrorKind {
-    /// Serialization of the item failed.
+    /// The codec could not encode the value.
     Serialize(SerializationError),
-    /// Sending of the serialized item over the chmux channel failed.
+    /// Transferring the encoded value failed; see [`chmux::SendError`].
     Send(chmux::SendError),
-    /// Connecting to remote channel failed.
+    /// Establishing the remote half of this channel failed; see [`ConnectError`].
     Connect(ConnectError),
-    /// Maximum item size was exceeded.
+    /// The encoded value exceeds the channel's configured item-size limit.
     MaxItemSizeExceeded,
 }
 
@@ -68,22 +71,22 @@ impl<T> SendError<T> {
         Self { kind, item }
     }
 
-    /// True, if the remote endpoint closed the channel.
+    /// Returns `true` if the remote receiver explicitly closed the channel.
     pub fn is_closed(&self) -> bool {
         matches!(&self.kind, SendErrorKind::Send(err) if err.is_closed())
     }
 
-    /// True, if the remote endpoint closed the channel, was dropped or the connection failed.
+    /// Returns `true` if the channel can no longer transfer values.
     pub fn is_disconnected(&self) -> bool {
         matches!(&self.kind, SendErrorKind::Send(_) | SendErrorKind::Connect(_))
     }
 
-    /// Whether the error is caused by the item to be sent.
+    /// Returns whether the failure was caused by the value being sent.
     pub fn is_item_specific(&self) -> bool {
         matches!(&self.kind, SendErrorKind::Serialize(_) | SendErrorKind::MaxItemSizeExceeded)
     }
 
-    /// Returns the error without the contained item.
+    /// Discards the unsent value and returns the same error with `()` in its place.
     pub fn without_item(self) -> SendError<()> {
         SendError { kind: self.kind, item: () }
     }
@@ -138,7 +141,11 @@ impl<T> From<base::SendError<T>> for SendError<T> {
 
 impl<T> Error for SendError<T> where T: fmt::Debug {}
 
-/// The sender part of a local/remote channel.
+/// The sending half of a local/remote channel.
+///
+/// Exactly one half of the channel must be transferred to a remote endpoint
+/// before this sender can be used. Unlike an [`mpsc`](crate::rch::mpsc) sender,
+/// this type is not cloneable or forwardable.
 pub struct Sender<T, Codec = codec::Default> {
     pub(super) sender: Option<Result<base::Sender<T, Codec>, ConnectError>>,
     pub(super) sender_rx: tokio::sync::mpsc::UnboundedReceiver<Result<base::Sender<T, Codec>, ConnectError>>,
@@ -194,7 +201,11 @@ where
         self.sender.as_mut().unwrap().as_mut().map_err(|err| err.clone())
     }
 
-    /// Sends an item over the channel.
+    /// Sends one value, waiting until it has been handed to the connection.
+    ///
+    /// A successful return does not mean that the remote application has processed
+    /// the value. On failure, the returned [`SendError`] contains the original
+    /// value.
     pub async fn send(&mut self, item: T) -> Result<(), SendError<T>> {
         match self.get().await {
             Ok(sender) => Ok(sender.send(item).await?),
@@ -202,12 +213,17 @@ where
         }
     }
 
-    /// True, once the remote endpoint has closed its receiver.
+    /// Returns whether the remote receiver has closed the channel.
+    ///
+    /// Establishes the channel connection on first use.
     pub async fn is_closed(&mut self) -> Result<bool, ConnectError> {
         Ok(self.get().await?.is_closed())
     }
 
-    /// Returns a future that will resolve when the remote endpoint closes its receiver.
+    /// Returns a future that completes when the remote receiver closes.
+    ///
+    /// Establishes the channel connection on first use. Await the returned
+    /// [`Closed`] future to wait for closure.
     pub async fn closed(&mut self) -> Result<Closed, ConnectError> {
         Ok(self.get().await?.closed())
     }

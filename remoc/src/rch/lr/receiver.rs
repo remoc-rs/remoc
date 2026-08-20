@@ -18,18 +18,21 @@ use crate::{
     codec::{self, DeserializationError},
 };
 
-/// An error that occurred during receiving from a remote endpoint.
+/// An error returned while receiving from a local/remote channel.
 #[derive(Clone, Debug)]
 pub enum RecvError {
-    /// Receiving data over the chmux channel failed.
+    /// Transferring the encoded value failed; see [`chmux::RecvError`].
     Receive(chmux::RecvError),
-    /// Deserialization of received data failed.
+    /// The codec could not decode the received value.
     Deserialize(DeserializationError),
-    /// chmux ports required for deserialization of received channels were not received.
+    /// One or more channels referenced by the value were not received.
+    ///
+    /// The contained numbers identify the missing multiplexed ports. This usually
+    /// indicates a peer or protocol failure rather than an application-level error.
     MissingPorts(Vec<u32>),
-    /// Connecting to remote channel failed.
+    /// Establishing the remote half of this channel failed; see [`ConnectError`].
     Connect(ConnectError),
-    /// Maximum item size was exceeded.
+    /// The received value exceeds the channel's configured item-size limit.
     MaxItemSizeExceeded,
 }
 
@@ -90,7 +93,11 @@ impl RecvError {
     }
 }
 
-/// The receiver part of a local/remote channel.
+/// The receiving half of a local/remote channel.
+///
+/// Exactly one half of the channel must be transferred to a remote endpoint
+/// before this receiver can be used. Unlike an [`mpsc`](crate::rch::mpsc)
+/// receiver, this type cannot be forwarded.
 pub struct Receiver<T, Codec = codec::Default> {
     pub(super) receiver: Option<Result<base::Receiver<T, Codec>, ConnectError>>,
     pub(super) sender_tx:
@@ -149,17 +156,21 @@ where
         self.receiver.as_mut().unwrap().as_mut().map_err(|err| err.clone())
     }
 
-    /// Receive an item from the remote endpoint.
+    /// Receives the next value.
+    ///
+    /// Returns `Ok(None)` after the sender has been dropped and all previously
+    /// sent values have been received.
     pub async fn recv(&mut self) -> Result<Option<T>, RecvError> {
         let receiver = self.get().await?;
         let item = receiver.recv().await?;
         Ok(item)
     }
 
-    /// Close the channel.
+    /// Closes the channel without dropping the receiver.
     ///
-    /// This stops the remote endpoint from sending more items, but allows already sent items
-    /// to be received.
+    /// This stops the remote endpoint from sending more values, while allowing
+    /// values already in transit to be received. The method waits for the channel
+    /// connection to be established if necessary.
     pub async fn close(&mut self) {
         if let Ok(receiver) = self.get().await {
             receiver.close().await;

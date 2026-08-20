@@ -13,7 +13,7 @@ use crate::{
     },
 };
 
-/// Error occurred during establishing a providing connection.
+/// An error returned while establishing a connection that provides a value.
 #[derive(Debug, Clone)]
 pub enum ProvideError<TransportSinkError, TransportStreamError> {
     /// Channel multiplexer error.
@@ -70,7 +70,7 @@ where
 {
 }
 
-/// Error occurred during establishing a consuming connection.
+/// An error returned while establishing a connection that consumes a value.
 #[derive(Debug, Clone)]
 pub enum ConsumeError<TransportSinkError, TransportStreamError> {
     /// Channel multiplexer error.

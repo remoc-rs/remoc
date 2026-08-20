@@ -20,6 +20,9 @@ impl fmt::Debug for RFnOnceProvider {
 
 impl RFnOnceProvider {
     /// Keeps the provider alive until it is not required anymore.
+    ///
+    /// This consumes the provider and keeps the function available until the
+    /// corresponding [`RFnOnce`] is called or dropped.
     pub fn keep(mut self) {
         let _ = self.keep_tx.take().unwrap().send(());
     }

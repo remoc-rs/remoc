@@ -23,26 +23,36 @@
 //!
 //! # Channel types
 //!
+//! | Channel | Delivery model | Back pressure | Typical use |
+//! |---|---|---|---|
+//! | [base] | one sender, one receiver | yes | bootstrap a connection |
+//! | [mpsc] | many senders, one receiver | yes | commands, work queues, streams of values |
+//! | [oneshot] | one value | n/a | replies and acknowledgements |
+//! | [watch] | only the newest value | no | configuration and status |
+//! | [broadcast] | every active receiver | no; slow receivers lag | events for several consumers |
+//! | [lr] | one sender, one receiver | yes | lower-overhead channel with placement restrictions |
+//! | [bin] | binary messages | yes | already encoded bytes |
+//! | [io] | byte stream | yes | large or streaming binary data |
+//!
 //! [Broadcast](broadcast), [MPSC](mpsc), [oneshot] and [watch] channels are closely
 //! modelled after the channels found in [tokio::sync].
 //! They also work when both halves of the channel are local and can be forwarded
 //! over multiple connections.
 //!
-//! An [local/remote channel](lr) is a more restricted version of an [MPSC](mpsc) channel.
+//! A [local/remote channel](lr) is a more restricted version of an [MPSC](mpsc) channel.
 //! It does not support forwarding and exactly one half of it must be on a remote endpoint.
-//! Its benefit is, that it does not spawn an async task and thus uses less resources.
+//! It uses fewer resources, but imposes more constraints on how the channel is used.
 //! When in doubt use an [MPSC channel](mpsc) instead.
 //!
 //! A [binary channel](bin) can be used to exchange binary data over a channel.
 //! It skips serialization and deserialization and thus is more efficient for binary data,
 //! especially when using text codecs such as JSON.
-//! It does support forwarding.
-//! However, at least one half of it must be on a remote endpoint.
+//! It works locally and supports forwarding over remote connections.
 //!
 //! An [I/O channel](io) provides [`AsyncWrite`](tokio::io::AsyncWrite) and
 //! [`AsyncRead`](tokio::io::AsyncRead) implementations for streaming binary data.
 //! It supports both known and unknown sizes, with integrity verification on completion.
-//! At least one half of it must be on a remote endpoint.
+//! It works both locally and across remote connections.
 //!
 //! # Transferring binary data efficiently
 //!
@@ -105,47 +115,31 @@
 //! The memory a channel occupies is therefore bounded, even if the two endpoints run at
 //! very different speeds.
 //!
-//! On its way out a value passes three stages, each of which can hold it up:
-//!
-//!   1. the queue of the channel itself, holding the number of items that was specified
-//!      when the channel was created, or [DEFAULT_BUFFER] items when the sending half
-//!      was received from a remote endpoint,
-//!   2. serialization, which cuts the value into chunks of
-//!      [chunk_size](crate::Cfg::chunk_size) bytes,
-//!   3. the transport, which takes a chunk only when the remote endpoint has credit for
-//!      it.
-//!
-//! Credit is what limits the amount of data in flight. Every port has an allowance of its
-//! own, [port_receive_buffer](crate::Cfg::port_receive_buffer) bytes, and draws on a pool
-//! shared by all ports of the connection,
-//! [shared_receive_buffer](crate::Cfg::shared_receive_buffer).
-//! The remote endpoint returns credit as it consumes what it has received, so a receiver
-//! that is never polled stops returning credit and the transmission comes to rest once
-//! the allowance is used up.
+//! A channel's item buffer controls how many values producers can queue before they
+//! have to wait. Values being transferred are additionally bounded in bytes by the
+//! per-channel and shared receive-buffer settings in [Cfg](crate::Cfg). These byte
+//! limits apply across the connection and keep a small number of large values from
+//! consuming unbounded memory.
 //!
 //! The [watch] and [broadcast] channels are the exception: neither applies back pressure.
 //! A watch channel holds only the newest value, so values are dropped when the transfer
 //! cannot keep up; a broadcast receiver that falls behind loses values as well.
 //!
-//! The queue of a channel bounds items, not bytes; how much data is in flight is decided
-//! by the credits, so a channel created with a buffer of one item may still have a port
-//! receive buffer of data behind it. The bounds in bytes are configured in
-//! [Cfg](crate::Cfg). A channel whose data is consumed slowly loses access to the shared
-//! buffer by itself, once its receive buffer reaches
-//! [port_receive_throttle](crate::Cfg::port_receive_throttle), so this needs no attention
-//! in general.
+//! Item and byte limits are independent: a channel with a one-item queue can still be
+//! transferring one large value. The defaults are intended for general use; applications
+//! with unusually large values or many active channels can tune the limits through
+//! [Cfg](crate::Cfg).
 //!
 //! # Size considerations
 //!
-//! The size of the objects exchanged is not limited.
-//! If the object is small enough it is first serialized into a buffer and then sent as
-//! one message to the remote endpoint.
-//! For larger objects, a serialization thread is spawned and the message is sent
-//! chunk-by-chunk to avoid the need for a large temporary memory buffer.
-//! Deserialization is also performed on-the-fly as data is received for large objects.
+//! Remoc can stream large serialized values without requiring the whole encoded value to
+//! fit in memory at once. Transfers are interleaved between channels, so a large value
+//! does not prevent unrelated channels from making progress.
 //!
-//! Large values are always sent in chunks, so that one channel does not block other channels
-//! for a long period of time.
+//! Individual channel types can impose a configurable maximum item size. If streaming
+//! serialization is unavailable on the current platform, values are additionally limited
+//! by [`Cfg::max_data_size`](crate::Cfg::max_data_size); see
+//! [`StreamingUnavailable`](crate::codec::StreamingUnavailable).
 //!
 //! To avoid denial of service attacks when you exchange data with untrusted remote endpoints,
 //! make sure that an object cannot grow to infinite size during deserialization.
@@ -443,14 +437,14 @@ pub const DEFAULT_BUFFER: usize = 2;
 /// The current default maximum allowed item size is 16 MB.
 pub const DEFAULT_MAX_ITEM_SIZE: usize = 16_777_216;
 
-/// Reason for why a value queued for sending failed to send.
+/// The reason a value queued for sending could not be transferred.
 #[derive(Debug, Clone)]
 pub enum SendingErrorKind {
-    /// Sending failed.
+    /// Encoding or transferring the queued value failed; see [`base::SendErrorKind`].
     Send(base::SendErrorKind),
     /// The value was dropped while it was in the send queue or
     /// the result of the sending operation has already been read
-    /// using [`Sending::try_result`].    
+    /// using [`Sending::try_result`].
     Dropped,
 }
 
@@ -474,7 +468,9 @@ impl fmt::Display for SendingErrorKind {
 /// A value queued for sending failed to send.
 #[derive(custom_debug::Debug, Clone)]
 pub enum SendingError<T> {
-    /// Sending failed.
+    /// Encoding or transferring the queued value failed.
+    ///
+    /// The nested [`base::SendError`] contains the value and the detailed cause.
     Send(base::SendError<T>),
     /// The value was dropped while it was in the send queue or
     /// the result of the sending operation has already been read
@@ -506,7 +502,7 @@ impl<T> fmt::Display for SendingError<T> {
 impl<T> Error for SendingError<T> where T: fmt::Debug {}
 
 impl<T> SendingError<T> {
-    /// Error kind.
+    /// Returns the reason for the failure without the unsent value.
     pub fn kind(&self) -> SendingErrorKind {
         match self {
             Self::Send(err) => SendingErrorKind::Send(err.kind.clone()),
@@ -526,6 +522,39 @@ impl<T> SendingError<T> {
 /// This would massively impact the throughput of the channel.
 ///
 /// Dropping the handle *does not* abort sending the value.
+///
+/// # Example
+///
+/// In the following example the client sends ten values and only afterwards
+/// checks whether transferring them succeeded.
+///
+/// ```
+/// use remoc::prelude::*;
+///
+/// // This would be run on the client.
+/// async fn client(mut tx: rch::base::Sender<rch::mpsc::Receiver<u32>>) {
+///     let (data_tx, data_rx) = rch::mpsc::channel(1);
+///     tx.send(data_rx).await.unwrap();
+///
+///     // Collect the handles instead of awaiting them, so that queueing
+///     // of the next value is not delayed by the transfer of this one.
+///     let mut sendings = Vec::new();
+///     for i in 0..10 {
+///         sendings.push(data_tx.send(i).await.unwrap());
+///     }
+///
+///     for sending in sendings {
+///         sending.await.unwrap();
+///     }
+/// }
+///
+/// // This would be run on the server.
+/// async fn server(mut rx: rch::base::Receiver<rch::mpsc::Receiver<u32>>) {
+///     let mut data_rx = rx.recv().await.unwrap().unwrap();
+///     while data_rx.recv().await.unwrap().is_some() {}
+/// }
+/// # tokio_test::block_on(remoc::doctest::client_server(client, server));
+/// ```
 pub struct Sending<T>(tokio::sync::oneshot::Receiver<Result<(), base::SendError<T>>>);
 
 impl<T> fmt::Debug for Sending<T> {
@@ -537,7 +566,9 @@ impl<T> fmt::Debug for Sending<T> {
 impl<T> Sending<T> {
     /// Tries to obtain the result of the sending operation.
     ///
-    /// If the value is still queued for sending `None` is returned.
+    /// If the value is still queued for sending, `None` is returned. Once this
+    /// yields `Some`, the stored result has been consumed and the handle no
+    /// longer reports it again.
     pub fn try_result(&mut self) -> Option<Result<(), SendingError<T>>> {
         match self.0.try_recv() {
             Ok(Ok(())) => Some(Ok(())),

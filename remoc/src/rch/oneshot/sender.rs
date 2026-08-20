@@ -4,12 +4,14 @@ use std::{error::Error, fmt};
 use super::super::{ClosedReason, SendErrorExt, Sending, mpsc};
 use crate::{RemoteSend, codec};
 
-/// An error occurred during sending over an mpsc channel.
+/// An error returned when a one-shot value cannot be queued for sending.
 #[derive(Clone, custom_debug::Debug)]
 pub enum SendError<T> {
-    /// The remote end closed the channel.
+    /// The receiver closed the channel before accepting the value.
     Closed(#[debug(skip)] T),
-    /// Communication with the remote endpoint failed.
+    /// An asynchronous transfer failed after the value was accepted for sending.
+    ///
+    /// The detailed cause is not available through a one-shot sender.
     Failed,
 }
 
@@ -23,12 +25,12 @@ crate::versioned::compact::impl_enum! {
 }
 
 impl<T> SendError<T> {
-    /// True, if the remote endpoint closed the channel.
+    /// Returns `true` if the receiver closed the channel before accepting the value.
     pub fn is_closed(&self) -> bool {
         matches!(self, Self::Closed(_))
     }
 
-    /// True, if the remote endpoint closed the channel, was dropped or the connection failed.
+    /// Returns `true` if the receiver is unavailable.
     ///
     /// This is always true since a oneshot channel has no method of reporting other errors
     /// (such as serialization errors) because the send operation is performed asynchronously.
@@ -81,7 +83,11 @@ impl<T> From<mpsc::TrySendError<T>> for SendError<T> {
 
 impl<T> Error for SendError<T> where T: fmt::Debug {}
 
-/// Sends a value to the associated receiver.
+/// The sending half of a one-shot channel.
+///
+/// A sender can be transferred to another endpoint and can send at most one value.
+/// Dropping it without sending causes the associated [`Receiver`](super::Receiver)
+/// to resolve with [`RecvError::Closed`](super::RecvError::Closed).
 #[derive(Serialize, Deserialize)]
 #[serde(bound(serialize = "T: RemoteSend, Codec: codec::Codec"))]
 #[serde(bound(deserialize = "T: RemoteSend, Codec: codec::Codec"))]
@@ -98,10 +104,12 @@ where
     T: RemoteSend,
     Codec: codec::Codec,
 {
-    /// Sends a value over this channel.
+    /// Sends the channel's single value.
     ///
-    /// `Ok` means that the value was queued for sending; the returned handle
-    /// reports whether it was sent.
+    /// This method does not wait for remote receipt: `Ok` only means the value
+    /// was accepted for transfer. Await the returned [`Sending`] handle to learn
+    /// whether that transfer completed; if queuing fails, the error contains the
+    /// original value.
     pub fn send(self, value: T) -> Result<Sending<T>, SendError<T>> {
         self.0.try_send(value).map_err(|err| err.into())
     }
@@ -113,7 +121,7 @@ where
         self.0.closed().await
     }
 
-    /// Returns the reason for why the channel has been closed.
+    /// Returns the reason the channel was closed.
     ///
     /// Returns [None] if the channel is not closed.
     pub fn closed_reason(&self) -> Option<ClosedReason> {

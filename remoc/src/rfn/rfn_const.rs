@@ -28,6 +28,9 @@ impl RFnProvider {
     pub const DEFAULT_MAX_CONCURRENCY: usize = 32;
 
     /// Keeps the provider alive until it is not required anymore.
+    ///
+    /// This consumes the provider and keeps the function available until all
+    /// corresponding [`RFn`] handles have been dropped.
     pub fn keep(mut self) {
         let _ = self.keep_tx.take().unwrap().send(());
     }

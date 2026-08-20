@@ -1,11 +1,15 @@
-//! Multi producer single customer remote channel.
+//! A bounded, multi-producer, single-consumer remote channel.
 //!
 //! The sender and receiver can both be sent to remote endpoints.
 //! The channel also works if both halves are local.
 //! Forwarding over multiple connections is supported.
 //!
-//! This has similar functionality as [tokio::sync::mpsc] with the additional
-//! ability to work over remote connections.
+//! Its API follows [tokio::sync::mpsc], with channel halves that can also be
+//! transferred over Remoc connections.
+//!
+//! The channel provides back pressure: once its buffer is full, [`Sender::send`]
+//! waits until the receiver makes capacity available. A successful send means the
+//! value was accepted for transfer, not necessarily that the receiver has processed it.
 //!
 //! # Example
 //!
@@ -76,7 +80,14 @@ pub use sender::{Permit, SendError, Sender, SenderSink, TrySendError};
 
 /// Creates a bounded channel for communicating between asynchronous tasks with back pressure.
 ///
-/// The sender and receiver may be sent to remote endpoints via channels.
+/// The sender and receiver may be sent to remote endpoints via channels or used
+/// locally on the creating endpoint. `local_buffer` bounds how many values can
+/// be accepted locally while they are waiting to be serialized, transferred, or
+/// deserialized.
+///
+/// # Panics
+///
+/// Panics if `local_buffer` is zero.
 pub fn channel<T, Codec>(local_buffer: usize) -> (Sender<T, Codec>, Receiver<T, Codec>)
 where
     T: RemoteSend,
@@ -94,8 +105,13 @@ where
 
 /// Makes a local mpsc receiver forwardable to remote endpoints.
 ///
-/// The returned [`Forwarding`] future resolves once forwarding has completed or an error occurs.
-/// The returned receiver may be sent to remote endpoints via channels.
+/// The returned receiver may be sent to remote endpoints via channels. Forwarding
+/// preserves back pressure: the local receiver is polled only after capacity has
+/// been reserved on the remote-facing channel.
+///
+/// The returned [`Forwarding`] future resolves once forwarding has completed or
+/// an error occurs. Dropping the [`Forwarding`] handle does not stop forwarding;
+/// call [`Forwarding::stop`] to stop it explicitly.
 pub fn forward<T, Codec>(mut local_rx: tokio::sync::mpsc::Receiver<T>) -> (Forwarding, Receiver<T, Codec>)
 where
     T: RemoteSend,

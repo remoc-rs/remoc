@@ -1,11 +1,19 @@
-//! Convenience re-export of common members.
+//! Convenient imports for typical Remoc applications.
 //!
-//! Like the standard library's prelude, this module simplifies importing of common items.
-//! Unlike the standard prelude, the contents of this module must be imported manually.
+//! Unlike Rust's standard prelude, this module must be imported explicitly:
 //!
 //! ```
 //! use remoc::prelude::*;
 //! ```
+//!
+//! This brings the enabled high-level modules into scope, together with extension
+//! traits used for connections and channels. It intentionally does not re-export
+//! every concrete channel or remote-object type; those remain namespaced, for
+//! example as `rch::mpsc::Sender` and `rtc::CallError`.
+//!
+//! Importing the prelude is optional. Libraries may prefer explicit imports in
+//! their public APIs, while applications and examples often benefit from the
+//! shorter names.
 //!
 
 pub use crate::chmux;

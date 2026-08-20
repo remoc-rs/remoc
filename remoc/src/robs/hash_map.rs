@@ -940,9 +940,57 @@ where
 
     /// Receives the next change event.
     ///
+    /// After [HashMapEvent::Done] has been received, `None` is returned.
+    ///
     /// # Panics
     /// Panics when the subscription is not incremental and [take_initial](Self::take_initial)
     /// has not been called.
+    ///
+    /// # Example
+    ///
+    /// In the following example the client applies the change events of a hash map
+    /// held by the server itself, instead of using a [mirror](Self::mirror).
+    ///
+    /// ```
+    /// use remoc::prelude::*;
+    /// use remoc::robs::hash_map::{HashMapEvent, HashMapSubscription, ObservableHashMap};
+    ///
+    /// // This would be run on the server.
+    /// async fn server(mut tx: rch::base::Sender<HashMapSubscription<u32, String>>) {
+    ///     let mut map: ObservableHashMap<u32, String> = ObservableHashMap::new();
+    ///     map.insert(1, "one".to_string());
+    ///
+    ///     tx.send(map.subscribe(1024)).await.unwrap();
+    ///
+    ///     map.insert(2, "two".to_string());
+    ///     map.done();
+    /// }
+    ///
+    /// // This would be run on the client.
+    /// async fn client(mut rx: rch::base::Receiver<HashMapSubscription<u32, String>>) {
+    ///     let mut sub = rx.recv().await.unwrap().unwrap();
+    ///
+    ///     // The subscription is not incremental, thus its initial contents
+    ///     // must be taken before the first call to recv.
+    ///     let mut map = sub.take_initial().unwrap();
+    ///
+    ///     while let Some(event) = sub.recv().await.unwrap() {
+    ///         match event {
+    ///             HashMapEvent::Set(k, v) => {
+    ///                 map.insert(k, v);
+    ///             }
+    ///             HashMapEvent::Remove(k) => {
+    ///                 map.remove(&k);
+    ///             }
+    ///             _ => (),
+    ///         }
+    ///     }
+    ///
+    ///     assert_eq!(map.get(&1), Some(&"one".to_string()));
+    ///     assert_eq!(map.get(&2), Some(&"two".to_string()));
+    /// }
+    /// # tokio_test::block_on(remoc::doctest::client_server(server, client));
+    /// ```
     pub async fn recv(&mut self) -> Result<Option<HashMapEvent<K, V>>, RecvError> {
         // Provide initial value events.
         if !self.complete {
@@ -1123,6 +1171,9 @@ where
     }
 
     /// Stops updating the hash map and returns its current contents.
+    ///
+    /// The returned map contains all updates applied before this method acquired
+    /// the mirror state. It does not wait for additional remote updates.
     pub async fn detach(self) -> HashMap<K, V> {
         let mut inner = self.inner.write().await;
         inner.take().unwrap().hm

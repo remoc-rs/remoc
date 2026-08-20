@@ -1079,6 +1079,9 @@ where
     }
 
     /// Stops updating the vector and returns its current contents.
+    ///
+    /// The returned vector contains all updates applied before this method
+    /// acquired the mirror state. It does not wait for additional remote updates.
     pub async fn detach(self) -> Vec<T> {
         let mut inner = self.inner.write().await;
         inner.take().unwrap().v

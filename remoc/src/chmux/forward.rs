@@ -146,22 +146,46 @@ pub(crate) async fn forward(rx: &mut super::Receiver, tx: &mut super::Sender) ->
                 let allocator = tx.port_allocator();
 
                 // Allocate local outgoing ports for forwarding.
+                let mut fwd_reqs = Vec::new();
                 let mut connect_reqs = Vec::new();
-                for req in &reqs {
-                    let mut connect_req = allocator.connect_req()?;
-                    connect_req = connect_req.with_id(req.id());
+                for req in reqs {
+                    let Ok(connect_req) = allocator.connect_req() else {
+                        tracing::debug!("no local port for forwarding port with id {}", req.id());
+                        wokio::spawn(async move { req.reject(true).await }.in_current_span());
+                        continue;
+                    };
+
+                    let mut connect_req = connect_req.with_id(req.id());
                     if !req.is_wait() {
                         connect_req = connect_req.no_wait();
                     }
                     if req.is_pre_connected() {
                         connect_req = connect_req.try_pre_connect();
                     }
+
                     connect_reqs.push(connect_req);
+                    fwd_reqs.push(req);
+                }
+
+                if connect_reqs.is_empty() {
+                    continue;
                 }
 
                 // Connect them.
-                let connects = tx.connect(connect_reqs).await?;
-                for (req, connect) in reqs.into_iter().zip(connects) {
+                let connects = match tx.connect(connect_reqs).await {
+                    Ok(connects) => connects,
+
+                    Err(SendError::LocalPortsExhausted) => {
+                        for req in fwd_reqs {
+                            tracing::debug!("no local port for forwarding port with id {}", req.id());
+                            wokio::spawn(async move { req.reject(true).await }.in_current_span());
+                        }
+                        continue;
+                    }
+                    Err(err) => return Err(err.into()),
+                };
+
+                for (req, connect) in fwd_reqs.into_iter().zip(connects) {
                     wokio::spawn(
                         async move {
                             let id = req.id();

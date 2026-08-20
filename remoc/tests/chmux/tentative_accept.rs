@@ -7,7 +7,9 @@ use std::time::Duration;
 use wasm_bindgen_test::wasm_bindgen_test;
 
 use crate::loop_transport;
-use remoc::chmux::{self, Client, Listener, Received, RecvError, SendError, TentativeAcceptError};
+use remoc::chmux::{
+    self, Client, Listener, OnPortsExhausted, Received, RecvError, SendError, TentativeAcceptError,
+};
 
 fn cfg() -> chmux::Cfg {
     chmux::Cfg { connection_timeout: Some(Duration::from_secs(1)), connect_queue: 2, ..Default::default() }
@@ -15,9 +17,14 @@ fn cfg() -> chmux::Cfg {
 
 /// Connects two multiplexers over an in-memory transport and runs them.
 async fn connected() -> (Client, Listener) {
+    connected_with_cfg(cfg(), cfg()).await
+}
+
+/// Connects two multiplexers with individual configurations and runs them.
+async fn connected_with_cfg(a_cfg: chmux::Cfg, b_cfg: chmux::Cfg) -> (Client, Listener) {
     loop_transport!(0, a_tx, a_rx, b_tx, b_rx);
     let ((a_mux, a_client, _a_server), (b_mux, _b_client, b_server)) =
-        try_join(chmux::ChMux::new(cfg(), a_tx, a_rx), chmux::ChMux::new(cfg(), b_tx, b_rx)).await.unwrap();
+        try_join(chmux::ChMux::new(a_cfg, a_tx, a_rx), chmux::ChMux::new(b_cfg, b_tx, b_rx)).await.unwrap();
 
     wokio::spawn(async move {
         let _ = a_mux.run().await;
@@ -234,4 +241,49 @@ async fn forwarded_port_rejection_after_originator_gave_up() {
     wokio::time::sleep(Duration::from_millis(200)).await;
     a_tx.send("still alive".into()).await.unwrap();
     drop(a_rx);
+}
+
+/// A forwarder that runs out of ports rejects the port it cannot forward, but keeps
+/// forwarding the channel that carried the request.
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
+async fn forwarded_port_exhaustion_keeps_channel_alive() {
+    crate::init();
+
+    // A <-> B <-> C, where the connection between A and B must allow enough concurrent
+    // connect requests, while B has no port left for the connection to C once the
+    // channel that is forwarded has been established.
+    const PORTS: usize = 4;
+    let wide_cfg = chmux::Cfg { connect_queue: PORTS as u16 * 2, ..cfg() };
+    let (a_client, mut b_a_server) = connected_with_cfg(wide_cfg.clone(), wide_cfg).await;
+    let b_cfg = chmux::Cfg { max_ports: 1, connect_queue: 1, ports_exhausted: OnPortsExhausted::Fail, ..cfg() };
+    let (b_c_client, mut c_server) = connected_with_cfg(b_cfg, cfg()).await;
+
+    let (mut a_tx, mut a_rx) = a_client.connect_port().await.unwrap();
+    let b_a = b_a_server.accept().await.unwrap().unwrap();
+    let b_c = b_c_client.connect_port().await.unwrap();
+    spawn_forwarder(b_a, b_c);
+    let (mut c_tx, mut c_rx) = c_server.accept().await.unwrap().unwrap();
+
+    // Request ports that the forwarder has no local port for.
+    let mut reqs = Vec::new();
+    for _ in 0..PORTS {
+        reqs.push(a_tx.connect_req().unwrap().pre_connect().await);
+    }
+    let connects = a_tx.connect(reqs).await.unwrap();
+
+    // Each of them is reported as rejected for lack of ports.
+    for connect in connects {
+        let (_sub_tx, mut sub_rx) = connect.await.unwrap();
+        match sub_rx.recv().await {
+            Err(RecvError::Rejected { no_ports: true }) => (),
+            other => panic!("unexpected receive result: {other:?}"),
+        }
+    }
+
+    // The channel that carried the requests keeps working in both directions.
+    a_tx.send("still forwarding".into()).await.unwrap();
+    assert_eq!(Vec::from(c_rx.recv().await.unwrap().unwrap()), b"still forwarding");
+    c_tx.send("in both directions".into()).await.unwrap();
+    assert_eq!(Vec::from(a_rx.recv().await.unwrap().unwrap()), b"in both directions");
 }

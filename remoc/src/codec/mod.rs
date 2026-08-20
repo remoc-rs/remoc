@@ -16,7 +16,7 @@
 //!
 //! # Selecting a codec
 //!
-//! The codec is a type parameter that defaults to [`Default`]. Specify another
+//! The codec is a type parameter that defaults to [`Default`](tyalias@Default). Specify another
 //! one when creating a channel or [connection](crate::Connect):
 //!
 //! ```

@@ -30,7 +30,6 @@
 //! | [oneshot] | one value | n/a | replies and acknowledgements |
 //! | [watch] | only the newest value | no | configuration and status |
 //! | [broadcast] | every active receiver | no; slow receivers lag | events for several consumers |
-//! | [lr] | one sender, one receiver | yes | lower-overhead channel with placement restrictions |
 //! | [bin] | binary messages | yes | already encoded bytes |
 //! | [io] | byte stream | yes | large or streaming binary data |
 //!
@@ -38,11 +37,6 @@
 //! modelled after the channels found in [tokio::sync].
 //! They also work when both halves of the channel are local and can be forwarded
 //! over multiple connections.
-//!
-//! A [local/remote channel](lr) is a more restricted version of an [MPSC](mpsc) channel.
-//! It does not support forwarding and exactly one half of it must be on a remote endpoint.
-//! It uses fewer resources, but imposes more constraints on how the channel is used.
-//! When in doubt use an [MPSC channel](mpsc) instead.
 //!
 //! A [binary channel](bin) can be used to exchange binary data over a channel.
 //! It skips serialization and deserialization and thus is more efficient for binary data,
@@ -184,6 +178,7 @@ pub mod base;
 pub mod bin;
 pub mod broadcast;
 pub mod io;
+#[deprecated = "use a remoc::rch::mpsc channel instead"]
 pub mod lr;
 pub mod mpsc;
 pub mod oneshot;

@@ -9,6 +9,7 @@ mod storage_ref;
 mod watch;
 
 /// Assert fmt::Debug impls for error types containing non-Debug data.
+#[allow(deprecated)]
 const _: () = {
     struct NotDebug;
 
@@ -24,6 +25,7 @@ const _: () = {
 };
 
 /// Assert Send and Sync for channel types.
+#[allow(deprecated)]
 const _: () = {
     const fn assert_send<T: Send>() {}
     const fn assert_send_sync<T: Send + Sync>() {}

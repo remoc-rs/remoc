@@ -1,3 +1,6 @@
+// The lr channel is deprecated, but must keep working until it is removed.
+#![allow(deprecated)]
+
 use remoc::rch::lr;
 
 #[cfg(all(target_family = "wasm", feature = "js"))]

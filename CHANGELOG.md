@@ -71,6 +71,7 @@ notes under *Deprecated* and *Removed* below.
   deprecated, because crate features are global to an application and thus a library
   using Remoc would be forced to use the default codec selected by the application.
   If required, specify the codec per channel using its generic type parameter instead.
+- rch::lr: the local/remote channel is deprecated in favor of an `rch::mpsc` channel.
 
 ### Removed
 - **BREAKING**: codec: the crate features `codec-postbag` and `default-codec-postbag`

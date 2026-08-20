@@ -126,9 +126,16 @@ where
                 Err(err) if err.is_closed() => break,
                 Err(err) => return Err(err),
             };
-            match local_rx.recv().await {
-                Some(v) => {
-                    permit.send(v);
+
+            let value = tokio::select! {
+                biased;
+                () = tx.closed() => continue,
+                value = local_rx.recv() => value,
+            };
+
+            match value {
+                Some(value) => {
+                    permit.send(value);
                 }
                 None => break,
             }

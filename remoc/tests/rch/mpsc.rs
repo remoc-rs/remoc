@@ -975,8 +975,8 @@ async fn closed_reason_of_send_errors() {
     assert!(err.is_closed());
 }
 
-/// Forwarding ends without error when the remote endpoint drops the receiver, since
-/// that is the ordinary way for a forwarded channel to end.
+/// Forwarding ends without error when the remote endpoint drops the receiver, even
+/// while no value is being forwarded.
 #[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
 #[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn forwarding_ends_when_remote_receiver_is_dropped() {
@@ -992,9 +992,9 @@ async fn forwarding_ends_when_remote_receiver_is_dropped() {
     let remote_rx = b_rx.recv().await.unwrap().unwrap();
     drop(remote_rx);
 
-    println!("Forwarding values into the dropped channel");
-    let _ = local_tx.send(1).await;
-    let _ = local_tx.send(2).await;
-
+    // No value is forwarded and the local sender is kept alive, thus forwarding can only
+    // end by noticing that the receiving endpoint went away.
+    println!("Waiting for forwarding to end");
     fwd.await.expect("forwarding to a dropped receiver reported an error");
+    drop(local_tx);
 }

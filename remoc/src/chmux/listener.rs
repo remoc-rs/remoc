@@ -76,6 +76,83 @@ impl From<ListenerError> for std::io::Error {
     }
 }
 
+/// An error occurred while tentatively accepting a connection request.
+#[derive(Debug, Clone)]
+pub enum TentativeAcceptError {
+    /// The request was not pre-connected by the remote endpoint.
+    ///
+    /// Only a pre-connected request can be accepted tentatively, because only its
+    /// requester is prepared to be told about a rejection after the channel has
+    /// been established.
+    NotPreConnected,
+    /// Accepting the request failed.
+    Listener(ListenerError),
+}
+
+impl fmt::Display for TentativeAcceptError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::NotPreConnected => write!(f, "request is not pre-connected"),
+            Self::Listener(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl Error for TentativeAcceptError {}
+
+impl From<ListenerError> for TentativeAcceptError {
+    fn from(err: ListenerError) -> Self {
+        Self::Listener(err)
+    }
+}
+
+impl From<TentativeAcceptError> for std::io::Error {
+    fn from(err: TentativeAcceptError) -> Self {
+        match err {
+            TentativeAcceptError::NotPreConnected => Self::new(std::io::ErrorKind::InvalidInput, err),
+            TentativeAcceptError::Listener(err) => err.into(),
+        }
+    }
+}
+
+/// Allows a tentatively accepted connection to be rejected afterwards.
+///
+/// Dropping this guard confirms the connection.
+pub struct AcceptGuard {
+    remote_port: u32,
+    tx: mpsc::Sender<PortEvt>,
+}
+
+impl fmt::Debug for AcceptGuard {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("AcceptGuard").field("remote_port", &self.remote_port).finish()
+    }
+}
+
+impl AcceptGuard {
+    /// Confirms the connection that was tentatively accepted.
+    ///
+    /// This is equivalent to dropping the guard.
+    pub fn accept(self) {}
+
+    /// Rejects the connection that was tentatively accepted.
+    ///
+    /// Setting `no_ports` to true indicates to the remote endpoint that the request
+    /// was rejected because no local port could be allocated.
+    ///
+    /// The requester observes this like the rejection of a pre-connected port, i.e. its
+    /// [sender](super::Sender) and [receiver](super::Receiver) fail with
+    /// [`SendError::Rejected`](super::SendError::Rejected) and
+    /// [`RecvError::Rejected`](super::RecvError::Rejected). Data that was already
+    /// exchanged over the port is discarded.
+    ///
+    /// The sender and receiver of the tentatively accepted port should be dropped, since
+    /// the requester is only notified when the port is closed.
+    pub async fn reject(self, no_ports: bool) {
+        let _ = self.tx.send(PortEvt::RejectedAfterAccept { remote_port: self.remote_port, no_ports }).await;
+    }
+}
+
 /// A connection request by the remote endpoint.
 ///
 /// Dropping the request rejects it.
@@ -162,6 +239,33 @@ impl Request {
         self.done = true;
 
         Ok(Some((sender, receiver)))
+    }
+
+    /// Tentatively accepts the request, so that it can still be rejected afterwards.
+    ///
+    /// This consumes the request and returns the sender and receiver for the new
+    /// bidirectional port together with a guard that allows rejecting the connection
+    /// afterwards. Dropping the guard confirms the connection.
+    ///
+    /// Use this when the decision whether to serve the channel depends on a result that
+    /// is not available yet, for example the response of another endpoint the channel is
+    /// forwarded to. Data can be exchanged over the port while the decision is pending.
+    ///
+    /// This is only possible for a [pre-connected](Self::is_pre_connected) request, since
+    /// only its requester is prepared to be told about a rejection after the channel has
+    /// been established. Otherwise [`TentativeAcceptError::NotPreConnected`] is returned
+    /// and the request is rejected.
+    pub async fn accept_tentatively(mut self) -> Result<(Sender, Receiver, AcceptGuard), TentativeAcceptError> {
+        if !self.is_pre_connected() {
+            return Err(TentativeAcceptError::NotPreConnected);
+        }
+
+        let remote_port = self.remote_port;
+        let tx = self.tx.clone();
+
+        let (sender, receiver) = self.accept_pre_connected().await?.unwrap();
+
+        Ok((sender, receiver, AcceptGuard { remote_port, tx }))
     }
 
     /// Accepts the request.

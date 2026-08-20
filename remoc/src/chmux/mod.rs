@@ -62,7 +62,7 @@ pub use any_storage::{AnyBox, AnyEntry, AnyStorage};
 pub use cfg::{Cfg, OnPortsExhausted};
 pub use client::{Client, Connect, ConnectError};
 pub use forward::ForwardError;
-pub use listener::{Listener, ListenerError, ListenerStream, Request};
+pub use listener::{AcceptGuard, Listener, ListenerError, ListenerStream, Request, TentativeAcceptError};
 pub use mux::ChMux;
 pub use port_allocator::{ConnectReq, PortAllocator, PortsExhausted, SidePort};
 pub use receiver::{DataBuf, Received, Receiver, ReceiverStream, RecvAnyError, RecvChunkError, RecvError};

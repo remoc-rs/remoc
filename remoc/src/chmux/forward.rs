@@ -4,7 +4,9 @@ use bytes::Buf;
 use std::{fmt, num::Wrapping};
 use tracing::Instrument;
 
-use super::{ConnectError, Received, RecvChunkError, RecvError, SendError, port_allocator::PortsExhausted};
+use super::{
+    AcceptGuard, ConnectError, Received, RecvChunkError, RecvError, SendError, port_allocator::PortsExhausted,
+};
 
 /// An error occurred during forwarding of a message.
 #[derive(Debug, Clone)]
@@ -71,10 +73,23 @@ impl std::error::Error for ForwardError {}
 /// Forwards all data received from a receiver to a sender.
 pub(crate) async fn forward(rx: &mut super::Receiver, tx: &mut super::Sender) -> Result<usize, ForwardError> {
     // Required to avoid borrow checking loop limitation.
-    fn spawn_forward(id: u32, mut rx: super::Receiver, mut tx: super::Sender) {
+    fn spawn_forward(id: u32, mut rx: super::Receiver, mut tx: super::Sender, guard: Option<AcceptGuard>) {
         wokio::spawn(
             async move {
-                if let Err(err) = forward(&mut rx, &mut tx).await {
+                let res = forward(&mut rx, &mut tx).await;
+
+                // Pass on the rejection of the port that is forwarded to.
+                if let Some(guard) = guard {
+                    match &res {
+                        Err(ForwardError::Recv(RecvError::Rejected { no_ports })) => {
+                            tracing::debug!("port forwarding for id {id} was rejected");
+                            guard.reject(*no_ports).await;
+                        }
+                        _ => guard.accept(),
+                    }
+                }
+
+                if let Err(err) = res {
                     tracing::debug!("port forwarding for id {id} failed: {err}");
                 }
             }
@@ -150,16 +165,9 @@ pub(crate) async fn forward(rx: &mut super::Receiver, tx: &mut super::Sender) ->
                     wokio::spawn(
                         async move {
                             let id = req.id();
-                            match connect.await {
-                                Ok((out_tx, out_rx)) => match req.accept().await {
-                                    Ok((in_tx, in_rx)) => {
-                                        spawn_forward(id, out_rx, in_tx);
-                                        spawn_forward(id, in_rx, out_tx);
-                                    }
-                                    Err(err) => {
-                                        tracing::debug!("port forwarding for id {id} failed to accept: {err}");
-                                    }
-                                },
+
+                            let (out_tx, out_rx) = match connect.await {
+                                Ok(tx_rx) => tx_rx,
                                 Err(err) => {
                                     tracing::debug!("port forwarding for id {id} failed to connect: {err}");
                                     req.reject(matches!(
@@ -167,6 +175,32 @@ pub(crate) async fn forward(rx: &mut super::Receiver, tx: &mut super::Sender) ->
                                         ConnectError::LocalPortsExhausted | ConnectError::RemotePortsExhausted
                                     ))
                                     .await;
+                                    return;
+                                }
+                            };
+
+                            // A pre-connected outgoing port is only accepted or rejected after it
+                            // has been established. Thus accept the incoming request tentatively and
+                            // let the forwarding task pass on a rejection to the requester.
+                            if req.is_pre_connected() {
+                                match req.accept_tentatively().await {
+                                    Ok((in_tx, in_rx, guard)) => {
+                                        spawn_forward(id, out_rx, in_tx, Some(guard));
+                                        spawn_forward(id, in_rx, out_tx, None);
+                                    }
+                                    Err(err) => {
+                                        tracing::debug!("port forwarding for id {id} failed to accept: {err}");
+                                    }
+                                }
+                            } else {
+                                match req.accept().await {
+                                    Ok((in_tx, in_rx)) => {
+                                        spawn_forward(id, out_rx, in_tx, None);
+                                        spawn_forward(id, in_rx, out_tx, None);
+                                    }
+                                    Err(err) => {
+                                        tracing::debug!("port forwarding for id {id} failed to accept: {err}");
+                                    }
                                 }
                             }
                         }

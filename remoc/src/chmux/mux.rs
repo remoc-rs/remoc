@@ -129,6 +129,13 @@ pub(super) enum PortEvt {
         /// Reserved port for pre-connect pool, if this was a pre-connected request.
         reserved_port: Option<ReservedPort>,
     },
+    /// Tentatively accepted connection was rejected afterwards.
+    RejectedAfterAccept {
+        /// Remote port.
+        remote_port: u32,
+        /// True if rejection due to no ports available.
+        no_ports: bool,
+    },
     /// Send message with content.
     SendData {
         /// Remote port that will receive data.
@@ -1037,6 +1044,14 @@ where
                 send_msg(permit, MultiplexMsg::Rejected { client_port: remote_port, no_ports });
             }
 
+            // Tentatively accepted remote connect request was rejected afterwards by local listener.
+            //
+            // The port request is not outstanding anymore and the pre-connect port pool has already
+            // been replenished when the request was tentatively accepted.
+            GlobalEvt::Port(PortEvt::RejectedAfterAccept { remote_port, no_ports }) => {
+                send_msg(permit, MultiplexMsg::Rejected { client_port: remote_port, no_ports });
+            }
+
             // Send data from port.
             GlobalEvt::Port(PortEvt::SendData { remote_port, data, first, last, credits }) => {
                 let msg = MultiplexMsg::Data { port: remote_port, first, last, credits };
@@ -1293,6 +1308,9 @@ where
             }
 
             // Port open rejected response from remote endpoint.
+            //
+            // For a pre-connected port this may also arrive after the port has been accepted,
+            // when the remote endpoint had accepted it only tentatively.
             MultiplexMsg::Rejected { client_port, no_ports } => {
                 let Entry::Occupied(mut entry) = self.ports.entry(SidePort::Local(client_port)) else {
                     return Err(protocol_err(format!(

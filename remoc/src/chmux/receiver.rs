@@ -460,25 +460,40 @@ impl Receiver {
     }
 
     /// Waits that a pre-connected port is fully connected.
+    ///
+    /// The pre-connect state is kept afterwards, because a port that was
+    /// [tentatively accepted](super::Request::accept_tentatively) can still be rejected
+    /// after it has been connected.
     async fn wait_pre_connect_done(&mut self) -> Result<(), RecvError> {
         if let Some(pre_connected_rx) = &mut self.pre_connected_rx {
-            {
-                let Ok(res) = pre_connected_rx.wait_for(|res| res.is_decided()).await else {
-                    return Err(RecvError::ChMux);
-                };
-                match &*res {
-                    PreConnectState::PreConnected => unreachable!(),
-                    PreConnectState::Accepted => (),
-                    PreConnectState::Rejected { no_ports } => {
-                        return Err(RecvError::Rejected { no_ports: *no_ports });
-                    }
+            let Ok(res) = pre_connected_rx.wait_for(|res| res.is_decided()).await else {
+                return Err(RecvError::ChMux);
+            };
+            match &*res {
+                PreConnectState::PreConnected => unreachable!(),
+                PreConnectState::Accepted => (),
+                PreConnectState::Rejected { no_ports } => {
+                    return Err(RecvError::Rejected { no_ports: *no_ports });
                 }
             }
-
-            self.pre_connected_rx = None;
         }
 
         Ok(())
+    }
+
+    /// The error to report when a tentatively accepted port has been rejected after
+    /// it had been connected.
+    ///
+    /// The remote endpoint sends the rejection before it closes the port, thus it has
+    /// always been processed once the closure of the port is observed.
+    fn pre_connect_rejected(&self) -> Option<RecvError> {
+        match &self.pre_connected_rx {
+            Some(pre_connected_rx) => match &*pre_connected_rx.borrow() {
+                PreConnectState::Rejected { no_ports } => Some(RecvError::Rejected { no_ports: *no_ports }),
+                PreConnectState::PreConnected | PreConnectState::Accepted => None,
+            },
+            None => None,
+        }
     }
 
     /// Receives data over the channel.
@@ -579,6 +594,8 @@ impl Receiver {
                         if let Receiving::Chunks { .. } = &self.receiving {
                             self.receiving = Receiving::Nothing;
                             return Err(RecvChunkError::Cancelled);
+                        } else if self.pre_connect_rejected().is_some() {
+                            return Err(RecvChunkError::Cancelled);
                         } else {
                             return Ok(None);
                         }
@@ -669,7 +686,10 @@ impl Receiver {
                 // Port closure.
                 Some(PortReceiveMsg::Finished) => {
                     self.finished = true;
-                    return Ok(None);
+                    match self.pre_connect_rejected() {
+                        Some(err) => return Err(err),
+                        None => return Ok(None),
+                    }
                 }
 
                 None => return Err(RecvError::ChMux),

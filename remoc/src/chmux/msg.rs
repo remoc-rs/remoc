@@ -51,7 +51,10 @@ pub enum MultiplexMsg {
         server_port: SidePort,
         // Flags u8.
     },
-    /// Connection refused because server has no ports available.
+    /// Connection request was refused.
+    ///
+    /// For a pre-connected port this may also be sent after the port has been opened,
+    /// when the server accepted it only tentatively.
     Rejected {
         /// Requesting client port.
         client_port: u32,

@@ -3,7 +3,7 @@ use std::{error::Error, fmt, marker::PhantomData, sync::Mutex, time::Duration};
 
 use super::{
     super::{
-        RemoteSendError, SendErrorExt,
+        ClosedReason, RemoteSendError, SendErrorExt,
         base::{self, PortDeserializer, PortSerializer},
     },
     RateLimitReceiver, RateLimitSender, Receiver, Ref, TransferStrategy, default_max_item_size,
@@ -46,9 +46,12 @@ crate::versioned::compact::impl_enum! {
 }
 
 impl SendError {
-    /// Returns `true` if no receiver remains available.
+    /// Returns `true` if the receiving endpoint went away.
+    ///
+    /// This is the case when no receiver remains, but not when the connection to it
+    /// failed; see [`closed_reason`](Self::closed_reason).
     pub fn is_closed(&self) -> bool {
-        matches!(self, Self::Closed)
+        matches!(self.closed_reason(), Some(ClosedReason::Closed | ClosedReason::Dropped))
     }
 
     /// Returns `true` if the channel can no longer transfer updates.
@@ -62,6 +65,20 @@ impl SendError {
     /// Returns whether the error was caused by the value being transferred.
     pub fn is_item_specific(&self) -> bool {
         matches!(self, Self::Send(err) if err.is_item_specific())
+    }
+
+    /// Returns the reason the channel was closed.
+    ///
+    /// Returns [None] if the error is not due to the channel being closed,
+    /// i.e. if it is specific to the value that was transferred.
+    pub fn closed_reason(&self) -> Option<ClosedReason> {
+        match self {
+            // A watch channel cannot be closed explicitly, thus no receiver remains.
+            Self::Closed => Some(ClosedReason::Dropped),
+            Self::Send(err) => ClosedReason::from_send_error_kind(err),
+            Self::Connect(err) => Some(ClosedReason::from_connect_error(err)),
+            Self::Listen(_) | Self::Forward => Some(ClosedReason::Failed),
+        }
     }
 }
 

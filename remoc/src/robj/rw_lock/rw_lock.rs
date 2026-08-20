@@ -101,7 +101,7 @@ impl fmt::Display for CommitError {
 impl<T> From<oneshot::SendError<T>> for CommitError {
     fn from(err: oneshot::SendError<T>) -> Self {
         match err {
-            oneshot::SendError::Closed(_) => Self::Dropped,
+            oneshot::SendError::Closed(_) | oneshot::SendError::Dropped => Self::Dropped,
             oneshot::SendError::Failed => Self::Failed,
         }
     }

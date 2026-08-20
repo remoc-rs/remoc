@@ -60,9 +60,12 @@ crate::versioned::compact::impl_enum! {
 }
 
 impl<T> SendError<T> {
-    /// Returns `true` if the receiver explicitly closed the channel.
+    /// Returns `true` if the receiving endpoint went away.
+    ///
+    /// This is the case when the receiver was closed or dropped, but not when the
+    /// connection to it failed; see [`closed_reason`](Self::closed_reason).
     pub fn is_closed(&self) -> bool {
-        matches!(self, Self::Closed(_))
+        matches!(self.closed_reason(), Some(ClosedReason::Closed | ClosedReason::Dropped))
     }
 
     /// Returns the reason the channel was disconnected.
@@ -182,9 +185,26 @@ crate::versioned::compact::impl_enum! {
 }
 
 impl<T> TrySendError<T> {
-    /// Returns `true` if the receiver explicitly closed the channel.
+    /// Returns `true` if the receiving endpoint went away.
+    ///
+    /// This is the case when the receiver was closed or dropped, but not when the
+    /// connection to it failed; see [`closed_reason`](Self::closed_reason).
     pub fn is_closed(&self) -> bool {
-        matches!(self, Self::Closed(_))
+        matches!(self.closed_reason(), Some(ClosedReason::Closed | ClosedReason::Dropped))
+    }
+
+    /// Returns the reason the channel was disconnected.
+    ///
+    /// Returns [None] if the error is not due to the channel being disconnected,
+    /// i.e. if the channel was full or the error is specific to the item that was sent.
+    pub fn closed_reason(&self) -> Option<ClosedReason> {
+        match self {
+            Self::Full(_) => None,
+            Self::Closed(_) => Some(ClosedReason::Closed),
+            Self::Send(err) => ClosedReason::from_send_error_kind(err),
+            Self::Connect(err) => Some(ClosedReason::from_connect_error(err)),
+            Self::Listen(_) | Self::Forward => Some(ClosedReason::Failed),
+        }
     }
 
     /// Returns `true` if the channel can no longer transfer values.

@@ -305,9 +305,8 @@ async fn simple_drop() {
     match tx.send(0).await {
         Ok(_) => panic!("send succeeded after close"),
         Err(err)
-            if err.is_disconnected()
-                && !err.is_closed()
-                && err.closed_reason() == Some(ClosedReason::Dropped) => {}
+            if err.is_disconnected() && err.is_closed() && err.closed_reason() == Some(ClosedReason::Dropped) => {
+        }
         Err(_) => panic!("wrong error after close"),
     }
 }
@@ -893,4 +892,109 @@ async fn parallel_32() {
             if err.is_closed() && err.is_disconnected() && err.closed_reason() == Some(ClosedReason::Closed) => {}
         Err(_) => panic!("wrong error after close"),
     }
+}
+
+/// Classification of send errors into the reason why the channel was closed.
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
+async fn closed_reason_of_send_errors() {
+    use remoc::chmux;
+
+    // The reason for closure determines what the predicates report.
+    let check = |err: &SendError<i16>| {
+        assert_eq!(
+            err.is_closed(),
+            matches!(err.closed_reason(), Some(ClosedReason::Closed | ClosedReason::Dropped)),
+            "is_closed does not follow closed_reason for {err:?}"
+        );
+        assert_eq!(
+            err.is_disconnected(),
+            err.closed_reason().is_some(),
+            "is_disconnected does not follow closed_reason for {err:?}"
+        );
+    };
+
+    // The receiver explicitly closed the channel.
+    let err: SendError<i16> = SendError::Closed(0);
+    assert_eq!(err.closed_reason(), Some(ClosedReason::Closed));
+
+    // The remote endpoint dropped the receiving half.
+    let err: SendError<i16> =
+        SendError::Send(SendErrorKind::Send(chmux::SendError::Closed { gracefully: false }));
+    assert_eq!(err.closed_reason(), Some(ClosedReason::Dropped));
+
+    // The channel was never taken over by the remote endpoint, either because the
+    // pre-connected port was rejected or because connecting it was.
+    let err: SendError<i16> =
+        SendError::Send(SendErrorKind::Send(chmux::SendError::Rejected { no_ports: false }));
+    assert_eq!(err.closed_reason(), Some(ClosedReason::Dropped));
+    let err: SendError<i16> = SendError::Connect(chmux::ConnectError::Rejected);
+    assert_eq!(err.closed_reason(), Some(ClosedReason::Dropped));
+
+    // The remote endpoint had no port available, which is a failure to connect
+    // rather than the receiver going away.
+    let err: SendError<i16> = SendError::Send(SendErrorKind::Send(chmux::SendError::Rejected { no_ports: true }));
+    assert_eq!(err.closed_reason(), Some(ClosedReason::Failed));
+    let err: SendError<i16> = SendError::Connect(chmux::ConnectError::RemotePortsExhausted);
+    assert_eq!(err.closed_reason(), Some(ClosedReason::Failed));
+
+    // The connection failed.
+    let err: SendError<i16> = SendError::Send(SendErrorKind::Send(chmux::SendError::ChMux));
+    assert_eq!(err.closed_reason(), Some(ClosedReason::Failed));
+
+    // Errors caused by the item itself leave the channel usable.
+    let err: SendError<i16> = SendError::Send(SendErrorKind::MaxItemSizeExceeded);
+    assert_eq!(err.closed_reason(), None);
+    assert!(!err.is_disconnected());
+
+    for err in [
+        SendError::Closed(0),
+        SendError::Send(SendErrorKind::Send(chmux::SendError::Closed { gracefully: true })),
+        SendError::Send(SendErrorKind::Send(chmux::SendError::Rejected { no_ports: false })),
+        SendError::Send(SendErrorKind::Send(chmux::SendError::Rejected { no_ports: true })),
+        SendError::Send(SendErrorKind::Send(chmux::SendError::ChMux)),
+        SendError::Send(SendErrorKind::MaxItemSizeExceeded),
+        SendError::Connect(chmux::ConnectError::Rejected),
+        SendError::Connect(chmux::ConnectError::RemotePortsExhausted),
+        SendError::Listen(chmux::ListenerError::ChMux),
+        SendError::Forward,
+    ] {
+        check(&err);
+    }
+
+    // A full channel is not closed at all.
+    let err: TrySendError<i16> = TrySendError::Full(0);
+    assert_eq!(err.closed_reason(), None);
+    assert!(!err.is_closed());
+    assert!(!err.is_disconnected());
+
+    // Trying to send classifies errors in the same way.
+    let err: TrySendError<i16> =
+        TrySendError::Send(SendErrorKind::Send(chmux::SendError::Rejected { no_ports: false }));
+    assert_eq!(err.closed_reason(), Some(ClosedReason::Dropped));
+    assert!(err.is_closed());
+}
+
+/// Forwarding ends without error when the remote endpoint drops the receiver, since
+/// that is the ordinary way for a forwarded channel to end.
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
+async fn forwarding_ends_when_remote_receiver_is_dropped() {
+    crate::init();
+    let ((mut a_tx, _a_rx), (_b_tx, mut b_rx)) = loop_channel::<mpsc::Receiver<i16>>().await;
+
+    println!("Forwarding a local channel to the remote endpoint");
+    let (local_tx, local_rx) = tokio::sync::mpsc::channel(1);
+    let (fwd, rx) = mpsc::forward(local_rx);
+    a_tx.send(rx).await.unwrap();
+
+    println!("Taking the receiver over and dropping it");
+    let remote_rx = b_rx.recv().await.unwrap().unwrap();
+    drop(remote_rx);
+
+    println!("Forwarding values into the dropped channel");
+    let _ = local_tx.send(1).await;
+    let _ = local_tx.send(2).await;
+
+    fwd.await.expect("forwarding to a dropped receiver reported an error");
 }

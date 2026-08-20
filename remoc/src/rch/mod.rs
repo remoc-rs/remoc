@@ -267,11 +267,22 @@ pub(crate) enum RemoteSendError {
 ///
 /// This is implemented for all send errors in this module.
 ///
-/// Since [watch] channels have no method to close them,
-/// [is_closed](Self::is_closed) and [is_disconnected](Self::is_disconnected) are
-/// equivalent for them.
+/// These functions follow the reason for closure that the error reports through its
+/// `closed_reason` function:
+///
+///   * No reason is reported when the error is caused by the item that was sent, in
+///     which case the channel remains usable.
+///   * [`ClosedReason::Closed`] and [`ClosedReason::Dropped`] mean that the receiving
+///     endpoint went away, which is reported by both [is_closed](Self::is_closed) and
+///     [is_disconnected](Self::is_disconnected).
+///   * [`ClosedReason::Failed`] means that the connection to a receiving endpoint that
+///     may well still exist failed, which is only reported by
+///     [is_disconnected](Self::is_disconnected).
 pub trait SendErrorExt {
-    /// Whether the remote endpoint closed the channel.
+    /// Whether the receiving endpoint went away, because it was closed or dropped.
+    ///
+    /// This is false when the connection to the receiving endpoint failed; use
+    /// [is_disconnected](Self::is_disconnected) to also cover that case.
     fn is_closed(&self) -> bool;
 
     /// Whether the remote endpoint closed or rejected the channel, was dropped or the connection failed.

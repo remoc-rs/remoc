@@ -9,7 +9,12 @@ use crate::{RemoteSend, codec};
 pub enum SendError<T> {
     /// The receiver closed the channel before accepting the value.
     Closed(#[debug(skip)] T),
-    /// An asynchronous transfer failed after the value was accepted for sending.
+    /// The receiver was dropped or never took the channel over.
+    ///
+    /// The value cannot be returned, because it was already queued for sending
+    /// when this became known.
+    Dropped,
+    /// Transferring the value failed.
     ///
     /// The detailed cause is not available through a one-shot sender.
     Failed,
@@ -20,14 +25,27 @@ crate::versioned::compact::impl_enum! {
     variants {
         Closed(item: T) => "_0",
         Failed => "_1",
+        Dropped => "_2",
     }
     where T: RemoteSend
 }
 
 impl<T> SendError<T> {
-    /// Returns `true` if the receiver closed the channel before accepting the value.
+    /// Returns `true` if the receiving endpoint went away.
+    ///
+    /// This is the case when the receiver was closed or dropped, but not when
+    /// transferring the value failed; see [`closed_reason`](Self::closed_reason).
     pub fn is_closed(&self) -> bool {
-        matches!(self, Self::Closed(_))
+        matches!(self.closed_reason(), Some(ClosedReason::Closed | ClosedReason::Dropped))
+    }
+
+    /// Returns the reason the channel was closed.
+    pub fn closed_reason(&self) -> Option<ClosedReason> {
+        match self {
+            Self::Closed(_) => Some(ClosedReason::Closed),
+            Self::Dropped => Some(ClosedReason::Dropped),
+            Self::Failed => Some(ClosedReason::Failed),
+        }
     }
 
     /// Returns `true` if the receiver is unavailable.
@@ -43,6 +61,7 @@ impl<T> SendError<T> {
     pub fn without_item(self) -> SendError<()> {
         match self {
             Self::Closed(_) => SendError::Closed(()),
+            Self::Dropped => SendError::Dropped,
             Self::Failed => SendError::Failed,
         }
     }
@@ -67,6 +86,7 @@ impl<T> fmt::Display for SendError<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Closed(_) => write!(f, "channel is closed"),
+            Self::Dropped => write!(f, "receiver has been dropped"),
             Self::Failed => write!(f, "send error"),
         }
     }
@@ -74,9 +94,14 @@ impl<T> fmt::Display for SendError<T> {
 
 impl<T> From<mpsc::TrySendError<T>> for SendError<T> {
     fn from(err: mpsc::TrySendError<T>) -> Self {
-        match err {
-            mpsc::TrySendError::Closed(err) => Self::Closed(err),
-            _ => Self::Failed,
+        match err.closed_reason() {
+            // Only this case can return the value, since the other errors do not carry it.
+            Some(ClosedReason::Closed) => match err {
+                mpsc::TrySendError::Closed(value) => Self::Closed(value),
+                _ => Self::Dropped,
+            },
+            Some(ClosedReason::Dropped) => Self::Dropped,
+            Some(ClosedReason::Failed) | None => Self::Failed,
         }
     }
 }

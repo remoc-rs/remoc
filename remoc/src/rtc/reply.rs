@@ -73,6 +73,7 @@ where
     pub fn send(self, reply: R) -> Result<Sending<Reply<R>>, oneshot::SendError<R>> {
         self.0.send(reply.into()).map_err(|err| match err {
             oneshot::SendError::Closed(reply) => oneshot::SendError::Closed(reply.into()),
+            oneshot::SendError::Dropped => oneshot::SendError::Dropped,
             oneshot::SendError::Failed => oneshot::SendError::Failed,
         })
     }

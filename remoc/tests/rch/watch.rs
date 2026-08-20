@@ -1143,3 +1143,56 @@ async fn receiver_rate_limit_combines_with_sender_via_max() {
     assert!(count > 1, "expected multiple throttled updates, got {count}");
     assert!(count < 20, "expected receiver rate limit (max) to dominate, but got {count} updates");
 }
+
+/// Classification of send errors into the reason why the channel was closed.
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
+async fn closed_reason_of_send_errors() {
+    use remoc::{chmux, rch::ClosedReason};
+
+    // A watch channel cannot be closed explicitly, thus no receiver remains.
+    assert_eq!(SendError::Closed.closed_reason(), Some(ClosedReason::Dropped));
+
+    // The remote endpoint dropped the receiving half or never took it over.
+    let err = SendError::Send(SendErrorKind::Send(chmux::SendError::Closed { gracefully: false }));
+    assert_eq!(err.closed_reason(), Some(ClosedReason::Dropped));
+    let err = SendError::Send(SendErrorKind::Send(chmux::SendError::Rejected { no_ports: false }));
+    assert_eq!(err.closed_reason(), Some(ClosedReason::Dropped));
+    assert_eq!(SendError::Connect(chmux::ConnectError::Rejected).closed_reason(), Some(ClosedReason::Dropped));
+
+    // The connection failed or the remote endpoint had no port available.
+    let err = SendError::Send(SendErrorKind::Send(chmux::SendError::ChMux));
+    assert_eq!(err.closed_reason(), Some(ClosedReason::Failed));
+    let err = SendError::Send(SendErrorKind::Send(chmux::SendError::Rejected { no_ports: true }));
+    assert_eq!(err.closed_reason(), Some(ClosedReason::Failed));
+
+    // Errors caused by the value itself leave the channel usable.
+    let err = SendError::Send(SendErrorKind::MaxItemSizeExceeded);
+    assert_eq!(err.closed_reason(), None);
+    assert!(!err.is_disconnected());
+
+    // The reason for closure determines what the predicates report.
+    for err in [
+        SendError::Closed,
+        SendError::Send(SendErrorKind::Send(chmux::SendError::Closed { gracefully: true })),
+        SendError::Send(SendErrorKind::Send(chmux::SendError::Rejected { no_ports: false })),
+        SendError::Send(SendErrorKind::Send(chmux::SendError::Rejected { no_ports: true })),
+        SendError::Send(SendErrorKind::Send(chmux::SendError::ChMux)),
+        SendError::Send(SendErrorKind::MaxItemSizeExceeded),
+        SendError::Connect(chmux::ConnectError::Rejected),
+        SendError::Connect(chmux::ConnectError::RemotePortsExhausted),
+        SendError::Listen(chmux::ListenerError::ChMux),
+        SendError::Forward,
+    ] {
+        assert_eq!(
+            err.is_closed(),
+            matches!(err.closed_reason(), Some(ClosedReason::Closed | ClosedReason::Dropped)),
+            "is_closed does not follow closed_reason for {err:?}"
+        );
+        assert_eq!(
+            err.is_disconnected(),
+            err.closed_reason().is_some(),
+            "is_disconnected does not follow closed_reason for {err:?}"
+        );
+    }
+}

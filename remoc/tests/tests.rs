@@ -19,6 +19,9 @@ mod codec;
 #[cfg(feature = "rch")]
 mod connect;
 
+#[cfg(any(feature = "rfn", feature = "robj"))]
+mod provider;
+
 #[cfg(feature = "rch")]
 mod rch;
 

@@ -29,7 +29,7 @@ use tokio::{
 use tokio_util::sync::ReusableBoxFuture;
 
 use super::{
-    AnyStorage, Cfg, ChMuxError, PROTOCOL_VERSION, PROTOCOL_VERSION_PORT_ID,
+    AnyStorage, Cfg, ChMuxError, PROTOCOL_VERSION,
     client::{Client, ClientReq, ConnectRsp, PreConnectState},
     credit::{
         CreditPool, CreditProvider, CreditUser, GlobalCreditMonitor, MixedCreditUser, PortCreditMonitor,
@@ -997,7 +997,7 @@ where
                         }
                     };
 
-                    let id = (self.remote_protocol_version >= PROTOCOL_VERSION_PORT_ID).then_some(id);
+                    let id = self.remote_cfg.port_id.then_some(id);
                     send_msg(permit, MultiplexMsg::OpenPort { client_port: port_num, wait, id, pre_connect });
                     let _ = sent_tx.send(());
                 } else {
@@ -1066,7 +1066,7 @@ where
                     .into_iter()
                     .map(|(port_req, response_tx)| {
                         let mut port_data_item = PortDataItem::from(&port_req);
-                        if self.remote_protocol_version < PROTOCOL_VERSION_PORT_ID {
+                        if !self.remote_cfg.port_id {
                             port_data_item.id = port_data_item.port;
                         }
 

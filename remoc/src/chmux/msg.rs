@@ -448,7 +448,8 @@ impl MultiplexMsg {
                 if magic != MAGIC {
                     return Err(invalid_data("invalid magic"));
                 }
-                Self::Hello { version: reader.read_u8()?, cfg: ExchangedCfg::read(&mut reader)? }
+                let version = reader.read_u8()?;
+                Self::Hello { version, cfg: ExchangedCfg::read(&mut reader, version)? }
             }
             MSG_PING => Self::Ping,
             MSG_OPEN_PORT => {
@@ -667,6 +668,8 @@ pub struct ExchangedCfg {
     pub postbag_version: postbag::cfg::Version,
     #[cfg(not(feature = "serde"))]
     pub postbag_version: (),
+    /// Whether port ids are supported.
+    pub port_id: bool,
 }
 
 impl ExchangedCfg {
@@ -688,6 +691,7 @@ impl ExchangedCfg {
             postbag_version: postbag::cfg::Version::default(),
             #[cfg(not(feature = "serde"))]
             postbag_version: (),
+            port_id: true,
         }
     }
 
@@ -711,10 +715,12 @@ impl ExchangedCfg {
         #[cfg(not(feature = "serde"))]
         writer.write_u8(0)?;
 
+        writer.write_u8(self.port_id.into())?;
+
         Ok(())
     }
 
-    pub(crate) fn read(mut reader: impl io::Read) -> Result<Self, io::Error> {
+    pub(crate) fn read(mut reader: impl io::Read, version: u8) -> Result<Self, io::Error> {
         let mut this = Self {
             connection_timeout: match reader.read_u64::<LE>()? {
                 0 => None,
@@ -743,6 +749,7 @@ impl ExchangedCfg {
             postbag_version: postbag::cfg::Version::Postbag0_4,
             #[cfg(not(feature = "serde"))]
             postbag_version: (),
+            port_id: version == 3,
         };
 
         let Ok(global_credits) = reader.read_u32::<LE>() else { return Ok(this) };
@@ -771,6 +778,9 @@ impl ExchangedCfg {
         {
             this.postbag_version = postbag_version.try_into().unwrap_or(postbag::cfg::Version::default());
         }
+
+        let Ok(port_id) = reader.read_u8() else { return Ok(this) };
+        this.port_id = port_id != 0;
 
         Ok(this)
     }

@@ -72,9 +72,6 @@ pub use sizer::{BufferSize, BufferSizeQuery, BufferSizer, DynamicBuffer, FixedBu
 /// Channel multiplexer protocol version.
 pub const PROTOCOL_VERSION: u8 = 3;
 
-/// Lowest protocol version that supports port ids.
-const PROTOCOL_VERSION_PORT_ID: u8 = 3;
-
 /// Channel multiplexer error.
 #[derive(Debug, Clone)]
 pub enum ChMuxError<SinkError, StreamError> {

@@ -1,9 +1,9 @@
 //! Method parsing and generation.
 
 use proc_macro2::{TokenStream, TokenTree};
-use quote::{TokenStreamExt, quote};
+use quote::{TokenStreamExt, format_ident, quote};
 use syn::{
-    Attribute, Block, FnArg, GenericArgument, Generics, Ident, LitStr, Pat, PatType, Path, PathArguments,
+    Attribute, Block, FnArg, GenericArgument, Generics, Ident, LitStr, Meta, Pat, PatType, Path, PathArguments,
     ReceiverKind, ReturnType, Stmt, Token, Type, TypeParamBound, braced, parenthesized,
     parse::{Parse, ParseStream},
     punctuated::Punctuated,
@@ -155,6 +155,10 @@ pub struct TraitMethod {
     pub bounds: Punctuated<TypeParamBound, Token![+]>,
     /// Whether method should be cancelled, if client sends hangup message.
     pub cancel: bool,
+    /// Whether a twin method taking a request receiver should be generated.
+    pub pipelinable: bool,
+    /// Name of that twin method, if specified by the user.
+    pub pipelined_name: Option<Ident>,
     /// Method body.
     pub body: Option<Vec<Stmt>>,
 }
@@ -211,17 +215,44 @@ impl TraitMethod {
         input.parse::<Token![fn]>()?;
         let ident: Ident = input.parse()?;
 
-        // Check for no_cancel attribute.
+        // Check for no_cancel and pipelinable attributes.
         let mut cancel = true;
+        let mut pipelinable = false;
+        let mut pipelined_name = None;
+        let mut attr_err = None;
         attrs.retain(|attr| {
-            if let Some(attr) = attr.path().get_ident()
-                && *attr == "no_cancel"
-            {
+            let Some(name) = attr.path().get_ident() else { return true };
+
+            if *name == "no_cancel" {
                 cancel = false;
                 return false;
             }
+
+            if *name == "pipelinable" {
+                pipelinable = true;
+                match &attr.meta {
+                    // #[pipelinable]
+                    Meta::Path(_) => (),
+                    // #[pipelinable(twin_method_name)]
+                    Meta::List(_) => match attr.parse_args::<Ident>() {
+                        Ok(name) => pipelined_name = Some(name),
+                        Err(err) => attr_err = Some(err),
+                    },
+                    Meta::NameValue(_) => {
+                        attr_err = Some(syn::Error::new_spanned(
+                            attr,
+                            "expected `#[pipelinable]` or `#[pipelinable(name)]`",
+                        ))
+                    }
+                }
+                return false;
+            }
+
             true
         });
+        if let Some(err) = attr_err {
+            return Err(err);
+        }
 
         // Split remaining attributes by how they are applied to the generated items.
         let mut doc_attrs = Vec::new();
@@ -339,12 +370,107 @@ impl TraitMethod {
             ret_ty,
             bounds,
             cancel,
+            pipelinable,
+            pipelined_name,
             body,
         })
     }
 }
 
 impl TraitMethod {
+    /// Identifier of the twin method taking a request receiver.
+    ///
+    /// This is the method name followed by `_pipelined`, unless a name was
+    /// specified using `#[pipelinable(name)]`.
+    pub fn pipelined_ident(&self) -> Ident {
+        match &self.pipelined_name {
+            Some(name) => name.clone(),
+            None => format_ident!("{}_pipelined", &self.ident),
+        }
+    }
+
+    /// The return type of the twin method taking a request receiver.
+    fn pipelined_ret_ty(&self, assoc: &[AssocType]) -> TokenStream {
+        let ret_ty = remove_self_type(&self.ret_ty, assoc);
+        quote! { <#ret_ty as ::remoc::rtc::IsPipelinableReply>::Pipelined }
+    }
+
+    /// The type of the request receiver handed over to the twin method.
+    fn pipelined_req_rx_ty(&self, assoc: &[AssocType]) -> TokenStream {
+        let ret_ty = remove_self_type(&self.ret_ty, assoc);
+        quote! { <#ret_ty as ::remoc::rtc::IsPipelinableReply>::ReqReceiver }
+    }
+
+    /// The bound the target object must satisfy so that the future of the twin
+    /// method, which holds the target across await points, is `Send`.
+    fn pipelined_self_bound(&self) -> TokenStream {
+        match self.self_ref {
+            SelfRef::Ref => quote! { where Self: ::std::marker::Sync },
+            SelfRef::Value | SelfRef::RefMut => quote! { where Self: ::std::marker::Send },
+        }
+    }
+
+    /// Twin method taking a request receiver, with its default implementation.
+    ///
+    /// This is a provided method of the trait, so that an implementation can
+    /// override it to serve the request receiver directly instead of forwarding
+    /// the requests to a client.
+    pub fn pipelined_trait_method(&self, impl_future: bool, assoc: &[AssocType]) -> TokenStream {
+        let Self { ident, .. } = self;
+        let pipelined_ident = self.pipelined_ident();
+        let ret_ty = self.pipelined_ret_ty(assoc);
+        let req_rx_ty = self.pipelined_req_rx_ty(assoc);
+        let self_bound = self.pipelined_self_bound();
+
+        let self_ref = match self.self_ref {
+            SelfRef::Value => quote! { self, },
+            SelfRef::Ref => quote! { &self, },
+            SelfRef::RefMut => quote! { &mut self, },
+        };
+
+        let mut args = quote! {};
+        let mut call_args = quote! {};
+        for NamedArg { ident, ty, .. } in &self.args {
+            let ty = remove_self_type(ty, assoc);
+            args.append_all(quote! { #ident : #ty , });
+            call_args.append_all(quote! { #ident , });
+        }
+
+        let doc = format!(
+            "Calls [`{ident}`](Self::{ident}) and lets the returned client execute the requests of the provided request receiver.\n\n\
+             The client is returned once all requests have been executed, i.e. once every client connected to the request receiver `__req_rx` has been dropped. 
+             The return value is `None` when the object was consumed by a method taking `self` by value.\n\n\
+             The default implementation [forwards](::remoc::rtc::ReqReceiver::forward) the requests to the client returned by [`{ident}`](Self::{ident})."
+        );
+
+        let body = quote! {
+            let __client = self.#ident(#call_args).await?;
+            let __client = ::remoc::rtc::ReqReceiver::forward(__req_rx, __client)
+                .await
+                .map_err(::remoc::rtc::CallError::from)?;
+            ::std::result::Result::Ok(__client)
+        };
+
+        if impl_future {
+            quote! {
+                #[doc=#doc]
+                fn #pipelined_ident ( #self_ref #args __req_rx: #req_rx_ty )
+                    -> impl ::std::future::Future<Output = #ret_ty> + ::std::marker::Send
+                #self_bound
+                {
+                    async move { #body }
+                }
+            }
+        } else {
+            quote! {
+                #[doc=#doc]
+                async fn #pipelined_ident ( #self_ref #args __req_rx: #req_rx_ty ) -> #ret_ty
+                #self_bound
+                { #body }
+            }
+        }
+    }
+
     /// Method definition within trait (without argument attributes).
     pub fn trait_method(&self, impl_future: bool) -> TokenStream {
         let Self { doc_attrs, attrs, ident, ret_ty, .. } = self;
@@ -410,12 +536,18 @@ impl TraitMethod {
         // reserved by remoc.
         let reply_tx_rename = self.numerical_rename.then(|| quote! { #[serde(rename = #REPLY_TX_NAME)] });
 
+        let reply_tx_ty = if self.pipelinable {
+            quote! { ::remoc::rtc::PipelinableReplyTo<#ret_ty, Codec> }
+        } else {
+            quote! { ::remoc::rtc::ReplyTo<#ret_ty, Codec> }
+        };
+
         let mut entries = quote! {
             #[doc="Reply channel for sending the result of the method invocation.\n\n"]
             #[doc="The channel is closed when the calling async method is cancelled "]
             #[doc="or a connection error occurs."]
             #reply_tx_rename
-            __reply_tx: ::remoc::rtc::ReplySender<#ret_ty, Codec>,
+            __reply_tx: #reply_tx_ty,
         };
 
         for NamedArg { attrs, ident, ty } in &self.args {
@@ -443,30 +575,44 @@ impl TraitMethod {
         let ident = &self.ident;
         let enum_ident = to_pascal_case(ident);
 
-        // Build match and call argument lists.
-        let mut entries = quote! { __reply_tx, };
+        // Build call argument list.
         let mut args = quote! {};
         for NamedArg { ident: arg_ident, .. } in &self.args {
-            entries.append_all(quote! { #arg_ident, });
             args.append_all(quote! { #arg_ident, });
         }
 
-        // Generate call code.
-        let call = if self.cancel {
-            quote! {
-                ::remoc::rtc::select! {
-                    biased;
-                    () = __reply_tx.closed() => (),
-                    result = __target.#ident(#args) => {
-                        ::remoc::rtc::send_reply(__reply_tx, &__err_tx, __guard, result).await;
+        // Invokes `method` with the request arguments and replies on `reply_tx`.
+        let invoke = |method: TokenStream, reply_tx: TokenStream, extra_args: TokenStream| {
+            if self.cancel {
+                quote! {
+                    ::remoc::rtc::select! {
+                        biased;
+                        () = #reply_tx.closed() => (),
+                        result = #method(#args #extra_args) => {
+                            ::remoc::rtc::send_reply(#reply_tx, &__err_tx, __guard, result).await;
+                        }
                     }
+                }
+            } else {
+                quote! {
+                    let result = #method(#args #extra_args).await;
+                    ::remoc::rtc::send_reply(#reply_tx, &__err_tx, __guard, result).await;
+                }
+            }
+        };
+
+        let call = if self.pipelinable {
+            let pipelined_ident = self.pipelined_ident();
+            let normal = invoke(quote! { __target.#ident }, quote! { __reply_tx }, quote! {});
+            let pipeline = invoke(quote! { __target.#pipelined_ident }, quote! { reply_tx }, quote! { req_rx, });
+            quote! {
+                match __reply_tx {
+                    ::remoc::rtc::PipelinableReplyTo::Normal(__reply_tx) => { #normal }
+                    ::remoc::rtc::PipelinableReplyTo::Pipeline { req_rx, reply_tx } => { #pipeline }
                 }
             }
         } else {
-            quote! {
-                let result = __target.#ident(#args).await;
-                ::remoc::rtc::send_reply(__reply_tx, &__err_tx, __guard, result).await;
-            }
+            invoke(quote! { __target.#ident }, quote! { __reply_tx }, quote! {})
         };
 
         // Generate match clause.
@@ -510,11 +656,21 @@ impl TraitMethod {
             entries.append_all(quote! { #ident , });
         }
 
+        // A pipelinable method wraps the reply channel, so that a request receiver can
+        // be handed over in its place.
+        let reply_to = if self.pipelinable {
+            quote! { ::remoc::rtc::PipelinableReplyTo::Normal(reply_tx) }
+        } else {
+            quote! { ::remoc::rtc::ReplyTo::from(reply_tx) }
+        };
+
+        let pipelined_method = self.pipelinable.then(|| self.pipelined_client_method(req_enum, &req_type, assoc));
+
         quote! {
             async fn #ident (#self_ref, #args) -> #ret_ty {
                 let (reply_tx, reply_rx) = ::remoc::rtc::reply_channel(self.max_reply_size);
 
-                let req_value = #req_enum :: #req_case { __reply_tx: reply_tx, #entries };
+                let req_value = #req_enum :: #req_case { __reply_tx: #reply_to, #entries };
                 let req = ::remoc::rtc::Req::#req_type(req_value);
 
                 let mut guard = match self.monitor.pre_call(&req).await {
@@ -529,6 +685,74 @@ impl TraitMethod {
                     Ok(reply) => {
                         let reply: #ret_ty = ::std::convert::Into::into(reply);
                         if reply.is_err() {
+                            guard.failed();
+                        }
+                        reply
+                    }
+                    Err(err) => {
+                        guard.reply_failed(&err);
+                        Err(::remoc::rtc::CallError::from(err).into())
+                    }
+                }
+            }
+
+            #pipelined_method
+        }
+    }
+
+    /// Implementation of the twin method taking a request receiver for the client.
+    ///
+    /// It sends the same request as the normal method, but hands the request receiver
+    /// over in place of the reply channel.
+    fn pipelined_client_method(
+        &self, req_enum: &Ident, req_type: &TokenStream, assoc: &[AssocType],
+    ) -> TokenStream {
+        let pipelined_ident = self.pipelined_ident();
+        let ret_ty = self.pipelined_ret_ty(assoc);
+        let req_rx_ty = self.pipelined_req_rx_ty(assoc);
+        let self_bound = self.pipelined_self_bound();
+        let req_case = to_pascal_case(&self.ident);
+
+        let self_ref = match self.self_ref {
+            SelfRef::Value => quote! { self, },
+            SelfRef::Ref => quote! { &self, },
+            SelfRef::RefMut => quote! { &mut self, },
+        };
+
+        let mut args = quote! {};
+        let mut entries = quote! {};
+        for NamedArg { ident, ty, .. } in &self.args {
+            let ty = remove_self_type(ty, assoc);
+            args.append_all(quote! { #ident : #ty , });
+            entries.append_all(quote! { #ident , });
+        }
+
+        quote! {
+            async fn #pipelined_ident (#self_ref #args __req_rx: #req_rx_ty) -> #ret_ty
+            #self_bound
+            {
+                let (reply_tx, reply_rx) = ::remoc::rtc::reply_channel(self.max_reply_size);
+
+                let req_value = #req_enum :: #req_case {
+                    __reply_tx: ::remoc::rtc::PipelinableReplyTo::Pipeline {
+                        req_rx: __req_rx, reply_tx,
+                    },
+                    #entries
+                };
+                let req = ::remoc::rtc::Req::#req_type(req_value);
+
+                let mut guard = match self.monitor.pre_call(&req).await {
+                    ::remoc::rtc::CallDecision::Pass => ::std::boxed::Box::new(::remoc::rtc::DefaultGuard),
+                    ::remoc::rtc::CallDecision::Guard(guard) => guard,
+                    ::remoc::rtc::CallDecision::Drop => return Err(::remoc::rtc::CallError::Dropped.into()),
+                };
+
+                self.req_tx.send(req).await.map_err(::remoc::rtc::CallError::from)?;
+
+                match reply_rx.await {
+                    Ok(reply) => {
+                        let reply: #ret_ty = ::std::convert::Into::into(reply);
+                        if ::remoc::rtc::IsReply::is_error(&reply) {
                             guard.failed();
                         }
                         reply

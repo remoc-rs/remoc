@@ -300,7 +300,7 @@ where
             },
             None => err,
         };
-        Err(base::SendError { kind: err.kind, item: Box::new(err.item) as AnySend })
+        Err(err.map_item(|item| Box::new(item) as AnySend))
     }
 }
 

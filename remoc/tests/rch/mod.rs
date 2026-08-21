@@ -9,6 +9,24 @@ mod remote;
 mod storage_ref;
 mod watch;
 
+/// A handle for a value that was never queued reports that it was dropped.
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test::wasm_bindgen_test)]
+async fn dropped_sending() {
+    use remoc::rch::{Sending, SendingError};
+
+    crate::init();
+
+    let mut sending = Sending::<u32>::dropped();
+    assert!(matches!(sending.try_result(), Some(Err(SendingError::Dropped))));
+
+    let sending = Sending::<u32>::dropped();
+    assert!(matches!(sending.await, Err(SendingError::Dropped)));
+
+    // Dropping it must not report a sending failure.
+    drop(Sending::<u32>::dropped());
+}
+
 /// Assert fmt::Debug impls for error types containing non-Debug data.
 #[allow(deprecated)]
 const _: () = {

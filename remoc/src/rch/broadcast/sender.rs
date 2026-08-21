@@ -330,17 +330,12 @@ impl<T> fmt::Debug for Sending<T> {
 
 impl<T> Sending<T> {
     fn map_result(res: Result<(), SendingError<BroadcastMsg<T>>>) -> Result<(), SendingError<T>> {
-        match res {
-            Ok(()) => Ok(()),
-            Err(SendingError::Dropped) => Err(SendingError::Dropped),
-            Err(SendingError::Send(base::SendError { kind, item })) => Err(SendingError::Send(base::SendError {
-                kind,
-                item: match item {
-                    BroadcastMsg::Value(value) => value,
-                    BroadcastMsg::Lagged => unreachable!("result of sending lagged is ignored"),
-                },
-            })),
-        }
+        res.map_err(|err| {
+            err.map_item(|item| match item {
+                BroadcastMsg::Value(value) => value,
+                BroadcastMsg::Lagged => unreachable!("result of sending lagged is ignored"),
+            })
+        })
     }
 
     /// Tries to obtain the result of the sending operation.

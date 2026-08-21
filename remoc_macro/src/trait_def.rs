@@ -125,6 +125,18 @@ impl Parse for TraitDef {
             }
         }
 
+        // The twin method generated for a pipelinable method must not collide with a
+        // method of the trait.
+        for method in methods.iter().filter(|m| m.pipelinable) {
+            let twin = method.pipelined_ident();
+            if methods.iter().any(|m| m.ident == twin) {
+                return Err(syn::Error::new(
+                    method.ident.span(),
+                    format!("`{twin}` is generated for this method and must not be declared"),
+                ));
+            }
+        }
+
         Ok(Self {
             attrs,
             vis,
@@ -314,6 +326,9 @@ impl TraitDef {
         // Trait methods.
         for m in &self.methods {
             defs.append_all(m.trait_method(!self.async_trait));
+            if m.pipelinable {
+                defs.append_all(m.pipelined_trait_method(!self.async_trait, &self.assoc_types));
+            }
         }
 
         if self.async_trait {
@@ -1441,11 +1456,15 @@ impl TraitDef {
                     self.req_rx.close()
                 }
 
-                async fn forward(mut self, client: Self::Client) -> ::std::result::Result<(), ::remoc::rtc::ServeError> {
+                async fn forward(mut self, client: Self::Client) -> ::std::result::Result<
+                    ::std::option::Option<Self::Client>, ::remoc::rtc::ServeError
+                > {
                     loop {
                         let permit = match client.req_tx.reserve().await {
                             ::std::result::Result::Ok(permit) => permit,
-                            ::std::result::Result::Err(err) if err.is_closed() => break ::std::result::Result::Ok(()),
+                            ::std::result::Result::Err(err) if err.is_closed() => {
+                                break ::std::result::Result::Ok(::std::option::Option::Some(client))
+                            }
                             ::std::result::Result::Err(err) => break ::std::result::Result::Err(err.into()),
                         };
 
@@ -1457,8 +1476,12 @@ impl TraitDef {
 
                         let req = match req {
                             ::std::result::Result::Ok(::std::option::Option::Some(req)) => req,
-                            ::std::result::Result::Ok(::std::option::Option::None) => break ::std::result::Result::Ok(()),
-                            ::std::result::Result::Err(err) if err.is_disconnected() => break ::std::result::Result::Ok(()),
+                            ::std::result::Result::Ok(::std::option::Option::None) => {
+                                break ::std::result::Result::Ok(::std::option::Option::Some(client))
+                            }
+                            ::std::result::Result::Err(err) if err.is_disconnected() => {
+                                break ::std::result::Result::Ok(::std::option::Option::Some(client))
+                            }
                             ::std::result::Result::Err(err) => break ::std::result::Result::Err(err.into()),
                         };
 
@@ -1469,7 +1492,13 @@ impl TraitDef {
                             ::remoc::rtc::CallDecision::Drop => continue,
                         }
 
+                        let consumed = ::std::matches!(req, ::remoc::rtc::Req::Value(_));
+
                         permit.send(req);
+
+                        if consumed {
+                            break ::std::result::Result::Ok(::std::option::Option::None);
+                        }
                     }
                 }
             }
@@ -1868,6 +1897,8 @@ impl TraitDef {
             }
 
             impl #impl_generics_impl ::remoc::rtc::Client for #client_ident #impl_generics_ty #impl_generics_where {
+                type ReqReceiver = #req_receiver #req_generics;
+
                 fn capacity(&self) -> usize {
                     self.req_tx.capacity()
                 }

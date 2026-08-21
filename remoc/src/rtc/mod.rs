@@ -308,7 +308,7 @@ pub mod monitor;
 mod reply;
 pub use reply::ReplySender;
 #[doc(hidden)]
-pub use reply::{IsReply, Reply, reply_channel};
+pub use reply::{Completing, IsPipelinableReply, IsReply, PipelinableReplyTo, Reply, ReplyTo, reply_channel};
 
 use futures::future::BoxFuture;
 use std::{
@@ -400,6 +400,24 @@ use crate::{
 /// If the `#[no_cancel]` attribute is applied on a trait method, it will run to completion,
 /// even if the client cancels the request by dropping the future.
 ///
+/// If the `#[pipelinable]` attribute is applied on a trait method returning the
+/// [client](Client) of another remotable trait, a twin method called `<name>_pipelined`
+/// is generated, which additionally takes the [request receiver](ReqReceiver) of that
+/// client. Specify `#[pipelinable(name)]` to name that method differently. The caller can
+/// thus create the client and request receiver pair itself using
+/// `OtherTraitClient::new(request_buffer)`, hand the request receiver over and call
+/// methods on the client without waiting for the call to complete; these calls are
+/// queued until the object is available.
+///
+/// The twin method returns `Ok(None)` when the object was consumed by a method taking
+/// `self` by value; use [`ConsumedExt::unconsumed`] to turn that into
+/// [`CallError::Consumed`]. Its default implementation calls the original method and
+/// [forwards](ReqReceiver::forward) the requests to the client it returns.
+///
+/// Adding the attribute to an existing method keeps its requests wire compatible.
+/// However, calling the twin method on an endpoint that does not know it fails with
+/// a receive error there.
+///
 /// All [serde field attributes](https://serde.rs/field-attrs.html) `#[serde(...)]`
 /// are allowed on the arguments of the functions.
 /// They will be transferred to the respective field of the request struct that will
@@ -434,6 +452,12 @@ pub enum CallError {
     Listen(chmux::ListenerError),
     /// An endpoint forwarding the call or reply could not complete the transfer.
     Forward,
+    /// The object was consumed by a method taking `self` by value.
+    ///
+    /// No client for it can be returned, because it is no longer being served.
+    /// This is produced by [`ConsumedExt::unconsumed`] and never sent over
+    /// a connection.
+    Consumed,
     /// A failure was reported by an endpoint forwarding the call or reply.
     ///
     /// The nested error is [`None`] when that endpoint reported a newer error
@@ -452,6 +476,7 @@ crate::versioned::compact::impl_enum! {
         Connect(err: chmux::ConnectError) => "_4",
         Listen(err: chmux::ListenerError) => "_5",
         Forward => "_6",
+        Consumed => "_7",
         Remote(err: Option<Box<CallError>>) => "_50",
     }
 }
@@ -466,6 +491,7 @@ impl fmt::Display for CallError {
             Self::Connect(err) => write!(f, "connect error: {err}"),
             Self::Listen(err) => write!(f, "listen error: {err}"),
             Self::Forward => write!(f, "forwarding error"),
+            Self::Consumed => write!(f, "the remote object was consumed"),
             Self::Remote(Some(err)) => write!(f, "remote {err}"),
             Self::Remote(None) => write!(f, "unknown remote error"),
         }
@@ -569,6 +595,11 @@ where
 
 /// Client of a remotable trait.
 pub trait Client {
+    /// The [request receiver](ReqReceiver) of the same remotable trait.
+    ///
+    /// Requests received by it can be [forwarded](ReqReceiver::forward) to this client.
+    type ReqReceiver;
+
     /// Returns the current capacity of the channel for sending requests to
     /// the server.
     ///
@@ -1078,6 +1109,9 @@ where
     ///
     /// Forwarding ends when all clients of this request receiver have been dropped
     /// and all queued requests have been forwarded, or when `client` is disconnected.
+    /// `client` is then returned, unless a request for a method taking `self` by value
+    /// was forwarded, in which case [`None`] is returned because the object is no
+    /// longer served.
     ///
     /// The returned future must be polled for requests to be forwarded; spawn it
     /// as a task if forwarding should proceed in the background.
@@ -1092,7 +1126,9 @@ where
     /// after forwarding instead of being held until the request has been processed.
     ///
     /// The maximum reply size of `client` does not apply.
-    fn forward(self, client: Self::Client) -> impl Future<Output = Result<(), ServeError>> + Send;
+    fn forward(
+        self, client: Self::Client,
+    ) -> impl Future<Output = Result<Option<Self::Client>, ServeError>> + Send;
 
     /// Converts the request receiver into a [stream](Stream) of requests.
     fn into_stream(self) -> ReqReceiverStream<Self, Codec>
@@ -1604,6 +1640,53 @@ impl fmt::Display for ServeError {
 
 impl Error for ServeError {}
 
+impl From<ServeError> for CallError {
+    fn from(err: ServeError) -> Self {
+        match err {
+            ServeError::ReqReceive(err) => match err {
+                mpsc::RecvError::Receive(err) => Self::Receive(err),
+                mpsc::RecvError::Connect(err) => Self::Connect(err),
+                mpsc::RecvError::Listen(err) => Self::Listen(err),
+                mpsc::RecvError::Remote(_) => Self::Forward,
+            },
+            ServeError::ReplySend(SendingErrorKind::Send(err)) => Self::Send(err),
+            ServeError::ReplySend(SendingErrorKind::Dropped) => Self::Dropped,
+            ServeError::Forward(err) => Self::from(err),
+            ServeError::Monitor(_) => Self::Forward,
+        }
+    }
+}
+
+/// Handling of an object that was consumed while its requests were served.
+///
+/// This is implemented for the result of a method that hands over a
+/// [request receiver](ReqReceiver), i.e. a method generated by applying the
+/// `#[pipelinable]` attribute within the [remote attribute](remote).
+///
+/// Such a method returns `Ok(None)` when the object was consumed by a method
+/// taking `self` by value, in which case no client for it can be returned.
+pub trait ConsumedExt<T, E> {
+    /// The client, provided that the object was not consumed.
+    ///
+    /// `Ok(Some(client))` becomes `Ok(client)` and `Ok(None)` becomes
+    /// `Err(CallError::Consumed)`, converted into the error type of the method.
+    /// Other errors are passed through unchanged.
+    fn unconsumed(self) -> Result<T, E>;
+}
+
+impl<T, E> ConsumedExt<T, E> for Result<Option<T>, E>
+where
+    E: From<CallError>,
+{
+    fn unconsumed(self) -> Result<T, E> {
+        match self {
+            Ok(Some(value)) => Ok(value),
+            Ok(None) => Err(CallError::Consumed.into()),
+            Err(err) => Err(err),
+        }
+    }
+}
+
 // Re-exports for proc macro usage.
 #[doc(hidden)]
 pub use serde::{Deserialize, Serialize};
@@ -1648,19 +1731,19 @@ pub const fn missing_max_reply_size() -> usize {
 
 /// Send reply to request.
 #[doc(hidden)]
-pub async fn send_reply<T, E, Codec>(
-    reply_tx: ReplySender<Result<T, E>, Codec>, err_tx: &ReplyErrorSender,
-    mut dispatch_guard: Box<dyn DispatchGuard>, result: Result<T, E>,
+pub async fn send_reply<R, Codec>(
+    reply_tx: impl Into<ReplySender<R, Codec>>, err_tx: &ReplyErrorSender,
+    mut dispatch_guard: Box<dyn DispatchGuard>, result: R,
 ) where
-    T: RemoteSend,
-    E: RemoteSend,
+    R: IsReply,
+    Reply<R>: RemoteSend,
     Codec: codec::Codec,
 {
-    if result.is_err() {
+    if result.is_error() {
         dispatch_guard.failed();
     }
 
-    let Ok(sending) = reply_tx.send(result) else { return };
+    let Ok(sending) = reply_tx.into().send(result) else { return };
 
     let err_tx = err_tx.clone();
     wokio::spawn(

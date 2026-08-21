@@ -119,7 +119,12 @@ impl<T> SendError<T> {
 
     /// Discards the unsent value and returns the same error with `()` in its place.
     pub fn without_item(self) -> SendError<()> {
-        SendError { kind: self.kind, item: () }
+        self.map_item(|_| ())
+    }
+
+    /// Returns the same error with the unsent value replaced by `map(item)`.
+    pub fn map_item<U>(self, map: impl FnOnce(T) -> U) -> SendError<U> {
+        SendError { kind: self.kind, item: map(self.item) }
     }
 }
 

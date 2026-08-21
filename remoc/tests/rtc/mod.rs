@@ -11,6 +11,7 @@ mod errors;
 mod generics;
 mod generics_non_clone;
 mod monitor;
+mod pipelined;
 mod pipelining;
 mod readonly;
 mod rename;

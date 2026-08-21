@@ -132,10 +132,45 @@ version can still talk to each other.
   remote endpoint, plus `Receiver::forwarded` constructors for mpsc, oneshot and watch
 - rch: `broadcast::WeakSender` and `broadcast::Sender::downgrade`, `strong_count`
   and `weak_count`
+- rch: `Sending::dropped` creates a handle for a value that was never queued for
+  sending, because the receiving half was already gone
+- rch: `SendingError::map_item` and `base::SendError::map_item` replace the unsent
+  value of a send error
 - rch: `bin` channels can now be used fully locally; when both ends stay in the same
   process a lightweight loopback is used and no serialization takes place
 - rch: `base::Sender::into_inner` and `base::Receiver::into_inner` to obtain the
   underlying chmux channel
+- rtc: the request receiver (`TraitReqReceiver`) can now be sent to a remote endpoint,
+  which then handles the requests of the client; a set request receiver monitor is not
+  transferred
+- rtc: every server variant can now be created from a request receiver, either using
+  `TraitReqReceiver::into_server`, `into_server_ref`, `into_server_ref_mut`,
+  `into_server_shared` and `into_server_shared_mut`, or using the `from_req_receiver`
+  function of the corresponding server trait; together with the above this allows a
+  remote endpoint to attach a target object to a client that is already connected
+- rtc: `ReqReceiver::forward` hands the requests of a request receiver over to another
+  client, which lets whatever that client is connected to execute them; replies are
+  delivered from there directly to the original caller
+- rtc: `TraitClient::new(request_buffer)` creates a client together with the request
+  receiver connected to it, mirroring `ReqReceiver::new`; calls made on the client
+  before the request receiver is attached to a target object are queued
+- rtc: pipelining via the `#[pipelinable]` attribute on a trait method returning the
+  client of another remotable trait. It generates a `<name>_pipelined` twin method taking
+  the request receiver of that client, so that the caller can use the client while the
+  call that provides the object is still in flight. The twin is a provided trait
+  method, whose default implementation forwards the requests to the returned client
+  and which can be overridden to serve the request receiver directly. Use
+  `#[pipelinable(name)]` to name the twin method differently.
+- rtc: `Client` has a new associated type `ReqReceiver`, naming the request receiver
+  whose requests can be forwarded to the client
+- rtc: `ReplyTo::complete` and `PipelinableReplyTo::complete` reply to a request,
+  the latter handling both an ordinary call and a handed over request receiver, so
+  that a request can be replied to the same way whether or not its method is
+  pipelinable. The returned handle reports whether the reply was transmitted and, if
+  not, the reply that could not be transmitted.
+- rtc: `CallError::Consumed` and `ConsumedExt::unconsumed`, for the case that
+  an object was consumed by a method taking `self` by value while its requests were
+  being served
 - rtc: [monitors](https://docs.rs/remoc/0.19/remoc/rtc/monitor/index.html) that
   observe and control every request of a client (`MonitorableClient::set_monitor`),
   server (`MonitorableServer::set_monitor`) and request receiver
@@ -183,6 +218,21 @@ version can still talk to each other.
   `...ReqRef` and `...ReqRefMut` enums instead of a single `...Req` enum.
 - **BREAKING**: rtc: `ReqReceiver` no longer implements `Stream` directly; call
   `ReqReceiver::into_stream()` to obtain a `ReqReceiverStream`
+- **BREAKING**: rtc: `ServerBase` has a new associated type `ReqReceiver`, naming the
+  request receiver every server variant can be created from
+- **BREAKING**: rtc: `ServeError` has a new `Forward` variant, reported when forwarding
+  a request to another client fails
+- **BREAKING**: rtc: `ReqReceiver::forward` returns the client it forwarded to, or
+  `None` when the object was consumed by a method taking `self` by value
+- **BREAKING**: rtc: the reply channel of a request is now transferred as `ReplyTo`
+  instead of the bare `ReplySender`, so that a method can later gain the `#[pipelinable]`
+  attribute without breaking its clients. `ReplyTo` offers the same functions as
+  `ReplySender`, thus code handling requests of a request receiver is unaffected.
+  Endpoints of Remoc 0.19 and earlier are unaffected as well, since they continue to
+  receive the bare reply sender.
+- **BREAKING**: rtc: `ReqReceiver` is no longer accepted as a server variant in the
+  `server(...)` argument of the `remote` attribute; the request receiver is now always
+  generated
 - **BREAKING**: rtc: `OnReqReceiveError` and `ServerBase::set_on_req_receive_error`
   have been removed; use a [server monitor](https://docs.rs/remoc/0.19/remoc/rtc/trait.ServerMonitor.html)
   to react to failing requests

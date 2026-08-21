@@ -518,6 +518,14 @@ impl<T> SendingError<T> {
             Self::Dropped => SendingErrorKind::Dropped,
         }
     }
+
+    /// Returns the same error with the unsent value replaced by `map(item)`.
+    pub fn map_item<U>(self, map: impl FnOnce(T) -> U) -> SendingError<U> {
+        match self {
+            Self::Send(err) => SendingError::Send(err.map_item(map)),
+            Self::Dropped => SendingError::Dropped,
+        }
+    }
 }
 
 /// Handle to obtain the result of a queued send operation.
@@ -585,6 +593,13 @@ impl<T> Sending<T> {
             Err(tokio::sync::oneshot::error::TryRecvError::Empty) => None,
             Err(tokio::sync::oneshot::error::TryRecvError::Closed) => Some(Err(SendingError::Dropped)),
         }
+    }
+
+    /// Creates a handle for a value that was never queued for sending.
+    ///
+    /// Awaiting it always yields [`SendingError::Dropped`].
+    pub fn dropped() -> Self {
+        Self(tokio::sync::oneshot::channel().1)
     }
 }
 

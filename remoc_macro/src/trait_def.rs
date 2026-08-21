@@ -26,7 +26,6 @@ enum ServerVariant {
     RefMut,
     Shared,
     SharedMut,
-    ReqReceiver,
 }
 
 struct InvalidServerVariant;
@@ -40,7 +39,6 @@ impl FromStr for ServerVariant {
             "ref_mut" | "RefMut" => Ok(Self::RefMut),
             "shared" | "Shared" => Ok(Self::Shared),
             "shared_mut" | "SharedMut" => Ok(Self::SharedMut),
-            "req_receiver" | "ReqReceiver" => Ok(Self::ReqReceiver),
             _ => Err(InvalidServerVariant),
         }
     }
@@ -178,7 +176,7 @@ impl TraitDef {
             while !content.is_empty() {
                 let variant: Ident = content.parse()?;
                 let variant = variant.to_string().parse::<ServerVariant>().map_err(|_| {
-                    content.error("supported server variants: Value, Ref, RefMut, Shared, SharedMut, ReqReceiver")
+                    content.error("supported server variants: Value, Ref, RefMut, Shared, SharedMut")
                 })?;
                 variants.insert(variant);
 
@@ -213,6 +211,66 @@ impl TraitDef {
     /// Identifier of the client type.
     fn client_ident(&self) -> Ident {
         format_ident!("{}Client", &self.ident)
+    }
+
+    /// Identifier of the request receiver type.
+    fn req_receiver_ident(&self) -> Ident {
+        format_ident!("{}ReqReceiver", &self.ident)
+    }
+
+    /// The `new` and `from_req_receiver` constructors of a server type.
+    ///
+    /// `target_ty` is how the server type holds its target object.
+    fn server_ctors(target_ty: TokenStream) -> TokenStream {
+        quote! {
+            fn new(target: #target_ty, request_buffer: usize) -> (Self, Self::Client) {
+                let (req_tx, req_rx) = ::remoc::rch::mpsc::channel(request_buffer);
+                (
+                    Self {
+                        target,
+                        req_rx,
+                        monitor: ::std::boxed::Box::new(::remoc::rtc::DefaultMonitor),
+                    },
+                    Self::Client::from_req_tx(req_tx),
+                )
+            }
+
+            fn from_req_receiver(target: #target_ty, req_rx: Self::ReqReceiver) -> Self {
+                Self {
+                    target,
+                    req_rx: req_rx.req_rx,
+                    monitor: ::remoc::rtc::req_receiver_monitor_as_server_monitor(req_rx.monitor),
+                }
+            }
+        }
+    }
+
+    /// The generic arguments corresponding to the parameters of `generics`.
+    fn generics_to_args(generics: &Generics) -> TokenStream {
+        let args: Vec<TokenStream> = generics
+            .params
+            .iter()
+            .map(|p| match p {
+                GenericParam::Lifetime(lt) => {
+                    let lt = &lt.lifetime;
+                    quote! { #lt }
+                }
+                GenericParam::Type(tp) => {
+                    let id = &tp.ident;
+                    quote! { #id }
+                }
+                GenericParam::Const(cp) => {
+                    let id = &cp.ident;
+                    quote! { #id }
+                }
+            })
+            .collect();
+
+        if args.is_empty() {
+            quote! {}
+        } else {
+            quote! { < #(#args),* > }
+        }
     }
 
     /// Generic parameters for the versioning macro, which expects const generic
@@ -729,7 +787,9 @@ impl TraitDef {
         };
 
         let client = self.client_ident();
+        let req_receiver = self.req_receiver_ident();
         let server = format_ident!("{}Server", &ident);
+        let ctors = Self::server_ctors(quote! { Target });
 
         let doc = format!("Server for [{}] taking the target object by value.", ident);
 
@@ -764,6 +824,7 @@ impl TraitDef {
 
             impl #impl_generics_impl ::remoc::rtc::ServerBase for #server #impl_generics_ty #impl_generics_where {
                 type Client = #client #req_generics;
+                type ReqReceiver = #req_receiver #req_generics;
             }
 
             impl #impl_generics_impl ::remoc::rtc::MonitorableServer for #server #impl_generics_ty #impl_generics_where {
@@ -777,17 +838,7 @@ impl TraitDef {
             }
 
             impl #impl_generics_impl ::remoc::rtc::Server <Target, Codec> for #server #impl_generics_ty #impl_generics_where {
-                fn new(target: Target, request_buffer: usize) -> (Self, Self::Client) {
-                    let (req_tx, req_rx) = ::remoc::rch::mpsc::channel(request_buffer);
-                    (
-                        Self {
-                            target,
-                            req_rx,
-                            monitor: ::std::boxed::Box::new(::remoc::rtc::DefaultMonitor),
-                        },
-                        Self::Client::new(req_tx),
-                    )
-                }
+                #ctors
 
                 async fn serve(self) -> (::std::option::Option<Target>, ::std::result::Result<(), ::remoc::rtc::ServeError>) {
                     let Self { mut target, mut req_rx, mut monitor } = self;
@@ -858,7 +909,9 @@ impl TraitDef {
         };
 
         let client = self.client_ident();
+        let req_receiver = self.req_receiver_ident();
         let server = format_ident!("{}ServerRef", &ident);
+        let ctors = Self::server_ctors(quote! { &'target Target });
 
         let doc = format!("Server for [{}] taking the target object by reference.", ident);
 
@@ -882,6 +935,7 @@ impl TraitDef {
             impl #impl_generics_impl ::remoc::rtc::ServerBase for #server #impl_generics_ty #impl_generics_where
             {
                 type Client = #client #req_generics;
+                type ReqReceiver = #req_receiver #req_generics;
             }
 
             impl #impl_generics_impl ::remoc::rtc::MonitorableServer for #server #impl_generics_ty #impl_generics_where
@@ -897,17 +951,7 @@ impl TraitDef {
 
             impl #impl_generics_impl ::remoc::rtc::ServerRef <'target, Target, Codec> for #server #impl_generics_ty #impl_generics_where
             {
-                fn new(target: &'target Target, request_buffer: usize) -> (Self, Self::Client) {
-                    let (req_tx, req_rx) = ::remoc::rch::mpsc::channel(request_buffer);
-                    (
-                        Self {
-                            target,
-                            req_rx,
-                            monitor: ::std::boxed::Box::new(::remoc::rtc::DefaultMonitor),
-                        },
-                        Self::Client::new(req_tx),
-                    )
-                }
+                #ctors
 
                 async fn serve(self) -> ::std::result::Result<(), ::remoc::rtc::ServeError> {
                     let Self { target, mut req_rx, mut monitor } = self;
@@ -971,7 +1015,9 @@ impl TraitDef {
         };
 
         let client = self.client_ident();
+        let req_receiver = self.req_receiver_ident();
         let server = format_ident!("{}ServerRefMut", &ident);
+        let ctors = Self::server_ctors(quote! { &'target mut Target });
 
         let doc = format!("Server for [{}] taking the target object by mutable reference.", ident);
 
@@ -1001,6 +1047,7 @@ impl TraitDef {
             impl #impl_generics_impl ::remoc::rtc::ServerBase for #server #impl_generics_ty #impl_generics_where
             {
                 type Client = #client #req_generics;
+                type ReqReceiver = #req_receiver #req_generics;
             }
 
             impl #impl_generics_impl ::remoc::rtc::MonitorableServer for #server #impl_generics_ty #impl_generics_where
@@ -1016,17 +1063,7 @@ impl TraitDef {
 
             impl #impl_generics_impl ::remoc::rtc::ServerRefMut <'target, Target, Codec> for #server #impl_generics_ty #impl_generics_where
             {
-                fn new(target: &'target mut Target, request_buffer: usize) -> (Self, Self::Client) {
-                    let (req_tx, req_rx) = ::remoc::rch::mpsc::channel(request_buffer);
-                    (
-                        Self {
-                            target,
-                            req_rx,
-                            monitor: ::std::boxed::Box::new(::remoc::rtc::DefaultMonitor),
-                        },
-                        Self::Client::new(req_tx),
-                    )
-                }
+                #ctors
 
                 async fn serve(self) -> ::std::result::Result<(), ::remoc::rtc::ServeError> {
                     let Self { target, mut req_rx, mut monitor } = self;
@@ -1090,7 +1127,9 @@ impl TraitDef {
         };
 
         let client = self.client_ident();
+        let req_receiver = self.req_receiver_ident();
         let server = format_ident!("{}ServerShared", &ident);
+        let ctors = Self::server_ctors(quote! { ::std::sync::Arc<Target> });
 
         let doc = format!("Server for [{}] taking the target object by shared reference.", ident);
 
@@ -1114,6 +1153,7 @@ impl TraitDef {
             impl #impl_generics_impl ::remoc::rtc::ServerBase for #server #impl_generics_ty #impl_generics_where
             {
                 type Client = #client #req_generics;
+                type ReqReceiver = #req_receiver #req_generics;
             }
 
             impl #impl_generics_impl ::remoc::rtc::MonitorableServer for #server #impl_generics_ty #impl_generics_where
@@ -1129,17 +1169,7 @@ impl TraitDef {
 
             impl #impl_generics_impl ::remoc::rtc::ServerShared <Target, Codec> for #server #impl_generics_ty #impl_generics_where
             {
-                fn new(target: ::std::sync::Arc<Target>, request_buffer: usize) -> (Self, Self::Client) {
-                    let (req_tx, req_rx) = ::remoc::rch::mpsc::channel(request_buffer);
-                    (
-                        Self {
-                            target,
-                            req_rx,
-                            monitor: ::std::boxed::Box::new(::remoc::rtc::DefaultMonitor),
-                        },
-                        Self::Client::new(req_tx),
-                    )
-                }
+                #ctors
 
                 async fn serve(self, spawn: bool) -> ::std::result::Result<(), ::remoc::rtc::ServeError> {
                     let Self { target, mut req_rx, mut monitor } = self;
@@ -1209,7 +1239,9 @@ impl TraitDef {
         };
 
         let client = self.client_ident();
+        let req_receiver = self.req_receiver_ident();
         let server = format_ident!("{}ServerSharedMut", &ident);
+        let ctors = Self::server_ctors(quote! { ::std::sync::Arc<::remoc::rtc::LocalRwLock<Target>> });
 
         let doc = format!("Server for [{}] taking the target object by shared mutable reference.", ident);
 
@@ -1239,6 +1271,7 @@ impl TraitDef {
             impl #impl_generics_impl ::remoc::rtc::ServerBase for #server #impl_generics_ty #impl_generics_where
             {
                 type Client = #client #req_generics;
+                type ReqReceiver = #req_receiver #req_generics;
             }
 
             impl #impl_generics_impl ::remoc::rtc::MonitorableServer for #server #impl_generics_ty #impl_generics_where
@@ -1254,17 +1287,7 @@ impl TraitDef {
 
             impl #impl_generics_impl ::remoc::rtc::ServerSharedMut <Target, Codec> for #server #impl_generics_ty #impl_generics_where
             {
-                fn new(target: ::std::sync::Arc<::remoc::rtc::LocalRwLock<Target>>, request_buffer: usize) -> (Self, Self::Client) {
-                    let (req_tx, req_rx) = ::remoc::rch::mpsc::channel(request_buffer);
-                    (
-                        Self {
-                            target,
-                            req_rx,
-                            monitor: ::std::boxed::Box::new(::remoc::rtc::DefaultMonitor),
-                        },
-                        Self::Client::new(req_tx),
-                    )
-                }
+                #ctors
 
                 async fn serve(self, spawn: bool) -> ::std::result::Result<(), ::remoc::rtc::ServeError> {
                     let Self { target, mut req_rx, mut monitor } = self;
@@ -1333,7 +1356,7 @@ impl TraitDef {
         let (req_value, req_ref, req_ref_mut) = self.request_enum_idents();
 
         let client = self.client_ident();
-        let server = format_ident!("{}ReqReceiver", &ident);
+        let server = self.req_receiver_ident();
 
         let req_params = quote! {
             #req_value #req_generics,
@@ -1373,6 +1396,7 @@ impl TraitDef {
             impl #impl_generics_impl ::remoc::rtc::ServerBase for #server #impl_generics_ty #impl_generics_where
             {
                 type Client = #client #req_generics;
+                type ReqReceiver = Self;
             }
 
             impl #impl_generics_impl ::remoc::rtc::MonitorableReqReceiver for #server #impl_generics_ty #impl_generics_where
@@ -1399,7 +1423,7 @@ impl TraitDef {
                             req_rx,
                             monitor: ::std::boxed::Box::new(::remoc::rtc::DefaultMonitor),
                         },
-                        Self::Client::new(req_tx),
+                        Self::Client::from_req_tx(req_tx),
                     )
                 }
 
@@ -1416,12 +1440,47 @@ impl TraitDef {
                 fn close(&mut self) {
                     self.req_rx.close()
                 }
+
+                async fn forward(mut self, client: Self::Client) -> ::std::result::Result<(), ::remoc::rtc::ServeError> {
+                    loop {
+                        let permit = match client.req_tx.reserve().await {
+                            ::std::result::Result::Ok(permit) => permit,
+                            ::std::result::Result::Err(err) if err.is_closed() => break ::std::result::Result::Ok(()),
+                            ::std::result::Result::Err(err) => break ::std::result::Result::Err(err.into()),
+                        };
+
+                        let req = ::remoc::rtc::select! {
+                            biased;
+                            () = client.req_tx.closed() => continue,
+                            req = self.recv() => req,
+                        };
+
+                        let req = match req {
+                            ::std::result::Result::Ok(::std::option::Option::Some(req)) => req,
+                            ::std::result::Result::Ok(::std::option::Option::None) => break ::std::result::Result::Ok(()),
+                            ::std::result::Result::Err(err) if err.is_disconnected() => break ::std::result::Result::Ok(()),
+                            ::std::result::Result::Err(err) => break ::std::result::Result::Err(err.into()),
+                        };
+
+                        match client.monitor.pre_call(&req).await {
+                            ::remoc::rtc::CallDecision::Pass => (),
+                            // The reply is not delivered through the client, thus the guard is released immediately.
+                            ::remoc::rtc::CallDecision::Guard(_guard) => (),
+                            ::remoc::rtc::CallDecision::Drop => continue,
+                        }
+
+                        permit.send(req);
+                    }
+                }
             }
         }
     }
 
-    /// Server types and implementations.
-    pub fn servers(&self) -> Result<TokenStream, &'static str> {
+    /// The server variants that are generated for this trait.
+    ///
+    /// This takes the variants requested by the `server(...)` argument and the
+    /// methods of the trait into account.
+    fn generated_server_variants(&self) -> Result<HashSet<ServerVariant>, &'static str> {
         let enabled = |variant: ServerVariant| match &self.server_variants {
             Some(variants) => variants.contains(&variant),
             None => false,
@@ -1431,28 +1490,28 @@ impl TraitDef {
             None => true,
         };
 
-        let mut servers = quote! {};
+        let mut variants = HashSet::new();
 
         // Always generate server taking value.
         if enabled_or_auto(ServerVariant::Value) {
-            servers.append_all(self.server_value());
+            variants.insert(ServerVariant::Value);
         }
 
         // Generate servers taking (mutable, shared) references, if possible.
         if !self.is_taking_value() {
             if enabled_or_auto(ServerVariant::RefMut) {
-                servers.append_all(self.server_ref_mut());
+                variants.insert(ServerVariant::RefMut);
             }
             if enabled_or_auto(ServerVariant::SharedMut) {
-                servers.append_all(self.server_shared_mut());
+                variants.insert(ServerVariant::SharedMut);
             }
 
             if !self.is_taking_ref_mut() {
                 if enabled_or_auto(ServerVariant::Ref) {
-                    servers.append_all(self.server_ref());
+                    variants.insert(ServerVariant::Ref);
                 }
                 if enabled_or_auto(ServerVariant::Shared) {
-                    servers.append_all(self.server_shared());
+                    variants.insert(ServerVariant::Shared);
                 }
             } else {
                 if enabled(ServerVariant::Ref) {
@@ -1473,10 +1532,194 @@ impl TraitDef {
             }
         }
 
-        // Always generate request receiver.
-        if enabled_or_auto(ServerVariant::ReqReceiver) {
-            servers.append_all(self.req_receiver());
+        Ok(variants)
+    }
+
+    /// Conversion of the request receiver into a single server type.
+    ///
+    /// `method` is the name of the generated function, `server` the server type it
+    /// returns and `server_trait` the path of the server trait, including its generic
+    /// arguments. `target_ty` is how that server holds its target object.
+    #[allow(clippy::too_many_arguments)]
+    fn req_receiver_into_server(
+        &self, method: &str, server: Ident, server_trait: TokenStream, target_ty: TokenStream,
+        with_lifetime: bool, with_send: bool, with_sync: bool, with_static: bool,
+    ) -> TokenStream {
+        let vis = &self.vis;
+        let method = format_ident!("{method}");
+
+        // Generic arguments of the server type, as seen from the request receiver.
+        let (server_ty_generics, _) = self.generics(GenericsArgs {
+            with_target: true,
+            with_codec: true,
+            with_codec_default: true,
+            with_lifetime,
+            with_send: false,
+            with_sync: false,
+            with_static: false,
+            with_assoc_types: false,
+        });
+        let server_args = Self::generics_to_args(&server_ty_generics);
+
+        let lifetime = if with_lifetime {
+            quote! { 'target, }
+        } else {
+            quote! {}
+        };
+
+        // The target object must implement the trait, with its associated types
+        // matching those of the request receiver.
+        let target_bound = self.trait_path_with_assoc_bindings();
+        let mut bounds = quote! { Target: #target_bound, };
+        if with_send {
+            bounds.append_all(quote! { Target: ::std::marker::Send, });
         }
+        if with_sync {
+            bounds.append_all(quote! { Target: ::std::marker::Sync, });
+        }
+        if with_static {
+            bounds.append_all(quote! { Target: 'static, });
+        }
+
+        let doc = format!("Converts this into a [{server}], which dispatches the requests to `target`.");
+
+        quote! {
+            #[doc=#doc]
+            ///
+            /// Requests that are already queued in the request receiver are processed by
+            /// the server.
+            #vis fn #method <#lifetime Target> (self, target: #target_ty) -> #server #server_args
+            where
+                #bounds
+            {
+                <#server #server_args as ::remoc::rtc::#server_trait>::from_req_receiver(target, self)
+            }
+        }
+    }
+
+    /// Conversions of the request receiver into the generated server types.
+    fn req_receiver_into_servers(&self, variants: &HashSet<ServerVariant>) -> TokenStream {
+        let ident = &self.ident;
+        let req_receiver = self.req_receiver_ident();
+
+        let (_, impl_generics) = self.generics(GenericsArgs {
+            with_target: false,
+            with_codec: true,
+            with_codec_default: true,
+            with_lifetime: false,
+            with_send: false,
+            with_sync: false,
+            with_static: false,
+            with_assoc_types: true,
+        });
+        let (impl_generics_impl, impl_generics_ty, impl_generics_where) = impl_generics.split_for_impl();
+
+        let need_send = self.is_taking_value() || self.is_taking_ref_mut();
+        let need_sync = self.is_taking_ref();
+
+        let mut methods = quote! {};
+
+        if variants.contains(&ServerVariant::Value) {
+            methods.append_all(self.req_receiver_into_server(
+                "into_server",
+                format_ident!("{ident}Server"),
+                quote! { Server<Target, Codec> },
+                quote! { Target },
+                false,
+                need_send,
+                need_sync,
+                self.is_taking_value(),
+            ));
+        }
+
+        if variants.contains(&ServerVariant::Ref) {
+            methods.append_all(self.req_receiver_into_server(
+                "into_server_ref",
+                format_ident!("{ident}ServerRef"),
+                quote! { ServerRef<'target, Target, Codec> },
+                quote! { &'target Target },
+                true,
+                false,
+                need_sync,
+                false,
+            ));
+        }
+
+        if variants.contains(&ServerVariant::RefMut) {
+            methods.append_all(self.req_receiver_into_server(
+                "into_server_ref_mut",
+                format_ident!("{ident}ServerRefMut"),
+                quote! { ServerRefMut<'target, Target, Codec> },
+                quote! { &'target mut Target },
+                true,
+                need_send,
+                need_sync,
+                false,
+            ));
+        }
+
+        if variants.contains(&ServerVariant::Shared) {
+            methods.append_all(self.req_receiver_into_server(
+                "into_server_shared",
+                format_ident!("{ident}ServerShared"),
+                quote! { ServerShared<Target, Codec> },
+                quote! { ::std::sync::Arc<Target> },
+                false,
+                true,
+                true,
+                true,
+            ));
+        }
+
+        if variants.contains(&ServerVariant::SharedMut) {
+            methods.append_all(self.req_receiver_into_server(
+                "into_server_shared_mut",
+                format_ident!("{ident}ServerSharedMut"),
+                quote! { ServerSharedMut<Target, Codec> },
+                quote! { ::std::sync::Arc<::remoc::rtc::LocalRwLock<Target>> },
+                false,
+                true,
+                true,
+                true,
+            ));
+        }
+
+        if methods.is_empty() {
+            return quote! {};
+        }
+
+        quote! {
+            impl #impl_generics_impl #req_receiver #impl_generics_ty #impl_generics_where {
+                #methods
+            }
+        }
+    }
+
+    /// Server types and implementations.
+    pub fn servers(&self) -> Result<TokenStream, &'static str> {
+        let variants = self.generated_server_variants()?;
+
+        let mut servers = quote! {};
+
+        if variants.contains(&ServerVariant::Value) {
+            servers.append_all(self.server_value());
+        }
+        if variants.contains(&ServerVariant::RefMut) {
+            servers.append_all(self.server_ref_mut());
+        }
+        if variants.contains(&ServerVariant::SharedMut) {
+            servers.append_all(self.server_shared_mut());
+        }
+        if variants.contains(&ServerVariant::Ref) {
+            servers.append_all(self.server_ref());
+        }
+        if variants.contains(&ServerVariant::Shared) {
+            servers.append_all(self.server_shared());
+        }
+
+        // The request receiver is always generated, since every server variant can be constructed from it.
+        servers.append_all(self.req_receiver());
+        servers.append_all(self.req_receiver_into_servers(&variants));
 
         Ok(servers)
     }
@@ -1487,6 +1730,8 @@ impl TraitDef {
         let attrs = attribute_tokens(attrs);
         let client_ident = self.client_ident();
         let client_ident_str = client_ident.to_string();
+        let req_receiver = self.req_receiver_ident();
+        let new_doc = format!("Creates a client and the [{req_receiver}] connected to it.");
 
         let (ty_generics, impl_generics) = self.generics(GenericsArgs {
             with_target: false,
@@ -1590,7 +1835,25 @@ impl TraitDef {
             #clone
 
             impl #impl_generics_impl #client_ident #impl_generics_ty #impl_generics_where {
-                fn new(req_tx: ::remoc::rch::mpsc::Sender<
+                #[doc=#new_doc]
+                ///
+                /// `request_buffer` bounds the number of calls that can be queued for sending.
+                ///
+                /// Calls made on the client are queued until the request receiver is
+                /// [attached to a target object](::remoc::rtc::ReqReceiver) or its requests
+                /// are [forwarded](::remoc::rtc::ReqReceiver::forward) to another client.
+                ///
+                /// # Panics
+                ///
+                /// Panics if `request_buffer` is zero.
+                #vis fn new(request_buffer: usize) -> (Self, #req_receiver #req_generics) {
+                    let (req_rx, client) = <#req_receiver #req_generics as ::remoc::rtc::ReqReceiver<Codec>>::new(
+                        request_buffer,
+                    );
+                    (client, req_rx)
+                }
+
+                fn from_req_tx(req_tx: ::remoc::rch::mpsc::Sender<
                     ::remoc::rtc::Req<#req_value #req_generics, #req_ref #req_generics, #req_ref_mut #req_generics>,
                     Codec,
                 >) -> Self

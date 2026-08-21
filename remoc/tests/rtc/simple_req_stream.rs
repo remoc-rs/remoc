@@ -17,7 +17,7 @@ impl From<remoc::rtc::CallError> for IncreaseError {
     }
 }
 
-#[remoc::rtc::remote(Server(ReqReceiver))]
+#[remoc::rtc::remote(Server())]
 pub trait Counter {
     async fn value(&self) -> Result<u32, remoc::rtc::CallError>;
     async fn watch(&mut self) -> Result<remoc::rch::watch::Receiver<u32>, remoc::rtc::CallError>;

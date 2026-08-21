@@ -71,6 +71,22 @@
 //! Unlike the other server types, the request receiver can itself be sent to a remote
 //! endpoint, which then handles the requests of the client.
 //!
+//! Every other server variant can also be created from a request receiver, either using
+//! `TraitReqReceiver::into_server`, `into_server_ref`, `into_server_ref_mut`,
+//! `into_server_shared` and `into_server_shared_mut` or using the `from_req_receiver`
+//! function of the server, for example [`ServerSharedMut::from_req_receiver`].
+//! Thus a request receiver can be sent to a remote endpoint, which then attaches a
+//! target object to it and serves the client.
+//!
+//! Alternatively the requests can be handed over to another client using
+//! [`ReqReceiver::forward`], which lets whatever that client is connected to execute
+//! them.
+//!
+//! A client and the request receiver connected to it can be created from either side:
+//! `TraitReqReceiver::new(request_buffer)` returns the request receiver first and
+//! `TraitClient::new(request_buffer)` the client first. Calls made on the client before
+//! the request receiver is attached to a target object are queued.
+//!
 //! See [ReqReceiver] for details.
 //!
 //! # Usage
@@ -374,11 +390,12 @@ use crate::{
 /// `#[async_trait::async_trait]` attribute on all implementations of the trait.
 ///
 /// The `server(...)` argument allows to limit the generated server variants.
-/// Supported variants are: `Value`, `Ref`, `RefMut`, `Shared`, `SharedMut`, `ReqReceiver`.
+/// Supported variants are: `Value`, `Ref`, `RefMut`, `Shared`, `SharedMut`.
 /// Multiple variants can be specified as a comma-separated list.
 /// For example, when `#[remoc::rtc::remote(server(SharedMut))]` is applied to `trait Trait` only the
 /// `TraitServerSharedMut` server will be generated.
 /// If unspecified, all server variants are generated.
+/// The request receiver `TraitReqReceiver` is always generated.
 ///
 /// If the `#[no_cancel]` attribute is applied on a trait method, it will run to completion,
 /// even if the client cancels the request by dropping the future.
@@ -761,6 +778,13 @@ impl CallGuard for ChainedCallGuard {
 pub trait ServerBase {
     /// The client type, which can be sent to a remote endpoint.
     type Client: Client;
+
+    /// The [request receiver](ReqReceiver) type of the same remotable trait.
+    ///
+    /// Every server variant can be created from a request receiver, which allows
+    /// serving a client that is already connected, possibly over a connection to
+    /// a remote endpoint.
+    type ReqReceiver: ServerBase<Client = Self::Client>;
 }
 
 /// A server that owns the target of a remotely callable trait.
@@ -780,6 +804,16 @@ where
     ///
     /// Panics if `request_buffer` is zero.
     fn new(target: Target, request_buffer: usize) -> (Self, Self::Client);
+
+    /// Creates a server that processes the requests of an existing request receiver.
+    ///
+    /// This allows to serve a client that is already connected to the request receiver,
+    /// for example a client on a remote endpoint that sent the request receiver here.
+    ///
+    /// Requests that are already queued in the request receiver are processed by the
+    /// server. A [request receiver monitor](ReqReceiverMonitor) set on the request
+    /// receiver is converted into a [server monitor](ServerMonitor) and kept.
+    fn from_req_receiver(target: Target, req_rx: Self::ReqReceiver) -> Self;
 
     /// Serves the target object.
     ///
@@ -806,6 +840,16 @@ where
     /// Panics if `request_buffer` is zero.
     fn new(target: &'target Target, request_buffer: usize) -> (Self, Self::Client);
 
+    /// Creates a server that processes the requests of an existing request receiver.
+    ///
+    /// This allows to serve a client that is already connected to the request receiver,
+    /// for example a client on a remote endpoint that sent the request receiver here.
+    ///
+    /// Requests that are already queued in the request receiver are processed by the
+    /// server. A [request receiver monitor](ReqReceiverMonitor) set on the request
+    /// receiver is converted into a [server monitor](ServerMonitor) and kept.
+    fn from_req_receiver(target: &'target Target, req_rx: Self::ReqReceiver) -> Self;
+
     /// Serves the target object.
     ///
     /// Serving ends when the client is dropped.
@@ -828,6 +872,16 @@ where
     ///
     /// Panics if `request_buffer` is zero.
     fn new(target: &'target mut Target, request_buffer: usize) -> (Self, Self::Client);
+
+    /// Creates a server that processes the requests of an existing request receiver.
+    ///
+    /// This allows to serve a client that is already connected to the request receiver,
+    /// for example a client on a remote endpoint that sent the request receiver here.
+    ///
+    /// Requests that are already queued in the request receiver are processed by the
+    /// server. A [request receiver monitor](ReqReceiverMonitor) set on the request
+    /// receiver is converted into a [server monitor](ServerMonitor) and kept.
+    fn from_req_receiver(target: &'target mut Target, req_rx: Self::ReqReceiver) -> Self;
 
     /// Serves the target object.
     ///
@@ -852,6 +906,16 @@ where
     ///
     /// Panics if `request_buffer` is zero.
     fn new(target: Arc<Target>, request_buffer: usize) -> (Self, Self::Client);
+
+    /// Creates a server that processes the requests of an existing request receiver.
+    ///
+    /// This allows to serve a client that is already connected to the request receiver,
+    /// for example a client on a remote endpoint that sent the request receiver here.
+    ///
+    /// Requests that are already queued in the request receiver are processed by the
+    /// server. A [request receiver monitor](ReqReceiverMonitor) set on the request
+    /// receiver is converted into a [server monitor](ServerMonitor) and kept.
+    fn from_req_receiver(target: Arc<Target>, req_rx: Self::ReqReceiver) -> Self;
 
     /// Serves the target object.
     ///
@@ -878,6 +942,16 @@ where
     /// Panics if `request_buffer` is zero.
     fn new(target: Arc<tokio::sync::RwLock<Target>>, request_buffer: usize) -> (Self, Self::Client);
 
+    /// Creates a server that processes the requests of an existing request receiver.
+    ///
+    /// This allows to serve a client that is already connected to the request receiver,
+    /// for example a client on a remote endpoint that sent the request receiver here.
+    ///
+    /// Requests that are already queued in the request receiver are processed by the
+    /// server. A [request receiver monitor](ReqReceiverMonitor) set on the request
+    /// receiver is converted into a [server monitor](ServerMonitor) and kept.
+    fn from_req_receiver(target: Arc<tokio::sync::RwLock<Target>>, req_rx: Self::ReqReceiver) -> Self;
+
     /// Serves the target object.
     ///
     /// If `spawn` is true, remote calls taking a `&self` reference are executed
@@ -898,6 +972,15 @@ where
 /// which then handles the requests of the client. Any [request receiver
 /// monitor](ReqReceiverMonitor) that was set is not transferred and must be set again
 /// on the receiving endpoint.
+///
+/// A request receiver can also be turned into any other server variant, which then
+/// dispatches the requests to a target object. Use `TraitReqReceiver::into_server`,
+/// `into_server_ref`, `into_server_ref_mut`, `into_server_shared` and
+/// `into_server_shared_mut` for that, or the `from_req_receiver` function of the
+/// server, for example [`ServerSharedMut::from_req_receiver`].
+///
+/// The requests can also be handed over to another client using [`forward`](Self::forward),
+/// which lets whatever that client is connected to execute them.
 ///
 /// # Example
 ///
@@ -987,6 +1070,29 @@ where
     /// This allows to process outstanding requests while stopping the client
     /// from sending new requests.
     fn close(&mut self);
+
+    /// Forwards all requests to the specified client.
+    ///
+    /// The client executes the requests, i.e. they are handled by whatever the
+    /// client is connected to, which may be a server on a remote endpoint.
+    ///
+    /// Forwarding ends when all clients of this request receiver have been dropped
+    /// and all queued requests have been forwarded, or when `client` is disconnected.
+    ///
+    /// The returned future must be polled for requests to be forwarded; spawn it
+    /// as a task if forwarding should proceed in the background.
+    ///
+    /// # Monitors
+    ///
+    /// Each request passes through the [request receiver monitor](ReqReceiverMonitor)
+    /// of this request receiver, if one is set, and then through the
+    /// [client monitor](ClientMonitor) of `client`, if one is set.
+    ///
+    /// A [call guard](CallGuard) returned by its client monitor is released
+    /// after forwarding instead of being held until the request has been processed.
+    ///
+    /// The maximum reply size of `client` does not apply.
+    fn forward(self, client: Self::Client) -> impl Future<Output = Result<(), ServeError>> + Send;
 
     /// Converts the request receiver into a [stream](Stream) of requests.
     fn into_stream(self) -> ReqReceiverStream<Self, Codec>
@@ -1389,6 +1495,50 @@ where
     Box::new(DefaultMonitor)
 }
 
+/// Adapts a [request receiver monitor](ReqReceiverMonitor) into a
+/// [server monitor](ServerMonitor).
+///
+/// Both are invoked at the same point of the request pipeline and
+/// [`RecvDecision`] is a subset of [`DispatchDecision`], thus every decision
+/// can be translated.
+struct ReqReceiverMonitorAsServerMonitor<Value, Ref, RefMut>(Box<dyn ReqReceiverMonitor<Value, Ref, RefMut>>);
+
+impl<Value, Ref, RefMut> ServerMonitor<Value, Ref, RefMut>
+    for ReqReceiverMonitorAsServerMonitor<Value, Ref, RefMut>
+where
+    Value: ReqEnum,
+    Ref: ReqEnum,
+    RefMut: ReqEnum,
+{
+    fn pre_dispatch<'a>(
+        &'a mut self, req: &'a Result<Option<Req<Value, Ref, RefMut>>, mpsc::RecvError>,
+    ) -> BoxFuture<'a, DispatchDecision> {
+        let pre_recv = self.0.pre_recv(req);
+
+        async move {
+            match pre_recv.await {
+                RecvDecision::Pass => DispatchDecision::Pass,
+                RecvDecision::Drop => DispatchDecision::Drop,
+            }
+        }
+        .boxed()
+    }
+}
+
+/// Converts the monitor of a [request receiver](ReqReceiver) into the monitor of a
+/// server, when the request receiver is converted into a server.
+#[doc(hidden)]
+pub fn req_receiver_monitor_as_server_monitor<Value, Ref, RefMut>(
+    monitor: Box<dyn ReqReceiverMonitor<Value, Ref, RefMut>>,
+) -> Box<dyn ServerMonitor<Value, Ref, RefMut>>
+where
+    Value: ReqEnum + 'static,
+    Ref: ReqEnum + 'static,
+    RefMut: ReqEnum + 'static,
+{
+    Box::new(ReqReceiverMonitorAsServerMonitor(monitor))
+}
+
 /// The default [call](CallGuard) and [dispatch](DispatchGuard).
 ///
 /// It does nothing.
@@ -1409,6 +1559,10 @@ pub enum ServeError {
     ReqReceive(mpsc::RecvError),
     /// Sending a reply to the client failed,
     ReplySend(SendingErrorKind),
+    /// Forwarding a request to another client failed.
+    ///
+    /// This can only occur while [forwarding](ReqReceiver::forward) requests.
+    Forward(mpsc::SendError<()>),
     /// Server failed because [server monitor](ServerMonitor) returned [`DispatchDecision::Error`].
     Monitor(Box<dyn Error + Send>),
 }
@@ -1431,11 +1585,18 @@ impl From<SendingErrorKind> for ServeError {
     }
 }
 
+impl From<mpsc::SendError<()>> for ServeError {
+    fn from(err: mpsc::SendError<()>) -> Self {
+        Self::Forward(err)
+    }
+}
+
 impl fmt::Display for ServeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::ReqReceive(err) => write!(f, "failed to receive RTC request: {err}"),
             Self::ReplySend(err) => write!(f, "failed to send reply to RTC request: {err}"),
+            Self::Forward(err) => write!(f, "failed to forward RTC request: {err}"),
             Self::Monitor(err) => write!(f, "failed by server monitor: {err}"),
         }
     }

@@ -23,6 +23,51 @@ pub enum OnPortsExhausted {
     Timeout(Duration),
 }
 
+/// Capabilities announced to the remote endpoint during the handshake.
+///
+/// This is only intended for testing Remoc itself.
+#[doc(hidden)]
+#[derive(Debug, Clone)]
+pub struct Capabilities {
+    /// Announce support for global credits.
+    pub global_credits: bool,
+    /// Announce support for sending received reports.
+    pub received_report: bool,
+    /// Announce support for port side specification.
+    pub port_side: bool,
+    /// Announce support for pre-connecting ports.
+    pub pre_connect: bool,
+    /// Announce support for variable integer encoding.
+    pub varint: bool,
+    /// Announce that transported types use the compact serialized format.
+    pub compact_transported: bool,
+    /// Announce support for port ids.
+    pub port_id: bool,
+    /// Announced Postbag data format version.
+    #[cfg(feature = "serde")]
+    pub postbag_version: postbag::cfg::Version,
+    #[doc(hidden)]
+    pub _non_exhaustive: (),
+}
+
+impl Default for Capabilities {
+    /// All capabilities are announced.
+    fn default() -> Self {
+        Self {
+            global_credits: true,
+            received_report: true,
+            port_side: true,
+            pre_connect: true,
+            varint: true,
+            compact_transported: true,
+            port_id: true,
+            #[cfg(feature = "serde")]
+            postbag_version: postbag::cfg::Version::default(),
+            _non_exhaustive: (),
+        }
+    }
+}
+
 /// Channel multiplexer configuration.
 ///
 /// In most cases the default configuration ([Cfg::default]) is recommended, since it
@@ -191,6 +236,12 @@ pub struct Cfg {
     ///
     /// By default this is 0, i.e. a channel transfers its items over a single channel.
     pub mpsc_parallel: usize,
+    /// Capabilities announced to the remote endpoint.
+    ///
+    /// This is only intended for testing Remoc itself.
+    #[doc(hidden)]
+    #[debug(skip)]
+    pub capabilities: Capabilities,
     #[doc(hidden)]
     #[debug(skip)]
     pub _non_exhaustive: (),
@@ -218,6 +269,7 @@ impl Default for Cfg {
             transport_receive_queue: 64,
             connect_queue: 128,
             mpsc_parallel: 0,
+            capabilities: Capabilities::default(),
             _non_exhaustive: (),
         }
     }

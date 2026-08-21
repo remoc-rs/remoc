@@ -14,9 +14,9 @@ pub struct CompactVersioner;
 impl Versioner for CompactVersioner {
     fn use_old() -> Result<bool, Error> {
         #[cfg(feature = "rch")]
-        if let Some(compact_transported) =
-            crate::rch::base::with_storage(|storage| storage.remote_cfg().compact_transported)
-        {
+        if let Some(compact_transported) = crate::rch::base::with_storage(|storage| {
+            storage.cfg().capabilities.compact_transported && storage.remote_cfg().compact_transported
+        }) {
             return Ok(!compact_transported);
         }
 

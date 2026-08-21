@@ -670,28 +670,32 @@ pub struct ExchangedCfg {
     pub postbag_version: (),
     /// Whether port ids are supported.
     pub port_id: bool,
+    /// Whether the announced global credits are to be used.
+    pub global_credits_enabled: bool,
 }
 
 impl ExchangedCfg {
     /// Create exchanged configuration.
     pub fn new(cfg: &Cfg, global_credits: u32) -> Self {
+        let caps = &cfg.capabilities;
         Self {
             connection_timeout: cfg.connection_timeout,
             chunk_size: cfg.chunk_size,
             port_receive_buffer: cfg.port_receive_buffer,
             connect_queue: cfg.connect_queue,
             global_credits: Some(global_credits),
-            received_report: true,
-            port_side: true,
-            pre_connect: true,
-            varint: true,
+            received_report: caps.received_report,
+            port_side: caps.port_side,
+            pre_connect: caps.pre_connect,
+            varint: caps.varint,
             frame_len_varint: cfg.io_frame_len_varint.is_some(),
-            compact_transported: true,
+            compact_transported: caps.compact_transported,
             #[cfg(feature = "serde")]
-            postbag_version: postbag::cfg::Version::default(),
+            postbag_version: caps.postbag_version,
             #[cfg(not(feature = "serde"))]
             postbag_version: (),
-            port_id: true,
+            port_id: caps.port_id,
+            global_credits_enabled: caps.global_credits,
         }
     }
 
@@ -716,6 +720,7 @@ impl ExchangedCfg {
         writer.write_u8(0)?;
 
         writer.write_u8(self.port_id.into())?;
+        writer.write_u8(self.global_credits_enabled.into())?;
 
         Ok(())
     }
@@ -750,6 +755,7 @@ impl ExchangedCfg {
             #[cfg(not(feature = "serde"))]
             postbag_version: (),
             port_id: version == 3,
+            global_credits_enabled: true,
         };
 
         let Ok(global_credits) = reader.read_u32::<LE>() else { return Ok(this) };
@@ -781,6 +787,12 @@ impl ExchangedCfg {
 
         let Ok(port_id) = reader.read_u8() else { return Ok(this) };
         this.port_id = port_id != 0;
+
+        let Ok(global_credits_enabled) = reader.read_u8() else { return Ok(this) };
+        this.global_credits_enabled = global_credits_enabled != 0;
+        if !this.global_credits_enabled {
+            this.global_credits = None;
+        }
 
         Ok(this)
     }

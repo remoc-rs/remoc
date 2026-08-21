@@ -134,8 +134,10 @@ pub mod varfloat {
 /// The Postbag data format version to use on the current connection.
 fn negotiated_version() -> Option<postbag::cfg::Version> {
     #[cfg(feature = "rch")]
-    if let Some(remote) = crate::rch::base::with_storage(|storage| storage.remote_cfg().postbag_version) {
-        return Some(remote.min(postbag::cfg::Version::default()));
+    if let Some(version) = crate::rch::base::with_storage(|storage| {
+        storage.remote_cfg().postbag_version.min(storage.cfg().capabilities.postbag_version)
+    }) {
+        return Some(version);
     }
 
     if super::ALLOW_OUTSIDE_REMOC.get() {

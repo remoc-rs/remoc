@@ -807,6 +807,8 @@ where
         let mut transport_sink = self.transport_sink.take().unwrap();
         let mut transport_stream = self.transport_stream.take().unwrap();
 
+        let varint = self.local_cfg.capabilities.varint && self.remote_cfg.varint;
+
         // Create send over transport task.
         let (send_tx, send_rx) = mpsc::channel(self.local_cfg.transport_send_queue);
         let (high_priority_send_tx, high_priority_send_rx) = mpsc::channel(8);
@@ -816,20 +818,15 @@ where
             self.local_cfg.flush_interval,
             send_rx,
             high_priority_send_rx,
-            self.remote_cfg.varint,
+            varint,
         )
         .fuse();
         pin_mut!(send_task);
 
         // Create receive over transport task.
         let (recv_tx, mut recv_rx) = mpsc::channel(self.local_cfg.transport_receive_queue);
-        let recv_task = Self::recv_task(
-            &mut transport_stream,
-            self.local_cfg.connection_timeout,
-            recv_tx,
-            self.remote_cfg.varint,
-        )
-        .fuse();
+        let recv_task =
+            Self::recv_task(&mut transport_stream, self.local_cfg.connection_timeout, recv_tx, varint).fuse();
         pin_mut!(recv_task);
 
         // Setup channels.

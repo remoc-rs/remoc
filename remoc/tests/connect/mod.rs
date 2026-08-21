@@ -1,5 +1,7 @@
 //! Establishing connections over the provided transports.
 
+mod capabilities;
+
 use futures::{StreamExt, future::try_join};
 use std::time::Duration;
 use wokio::time::timeout;

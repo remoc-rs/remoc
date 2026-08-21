@@ -59,7 +59,7 @@ mod sender;
 mod sizer;
 
 pub use any_storage::{AnyBox, AnyEntry, AnyStorage};
-pub use cfg::{Cfg, OnPortsExhausted};
+pub use cfg::{Capabilities, Cfg, OnPortsExhausted};
 pub use client::{Client, Connect, ConnectError};
 pub use forward::ForwardError;
 pub use listener::{AcceptGuard, Listener, ListenerError, ListenerStream, Request, TentativeAcceptError};

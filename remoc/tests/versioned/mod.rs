@@ -168,14 +168,20 @@ mod recover {
             Busy(u32),
             /// Only known to this version.
             Overloaded(String),
+            /// Stands for a status this version does not know.
+            Unknown,
         }
 
+        // The recovery clause belongs to the type and thus is declared by every
+        // version of it.
         impl_enum! {
             Status,
+            recover = Status::Unknown,
             variants {
                 Ready => "_0",
                 Busy(load: u32) => "_1",
                 Overloaded(reason: String) => "_2",
+                Unknown => "_50",
             }
         }
 

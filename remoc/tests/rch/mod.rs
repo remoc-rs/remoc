@@ -1,5 +1,6 @@
 mod bin;
 mod broadcast;
+mod distributor;
 mod io;
 mod lr;
 mod mpsc;

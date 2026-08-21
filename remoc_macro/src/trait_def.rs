@@ -215,6 +215,32 @@ impl TraitDef {
         format_ident!("{}Client", &self.ident)
     }
 
+    /// Generic parameters for the versioning macro, which expects const generic
+    /// parameters to follow the type generic parameters, separated by a semicolon.
+    fn versioned_generics(ty_generics: &Generics) -> TokenStream {
+        let mut ty_params = Vec::new();
+        let mut const_params = Vec::new();
+        for p in &ty_generics.params {
+            match p {
+                GenericParam::Type(tp) => {
+                    let id = &tp.ident;
+                    ty_params.push(quote! { #id });
+                }
+                GenericParam::Const(cp) => {
+                    let (id, ty) = (&cp.ident, &cp.ty);
+                    const_params.push(quote! { const #id: #ty });
+                }
+                GenericParam::Lifetime(_) => (),
+            }
+        }
+        let consts = if const_params.is_empty() {
+            quote! {}
+        } else {
+            quote! { ; #( #const_params ),* }
+        };
+        quote! { < #( #ty_params ),* #consts > }
+    }
+
     /// Vanilla trait definition, without remote-specific attributes.
     pub fn vanilla_trait(&self) -> TokenStream {
         let Self { vis, ident, attrs, colon, supertraits, generics, .. } = self;
@@ -1315,7 +1341,10 @@ impl TraitDef {
             #req_ref_mut #req_generics,
         };
 
-        let doc = format!("Request receiver for [{}].", ident);
+        let doc = format!("Request receiver for [{}].\n\nCan be sent to a remote endpoint.", ident);
+
+        let versioned_generics = Self::versioned_generics(&ty_generics);
+        let impl_generics_where_pred = &impl_generics_where.unwrap().predicates;
 
         quote! {
             #[doc=#doc]
@@ -1325,6 +1354,20 @@ impl TraitDef {
                     Codec,
                 >,
                 monitor: ::std::boxed::Box<dyn ::remoc::rtc::ReqReceiverMonitor<#req_params>>,
+            }
+
+            ::remoc::versioned::compact::impl_struct! {
+                #server #versioned_generics,
+                fields {
+                    req_rx: ::remoc::rch::mpsc::Receiver<
+                        ::remoc::rtc::Req<#req_params>,
+                        Codec,
+                    > => "_0",
+                }
+                default {
+                    monitor = ::remoc::rtc::default_req_receiver_monitor(),
+                }
+                where #impl_generics_where_pred
             }
 
             impl #impl_generics_impl ::remoc::rtc::ServerBase for #server #impl_generics_ty #impl_generics_where
@@ -1469,31 +1512,7 @@ impl TraitDef {
 
         let impl_generics_where_pred = &impl_generics_where.unwrap().predicates;
 
-        // Generic parameters for the versioning macro, which expects const generic
-        // parameters to follow the type generic parameters, separated by a semicolon.
-        let versioned_generics = {
-            let mut ty_params = Vec::new();
-            let mut const_params = Vec::new();
-            for p in &ty_generics.params {
-                match p {
-                    GenericParam::Type(tp) => {
-                        let id = &tp.ident;
-                        ty_params.push(quote! { #id });
-                    }
-                    GenericParam::Const(cp) => {
-                        let (id, ty) = (&cp.ident, &cp.ty);
-                        const_params.push(quote! { const #id: #ty });
-                    }
-                    GenericParam::Lifetime(_) => (),
-                }
-            }
-            let consts = if const_params.is_empty() {
-                quote! {}
-            } else {
-                quote! { ; #( #const_params ),* }
-            };
-            quote! { < #( #ty_params ),* #consts > }
-        };
+        let versioned_generics = Self::versioned_generics(&ty_generics);
 
         let assoc = &self.assoc_types;
 

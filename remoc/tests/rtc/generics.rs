@@ -41,6 +41,14 @@ where
     async fn increase(&mut self, #[serde(default)] by: T) -> Result<(), IncreaseError>;
 }
 
+fn _assert_req_receiver_remote_sendable<T>()
+where
+    T: remoc::RemoteSend + CheckedAddable + Clone + Default + Sync,
+{
+    fn assert<X: remoc::RemoteSend>() {}
+    assert::<GenericCounterReqReceiver<T>>();
+}
+
 pub struct GenericCounterObj<T> {
     value: T,
     watchers: Vec<remoc::rch::watch::Sender<T>>,

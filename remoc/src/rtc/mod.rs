@@ -68,6 +68,9 @@
 //! on a target object, it allows you to process each request as a message and send the result
 //! via a oneshot reply channel.
 //!
+//! Unlike the other server types, the request receiver can itself be sent to a remote
+//! endpoint, which then handles the requests of the client.
+//!
 //! See [ReqReceiver] for details.
 //!
 //! # Usage
@@ -891,6 +894,11 @@ where
 /// authorization. Every request contains a one-shot reply sender that must be used
 /// to complete the corresponding client call.
 ///
+/// Unlike the other server types, a request receiver can be sent to a remote endpoint,
+/// which then handles the requests of the client. Any [request receiver
+/// monitor](ReqReceiverMonitor) that was set is not transferred and must be set again
+/// on the receiving endpoint.
+///
 /// # Example
 ///
 /// In the following example the server handles the calls of the client as messages
@@ -1369,6 +1377,16 @@ where
     RefMut: ReqEnum,
 {
     Arc::new(DefaultMonitor)
+}
+
+#[doc(hidden)]
+pub fn default_req_receiver_monitor<Value, Ref, RefMut>() -> Box<dyn ReqReceiverMonitor<Value, Ref, RefMut>>
+where
+    Value: ReqEnum,
+    Ref: ReqEnum,
+    RefMut: ReqEnum,
+{
+    Box::new(DefaultMonitor)
 }
 
 /// The default [call](CallGuard) and [dispatch](DispatchGuard).

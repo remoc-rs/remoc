@@ -17,6 +17,7 @@ mod serde_with;
 mod simple;
 mod simple_clone;
 mod simple_req;
+mod simple_req_remote;
 mod simple_req_stream;
 mod simple_rpit;
 mod value;

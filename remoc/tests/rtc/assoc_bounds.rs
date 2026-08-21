@@ -23,6 +23,14 @@ pub trait Doubler {
     async fn double(&mut self) -> Result<Self::Item, remoc::rtc::CallError>;
 }
 
+fn _assert_req_receiver_remote_sendable<T>()
+where
+    T: remoc::RemoteSend + Doubleable + Clone,
+{
+    fn assert<X: remoc::RemoteSend>() {}
+    assert::<DoublerReqReceiver<T>>();
+}
+
 pub struct DoublerObj<T> {
     value: T,
 }

@@ -499,13 +499,27 @@ cfg_select! {
         #[doc(no_inline)]
         pub use postbag::Postbag as Default;
     }
-    feature = "default-codec-postbag-slim" => { default_codec!(PostbagSlim); }
-    feature = "default-codec-bincode" => { default_codec!(Bincode); }
-    feature = "default-codec-bincode2" => { default_codec!(Bincode2); }
-    feature = "default-codec-ciborium" => { default_codec!(Ciborium); }
-    feature = "default-codec-json" => { default_codec!(Json); }
-    feature = "default-codec-message-pack" => { default_codec!(MessagePack); }
-    feature = "default-codec-postcard" => { default_codec!(Postcard); }
+    feature = "default-codec-postbag-slim" => {
+        default_codec!(PostbagSlim);
+    }
+    feature = "default-codec-bincode" => {
+        default_codec!(Bincode);
+    }
+    feature = "default-codec-bincode2" => {
+        default_codec!(Bincode2);
+    }
+    feature = "default-codec-ciborium" => {
+        default_codec!(Ciborium);
+    }
+    feature = "default-codec-json" => {
+        default_codec!(Json);
+    }
+    feature = "default-codec-message-pack" => {
+        default_codec!(MessagePack);
+    }
+    feature = "default-codec-postcard" => {
+        default_codec!(Postcard);
+    }
     _ => {
         #[doc(no_inline)]
         pub use postbag::Postbag as Default;

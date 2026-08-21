@@ -1363,23 +1363,19 @@ where
 
                 // Determine split between port and global credits.
                 let total = size.max(1);
-                let port_credit;
-                let global_credit;
-                match credits {
+                let (global_credit, port_credit) = match credits {
                     DataCredits::PortOnly => {
-                        global_credit = UsedGlobalCredit::default();
-                        port_credit = receiver_credit_monitor.use_credits(total, 0)?;
+                        (UsedGlobalCredit::default(), receiver_credit_monitor.use_credits(total, 0)?)
                     }
-                    DataCredits::GlobalOnly => {
-                        global_credit = self.receive_credit_monitor.use_credits(total)?;
-                        port_credit = receiver_credit_monitor.use_credits(0, total)?;
-                    }
-                    DataCredits::GlobalAndPort(global) => {
-                        global_credit = self.receive_credit_monitor.use_credits(global)?;
-                        port_credit =
-                            receiver_credit_monitor.use_credits(total.saturating_sub(global), global)?;
-                    }
-                }
+                    DataCredits::GlobalOnly => (
+                        self.receive_credit_monitor.use_credits(total)?,
+                        receiver_credit_monitor.use_credits(0, total)?,
+                    ),
+                    DataCredits::GlobalAndPort(global) => (
+                        self.receive_credit_monitor.use_credits(global)?,
+                        receiver_credit_monitor.use_credits(total.saturating_sub(global), global)?,
+                    ),
+                };
 
                 // Update remote credits report.
                 self.remote_credits_report.consume(global_credit.credits());

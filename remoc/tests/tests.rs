@@ -59,6 +59,38 @@ macro_rules! loop_transport {
     };
 }
 
+/// Whether the default codec supports recoverable deserialization.
+///
+/// Only the Postbag codecs provide it. With any other codec a value that fails to
+/// deserialize makes the whole enclosing message undecodable, since the codec cannot
+/// know where the undecodable value ends.
+#[cfg(feature = "serde")]
+#[allow(deprecated)]
+pub fn codec_supports_recovery() -> bool {
+    use std::any::TypeId;
+
+    let default = TypeId::of::<remoc::codec::Default>();
+    default == TypeId::of::<remoc::codec::Postbag>() || default == TypeId::of::<remoc::codec::PostbagSlim>()
+}
+
+/// Ends the calling test when the default codec does not support recoverable
+/// deserialization.
+#[macro_export]
+macro_rules! require_codec_recovery {
+    () => {
+        if !$crate::codec_supports_recovery() {
+            #[allow(deprecated)]
+            {
+                println!(
+                    "skipped: codec {} does not support recoverable deserialization",
+                    std::any::type_name::<remoc::codec::Default>()
+                );
+            }
+            return;
+        }
+    };
+}
+
 #[cfg(feature = "rch")]
 pub async fn loop_channel<T>() -> ((base::Sender<T>, base::Receiver<T>), (base::Sender<T>, base::Receiver<T>))
 where

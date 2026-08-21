@@ -263,6 +263,7 @@ mod recover {
     #[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
     async fn unknown_variant_is_recovered() {
         crate::init();
+        crate::require_codec_recovery!();
         let (mut tx, mut rx) = across_versions().await;
 
         let sent = new::Report {
@@ -285,6 +286,7 @@ mod recover {
     #[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
     async fn recovery_does_not_break_the_channel() {
         crate::init();
+        crate::require_codec_recovery!();
         let (mut tx, mut rx) = across_versions().await;
 
         tx.send(new::Report { status: new::Status::Overloaded("gone".to_string()), note: "first".to_string() })

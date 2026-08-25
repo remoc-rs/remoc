@@ -12,6 +12,8 @@ use super::{Codec, DeserializationError, SerializationError};
 pub struct Json;
 
 impl Codec for Json {
+    const NAME: &'static str = "Json";
+
     fn serialize<Writer, Item>(writer: Writer, item: &Item) -> Result<(), super::SerializationError>
     where
         Writer: std::io::Write,

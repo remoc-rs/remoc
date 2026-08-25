@@ -10,6 +10,8 @@ use super::{Codec, DeserializationError, SerializationError};
 pub struct MessagePack;
 
 impl Codec for MessagePack {
+    const NAME: &'static str = "MessagePack";
+
     fn serialize<Writer, Item>(mut writer: Writer, item: &Item) -> Result<(), super::SerializationError>
     where
         Writer: std::io::Write,

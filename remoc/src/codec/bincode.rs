@@ -16,6 +16,8 @@ const LEGACY: bincode::config::Configuration<
 > = bincode::config::legacy();
 
 impl Codec for Bincode {
+    const NAME: &'static str = "Bincode";
+
     fn serialize<Writer, Item>(mut writer: Writer, item: &Item) -> Result<(), super::SerializationError>
     where
         Writer: std::io::Write,
@@ -45,6 +47,8 @@ pub struct Bincode2;
 const STANDARD: bincode::config::Configuration = bincode::config::standard();
 
 impl Codec for Bincode2 {
+    const NAME: &'static str = "Bincode2";
+
     fn serialize<Writer, Item>(mut writer: Writer, item: &Item) -> Result<(), super::SerializationError>
     where
         Writer: std::io::Write,

@@ -10,6 +10,8 @@ use super::{Codec, DeserializationError, SerializationError};
 pub struct Postcard;
 
 impl Codec for Postcard {
+    const NAME: &'static str = "Postcard";
+
     fn serialize<Writer, Item>(writer: Writer, item: &Item) -> Result<(), super::SerializationError>
     where
         Writer: std::io::Write,

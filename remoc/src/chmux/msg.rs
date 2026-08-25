@@ -668,6 +668,8 @@ pub struct ExchangedCfg {
     pub postbag_version: postbag::cfg::Version,
     #[cfg(not(feature = "serde"))]
     pub postbag_version: (),
+    /// Whether Postbag allows skipping fields.
+    pub postbag_allow_skip: bool,
     /// Whether port ids are supported.
     pub port_id: bool,
     /// Whether the announced global credits are to be used.
@@ -694,6 +696,7 @@ impl ExchangedCfg {
             postbag_version: caps.postbag_version,
             #[cfg(not(feature = "serde"))]
             postbag_version: (),
+            postbag_allow_skip: caps.postbag_allow_skip,
             port_id: caps.port_id,
             global_credits_enabled: caps.global_credits,
         }
@@ -718,6 +721,7 @@ impl ExchangedCfg {
         writer.write_u8(self.postbag_version.into())?;
         #[cfg(not(feature = "serde"))]
         writer.write_u8(0)?;
+        writer.write_u8(self.postbag_allow_skip.into())?;
 
         writer.write_u8(self.port_id.into())?;
         writer.write_u8(self.global_credits_enabled.into())?;
@@ -754,6 +758,7 @@ impl ExchangedCfg {
             postbag_version: postbag::cfg::Version::Postbag0_4,
             #[cfg(not(feature = "serde"))]
             postbag_version: (),
+            postbag_allow_skip: false,
             port_id: version == 3,
             global_credits_enabled: true,
         };
@@ -784,6 +789,8 @@ impl ExchangedCfg {
         {
             this.postbag_version = postbag_version.try_into().unwrap_or(postbag::cfg::Version::default());
         }
+        let Ok(allow_skip) = reader.read_u8() else { return Ok(this) };
+        this.postbag_allow_skip = allow_skip != 0;
 
         let Ok(port_id) = reader.read_u8() else { return Ok(this) };
         this.port_id = port_id != 0;

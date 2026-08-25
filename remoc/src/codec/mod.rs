@@ -227,6 +227,9 @@ impl<'de> Deserialize<'de> for DeserializationError {
 
 /// Serializes and deserializes items from and to byte data.
 pub trait Codec: Send + Sync + Serialize + for<'de> Deserialize<'de> + Clone + Unpin + 'static {
+    /// The name of this codec.
+    const NAME: &'static str;
+
     /// Serializes the specified item into the data format.
     fn serialize<Writer, Item>(writer: Writer, item: &Item) -> Result<(), SerializationError>
     where
@@ -238,6 +241,29 @@ pub trait Codec: Send + Sync + Serialize + for<'de> Deserialize<'de> + Clone + U
     where
         Reader: Read,
         Item: DeserializeOwned;
+
+    /// Whether skipping struct fields using #[serde(skip_serializing_if = "...")] is allowed.
+    fn is_skipping_fields_supported() -> bool {
+        false
+    }
+
+    /// Serializes the specified item, publishing this codec as the one that is
+    /// serializing so that the [`skip`] predicates can consult it.
+    ///
+    /// This is what Remoc calls to serialize an item; implement
+    /// [`serialize`](Self::serialize) and [`is_skipping_fields_supported`](Self::is_skipping_fields_supported) instead of
+    /// overriding it.
+    fn serialize_active<Writer, Item>(writer: Writer, item: &Item) -> Result<(), SerializationError>
+    where
+        Writer: Write,
+        Item: Serialize,
+    {
+        let _active = active::activate(active::ActiveCodec {
+            name: Self::NAME,
+            allow_skip: Self::is_skipping_fields_supported(),
+        });
+        <Self as Codec>::serialize(writer, item)
+    }
 }
 
 /// Dummy codec.
@@ -247,6 +273,8 @@ pub trait Codec: Send + Sync + Serialize + for<'de> Deserialize<'de> + Clone + U
 pub(crate) struct Dummy;
 
 impl Codec for Dummy {
+    const NAME: &'static str = "Dummy";
+
     fn serialize<Writer, Item>(_writer: Writer, _item: &Item) -> Result<(), SerializationError>
     where
         Writer: std::io::Write,
@@ -318,7 +346,7 @@ impl ErasedSerializer {
         Self {
             type_id: TypeId::of::<T>(),
             type_name: type_name::<T>(),
-            codec_name: type_name::<C>(),
+            codec_name: C::NAME,
             inner: Box::new(ErasedSerializerInner::<T, C>(|_, _| ())),
         }
     }
@@ -368,7 +396,7 @@ where
         let Some(item) = item.downcast_ref::<T>() else { panic!("ErasedSerializer called with mismatched type") };
 
         let mut writer = BufWriter::with_capacity(buffer_size, writer);
-        <C as Codec>::serialize(&mut writer, item)?;
+        <C as Codec>::serialize_active(&mut writer, item)?;
         writer.flush().map_err(SerializationError::new)
     }
 }
@@ -404,7 +432,7 @@ impl ErasedDeserializer {
     {
         Self {
             type_name: type_name::<T>(),
-            codec_name: type_name::<C>(),
+            codec_name: C::NAME,
             inner: Box::new(ErasedDeserializerInner::<T, C>(|_, _| ())),
         }
     }
@@ -449,6 +477,9 @@ thread_local! {
     #[doc(hidden)]
     pub static ALLOW_OUTSIDE_REMOC: Cell<bool> = const { Cell::new(false) };
 }
+
+mod active;
+pub mod skip;
 
 mod postbag;
 pub use postbag::{Postbag, PostbagSlim, PostbagWith, compact, fixint, recoverable, varfloat};

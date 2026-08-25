@@ -16,6 +16,8 @@ use super::{Codec, DeserializationError, SerializationError};
 pub struct Ciborium;
 
 impl Codec for Ciborium {
+    const NAME: &'static str = "Ciborium";
+
     fn serialize<Writer, Item>(writer: Writer, item: &Item) -> Result<(), super::SerializationError>
     where
         Writer: std::io::Write,

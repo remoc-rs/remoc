@@ -46,6 +46,8 @@ pub struct Capabilities {
     /// Announced Postbag data format version.
     #[cfg(feature = "serde")]
     pub postbag_version: postbag::cfg::Version,
+    /// Announce that Postbag can skip serializing fields.
+    pub postbag_allow_skip: bool,
     #[doc(hidden)]
     pub _non_exhaustive: (),
 }
@@ -63,6 +65,10 @@ impl Default for Capabilities {
             port_id: true,
             #[cfg(feature = "serde")]
             postbag_version: postbag::cfg::Version::default(),
+            #[cfg(feature = "serde")]
+            postbag_allow_skip: postbag::cfg::Full::new().allow_skip(),
+            #[cfg(not(feature = "serde"))]
+            postbag_allow_skip: true,
             _non_exhaustive: (),
         }
     }

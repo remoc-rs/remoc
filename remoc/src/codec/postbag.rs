@@ -148,6 +148,16 @@ fn negotiated_version() -> Option<postbag::cfg::Version> {
     None
 }
 
+/// Whether the remote endpoint can decode data that leaves out a struct field.
+fn remote_allows_skip() -> bool {
+    #[cfg(feature = "rch")]
+    if let Some(allow_skip) = crate::rch::base::with_storage(|storage| storage.remote_cfg().postbag_allow_skip) {
+        return allow_skip;
+    }
+
+    false
+}
+
 /// The configuration to use on the current connection.
 fn cfg<const WITH_IDENTS: bool, const DEPTH_LIMIT: usize>() -> std::io::Result<postbag::cfg::Cfg<WITH_IDENTS>> {
     let Some(version) = negotiated_version() else {
@@ -188,6 +198,8 @@ fn cfg<const WITH_IDENTS: bool, const DEPTH_LIMIT: usize>() -> std::io::Result<p
 pub struct PostbagWith<const WITH_IDENTS: bool, const DEPTH_LIMIT: usize>;
 
 impl<const WITH_IDENTS: bool, const DEPTH_LIMIT: usize> Codec for PostbagWith<WITH_IDENTS, DEPTH_LIMIT> {
+    const NAME: &'static str = if WITH_IDENTS { "Postbag" } else { "PostbagSlim" };
+
     fn serialize<Writer, Item>(writer: Writer, item: &Item) -> Result<(), SerializationError>
     where
         Writer: std::io::Write,
@@ -205,6 +217,10 @@ impl<const WITH_IDENTS: bool, const DEPTH_LIMIT: usize> Codec for PostbagWith<WI
         let value = postbag::deserialize(cfg::<WITH_IDENTS, DEPTH_LIMIT>()?, reader)
             .map_err(DeserializationError::new)?;
         Ok(value)
+    }
+
+    fn is_skipping_fields_supported() -> bool {
+        cfg::<WITH_IDENTS, DEPTH_LIMIT>().is_ok_and(|cfg| cfg.allow_skip()) && remote_allows_skip()
     }
 }
 

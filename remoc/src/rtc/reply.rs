@@ -377,13 +377,13 @@ mod transported {
         #[serde(rename = "_0")]
         pub tx: SenderRef<'transport, R, Codec>,
         #[serde(rename = "_1")]
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(skip_serializing_if = "crate::codec::skip::Option::is_none")]
         pub req_rx: Option<&'transport Rx>,
         #[serde(rename = "_2")]
-        #[serde(skip_serializing_if = "is_false")]
+        #[serde(skip_serializing_if = "crate::codec::skip::if_default")]
         pub sequential: bool,
         #[serde(rename = "_3")]
-        #[serde(skip_serializing_if = "is_false")]
+        #[serde(skip_serializing_if = "crate::codec::skip::if_default")]
         pub stop_on_error: bool,
     }
 
@@ -409,10 +409,6 @@ mod transported {
         #[serde(rename = "_3")]
         #[serde(default)]
         pub stop_on_error: bool,
-    }
-
-    pub fn is_false(value: &bool) -> bool {
-        !*value
     }
 
     pub fn none<T>() -> Option<T> {

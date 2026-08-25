@@ -1792,7 +1792,6 @@ impl TraitDef {
         let client_ident = self.client_ident();
         let client_ident_str = client_ident.to_string();
         let req_receiver = self.req_receiver_ident();
-        let new_doc = format!("Creates a client and the [{req_receiver}] connected to it.");
 
         let (ty_generics, impl_generics) = self.generics(GenericsArgs {
             with_target: false,
@@ -1902,24 +1901,6 @@ impl TraitDef {
             #clone
 
             impl #impl_generics_impl #client_ident #impl_generics_ty #impl_generics_where {
-                #[doc=#new_doc]
-                ///
-                /// `request_buffer` bounds the number of calls that can be queued for sending.
-                ///
-                /// Calls made on the client are queued until the request receiver is
-                /// [attached to a target object](::remoc::rtc::ReqReceiver) or its requests
-                /// are [forwarded](::remoc::rtc::ReqReceiver::forward) to another client.
-                ///
-                /// # Panics
-                ///
-                /// Panics if `request_buffer` is zero.
-                #vis fn new(request_buffer: usize) -> (Self, #req_receiver #req_generics) {
-                    let (req_rx, client) = <#req_receiver #req_generics as ::remoc::rtc::ReqReceiver<Codec>>::new(
-                        request_buffer,
-                    );
-                    (client, req_rx)
-                }
-
                 /// Creates the reply channel for a request, carrying the call
                 /// options of this client.
                 #[doc(hidden)]
@@ -1958,6 +1939,13 @@ impl TraitDef {
 
             impl #impl_generics_impl ::remoc::rtc::Client for #client_ident #impl_generics_ty #impl_generics_where {
                 type ReqReceiver = #req_receiver #req_generics;
+
+                fn new(request_buffer: usize) -> (Self, Self::ReqReceiver) {
+                    let (req_rx, client) = <#req_receiver #req_generics as ::remoc::rtc::ReqReceiver<Codec>>::new(
+                        request_buffer,
+                    );
+                    (client, req_rx)
+                }
 
                 fn capacity(&self) -> usize {
                     self.req_tx.capacity()

@@ -603,6 +603,21 @@ pub trait Client {
     /// Requests received by it can be [forwarded](ReqReceiver::forward) to this client.
     type ReqReceiver;
 
+    /// Creates a client and the [request receiver](Self::ReqReceiver) connected to it.
+    ///
+    /// `request_buffer` bounds the number of calls that can be queued for sending.
+    ///
+    /// Calls made on the client are queued until the request receiver is
+    /// [attached to a target object](ReqReceiver) or its requests are
+    /// [forwarded](ReqReceiver::forward) to another client.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `request_buffer` is zero.
+    fn new(request_buffer: usize) -> (Self, Self::ReqReceiver)
+    where
+        Self: Sized;
+
     /// Returns the current capacity of the channel for sending requests to
     /// the server.
     ///

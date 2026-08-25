@@ -156,3 +156,4 @@ async fn stop_on_error_is_off_by_default() {
     let ((), res) = tokio::join!(client_task, server.serve(true));
     res.unwrap();
 }
+

@@ -93,7 +93,7 @@ async fn pipelined_calls_are_queued() {
     // The work is polled first, so its requests are queued before `open_counter`
     // even sends the request receiver to the other endpoint.
     let (value, opened) = tokio::join!(
-        async {
+        async move {
             counter.increase(20).await.unwrap();
             counter.increase(45).await.unwrap();
             counter.value().await.unwrap()
@@ -115,7 +115,7 @@ async fn pipelined_calls_fail_when_access_is_denied() {
     let (mut counter, counter_rx) = CounterClient::new(4);
 
     let (value, opened) = tokio::join!(
-        async { counter.increase(20).await },
+        async move { counter.increase(20).await },
         dir.open_counter("forbidden".to_string(), counter_rx),
     );
 

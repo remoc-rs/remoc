@@ -305,6 +305,9 @@
 
 pub mod monitor;
 
+mod calls;
+pub use calls::calls;
+
 mod reply;
 pub use reply::ReplySender;
 #[doc(hidden)]
@@ -409,10 +412,12 @@ use crate::{
 /// methods on the client without waiting for the call to complete; these calls are
 /// queued until the object is available.
 ///
-/// The twin method returns `Ok(None)` when the object was consumed by a method taking
-/// `self` by value; use [`ConsumedExt::unconsumed`] to turn that into
-/// [`CallError::Consumed`]. Its default implementation calls the original method and
-/// [forwards](ReqReceiver::forward) the requests to the client it returns.
+/// The twin returns a [`Call`], so that the request receiver is handed over immediately
+/// and calls on the client can be started without waiting for the session call to
+/// complete. Serving of the request receiver continues in the background, so the caller
+/// keeps the client it created for as long as it likes. The default implementation calls
+/// the original method and [forwards](ReqReceiver::forward) the requests to the client
+/// it returns.
 ///
 /// Adding the attribute to an existing method keeps its requests wire compatible.
 /// However, calling the twin method on an endpoint that does not know it fails with
@@ -452,12 +457,6 @@ pub enum CallError {
     Listen(chmux::ListenerError),
     /// An endpoint forwarding the call or reply could not complete the transfer.
     Forward,
-    /// The object was consumed by a method taking `self` by value.
-    ///
-    /// No client for it can be returned, because it is no longer being served.
-    /// This is produced by [`ConsumedExt::unconsumed`] and never sent over
-    /// a connection.
-    Consumed,
     /// A failure was reported by an endpoint forwarding the call or reply.
     ///
     /// The nested error is [`None`] when that endpoint reported a newer error
@@ -476,7 +475,6 @@ crate::versioned::compact::impl_enum! {
         Connect(err: chmux::ConnectError) => "_4",
         Listen(err: chmux::ListenerError) => "_5",
         Forward => "_6",
-        Consumed => "_7",
         Remote(err: Option<Box<CallError>>) => "_50",
     }
 }
@@ -491,7 +489,6 @@ impl fmt::Display for CallError {
             Self::Connect(err) => write!(f, "connect error: {err}"),
             Self::Listen(err) => write!(f, "listen error: {err}"),
             Self::Forward => write!(f, "forwarding error"),
-            Self::Consumed => write!(f, "the remote object was consumed"),
             Self::Remote(Some(err)) => write!(f, "remote {err}"),
             Self::Remote(None) => write!(f, "unknown remote error"),
         }
@@ -540,6 +537,12 @@ pub trait ReqEnum {
     /// # Panics
     /// Panics when called on the `__Phantom` variant.
     fn method_name(&self) -> &'static str;
+
+    /// Whether the caller permits the server to dispatch this request on its own task.
+    ///
+    /// # Panics
+    /// Panics when called on the `__Phantom` variant.
+    fn allow_spawn(&self) -> bool;
 }
 
 /// A request from client to server.
@@ -631,6 +634,157 @@ pub trait Client {
 
     /// Sets the maximum allowed size of a reply in bytes.
     fn set_max_reply_size(&mut self, max_reply_size: usize);
+
+    /// Whether the server may dispatch calls made by this client on their own tasks.
+    ///
+    /// This is `true` by default. When set to `false` the server serves the calls of
+    /// this client sequentially, in the order they were made, even when it was started
+    /// with `spawn` enabled. Calls of other clients are unaffected.
+    ///
+    /// Only [`ServerShared`] and [`ServerSharedMut`] dispatch in parallel at all, and
+    /// only calls to methods taking `&self`. A call to a method taking `&mut self`
+    /// requires exclusive access to the target and is always served sequentially,
+    /// thus this has no effect on it.
+    fn allow_spawn(&self) -> bool;
+
+    /// Sets whether the server may dispatch calls made by this client on their own tasks.
+    fn set_allow_spawn(&mut self, allow_spawn: bool);
+
+    /// Whether the server shall stop serving when a call made by this client fails.
+    ///
+    /// This is `false` by default. When set to `true` a call that returns an error
+    /// makes the server stop with [`ServeError::CallFailed`] after the error has been
+    /// sent to this client.
+    fn stop_on_error(&self) -> bool;
+
+    /// Sets whether the server shall stop serving when a call made by this client fails.
+    fn set_stop_on_error(&mut self, stop_on_error: bool);
+}
+
+/// A remote method call that has been started.
+///
+/// This is returned by the `<name>_call` twin of every method of a remotable trait,
+/// which starts the call without waiting for its result. Await this to obtain the
+/// result.
+///
+/// Starting several calls before awaiting their results avoids one round trip per
+/// call, since the requests are transferred to the server without waiting for the
+/// reply of the preceding one. The requests are transferred in the order the calls
+/// were started.
+///
+/// Dropping this without awaiting it cancels the call, unless the method is marked
+/// with `#[no_cancel]`. Note that the object may already have been called when the
+/// cancellation reaches the server.
+#[must_use = "the RTC call is cancelled when Call is dropped"]
+pub struct Call<R> {
+    method: &'static str,
+    inner: CallInner<R>,
+}
+
+enum CallInner<R> {
+    /// The result is already available, because the object was called locally.
+    Ready(Option<R>),
+    /// The result is awaited from the server.
+    Pending(BoxFuture<'static, R>),
+}
+
+impl<R> fmt::Debug for Call<R> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("Call").field("method", &self.method).finish()
+    }
+}
+
+impl<R> Call<R> {
+    /// A call that has already been performed, yielding `result`.
+    #[doc(hidden)]
+    pub fn ready(method: &'static str, result: R) -> Self {
+        Self { method, inner: CallInner::Ready(Some(result)) }
+    }
+
+    /// A call whose result is obtained by awaiting `result`.
+    #[doc(hidden)]
+    pub fn pending(method: &'static str, result: impl Future<Output = R> + Send + 'static) -> Self {
+        Self { method, inner: CallInner::Pending(result.boxed()) }
+    }
+}
+
+impl<T, E> Call<Result<T, E>> {
+    /// Applies `op` to the error of the call, leaving its value untouched.
+    ///
+    /// Use this to bring calls with differing error types to a common one, for
+    /// example to await them together using [`try_join`](tokio::try_join), which
+    /// requires all of them to have the same error type.
+    pub fn map_err<F>(self, op: impl FnOnce(E) -> F + Send + 'static) -> Call<Result<T, F>>
+    where
+        T: Send + 'static,
+        E: 'static,
+        F: Send + 'static,
+    {
+        let Self { method, inner } = self;
+
+        let inner = match inner {
+            CallInner::Ready(result) => CallInner::Ready(result.map(|result| result.map_err(op))),
+            CallInner::Pending(result) => CallInner::Pending(async move { result.await.map_err(op) }.boxed()),
+        };
+
+        Call { method, inner }
+    }
+}
+
+impl<T, E> Call<Result<T, E>>
+where
+    T: Send + 'static,
+    E: fmt::Display + Send + 'static,
+{
+    /// Lets the RTC call continue in the background.
+    ///
+    /// Errors are logged with [warning log level](tracing::Level::WARN).
+    pub fn spawn(self) {
+        wokio::spawn(
+            async move {
+                let method = self.method;
+                if let Err(err) = self.await {
+                    tracing::warn!(%err, method, "calling a remote method failed");
+                }
+            }
+            .in_current_span(),
+        );
+    }
+}
+
+/// Maps the error of a started call before it is awaited.
+///
+/// This is implemented for the future returned by every `<name>_call` method of a
+/// remotable trait, so that calls with differing error types can be brought to a
+/// common one before they are awaited together.
+pub trait CallFutureExt<T, E>: Future<Output = Call<Result<T, E>>> + Sized {
+    /// Applies `op` to the error of the call, leaving its value untouched.
+    ///
+    /// This is [`Call::map_err`] applied to the call once it has been started.
+    #[allow(clippy::async_yields_async)]
+    fn map_err<F>(self, op: impl FnOnce(E) -> F + Send + 'static) -> impl Future<Output = Call<Result<T, F>>>
+    where
+        T: Send + 'static,
+        E: 'static,
+        F: Send + 'static,
+    {
+        async move { self.await.map_err(op) }
+    }
+}
+
+impl<Fut, T, E> CallFutureExt<T, E> for Fut where Fut: Future<Output = Call<Result<T, E>>> {}
+
+impl<R> Unpin for Call<R> {}
+
+impl<R> Future for Call<R> {
+    type Output = R;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        match &mut self.get_mut().inner {
+            CallInner::Ready(result) => Poll::Ready(result.take().expect("Call polled after completion")),
+            CallInner::Pending(result) => result.poll_unpin(cx),
+        }
+    }
 }
 
 /// A future that completes when the server or client has been dropped
@@ -1601,6 +1755,11 @@ pub enum ServeError {
     Forward(mpsc::SendError<()>),
     /// Server failed because [server monitor](ServerMonitor) returned [`DispatchDecision::Error`].
     Monitor(Box<dyn Error + Send>),
+    /// A call failed and the caller requested the server to stop serving in that case.
+    CallFailed {
+        /// Name of the method that failed.
+        method: &'static str,
+    },
 }
 
 impl From<mpsc::RecvError> for ServeError {
@@ -1634,6 +1793,7 @@ impl fmt::Display for ServeError {
             Self::ReplySend(err) => write!(f, "failed to send reply to RTC request: {err}"),
             Self::Forward(err) => write!(f, "failed to forward RTC request: {err}"),
             Self::Monitor(err) => write!(f, "failed by server monitor: {err}"),
+            Self::CallFailed { method } => write!(f, "RTC call to {method} failed"),
         }
     }
 }
@@ -1653,36 +1813,7 @@ impl From<ServeError> for CallError {
             ServeError::ReplySend(SendingErrorKind::Dropped) => Self::Dropped,
             ServeError::Forward(err) => Self::from(err),
             ServeError::Monitor(_) => Self::Forward,
-        }
-    }
-}
-
-/// Handling of an object that was consumed while its requests were served.
-///
-/// This is implemented for the result of a method that hands over a
-/// [request receiver](ReqReceiver), i.e. a method generated by applying the
-/// `#[pipelinable]` attribute within the [remote attribute](remote).
-///
-/// Such a method returns `Ok(None)` when the object was consumed by a method
-/// taking `self` by value, in which case no client for it can be returned.
-pub trait ConsumedExt<T, E> {
-    /// The client, provided that the object was not consumed.
-    ///
-    /// `Ok(Some(client))` becomes `Ok(client)` and `Ok(None)` becomes
-    /// `Err(CallError::Consumed)`, converted into the error type of the method.
-    /// Other errors are passed through unchanged.
-    fn unconsumed(self) -> Result<T, E>;
-}
-
-impl<T, E> ConsumedExt<T, E> for Result<Option<T>, E>
-where
-    E: From<CallError>,
-{
-    fn unconsumed(self) -> Result<T, E> {
-        match self {
-            Ok(Some(value)) => Ok(value),
-            Ok(None) => Err(CallError::Consumed.into()),
-            Err(err) => Err(err),
+            ServeError::CallFailed { .. } => Self::Forward,
         }
     }
 }
@@ -1701,7 +1832,7 @@ pub use tokio::sync::mpsc as local_mpsc;
 #[doc(hidden)]
 pub use wokio::task::spawn;
 #[doc(hidden)]
-pub type ReplyErrorSender = tokio::sync::mpsc::Sender<SendingErrorKind>;
+pub type ReplyErrorSender = tokio::sync::mpsc::Sender<ServeError>;
 #[doc(hidden)]
 pub use futures::future::FutureExt;
 #[doc(hidden)]
@@ -1713,7 +1844,7 @@ pub use tracing::Instrument;
 
 /// Create channel for queueing reply sending errors.
 #[doc(hidden)]
-pub fn reply_error_channel() -> (ReplyErrorSender, tokio::sync::mpsc::Receiver<SendingErrorKind>) {
+pub fn reply_error_channel() -> (ReplyErrorSender, tokio::sync::mpsc::Receiver<ServeError>) {
     tokio::sync::mpsc::channel(16)
 }
 
@@ -1729,10 +1860,10 @@ pub const fn missing_max_reply_size() -> usize {
     usize::MAX
 }
 
-/// Send reply to request.
+/// Completes a call by replying to the request.
 #[doc(hidden)]
-pub async fn send_reply<R, Codec>(
-    reply_tx: impl Into<ReplySender<R, Codec>>, err_tx: &ReplyErrorSender,
+pub async fn complete_call<R, Codec>(
+    reply_to: ReplyTo<R, Codec>, method: &'static str, err_tx: &ReplyErrorSender,
     mut dispatch_guard: Box<dyn DispatchGuard>, result: R,
 ) where
     R: IsReply,
@@ -1741,9 +1872,12 @@ pub async fn send_reply<R, Codec>(
 {
     if result.is_error() {
         dispatch_guard.failed();
+        if reply_to.stop_on_error() {
+            let _ = err_tx.send(ServeError::CallFailed { method }).await;
+        }
     }
 
-    let Ok(sending) = reply_tx.into().send(result) else { return };
+    let Ok(sending) = reply_to.send(result) else { return };
 
     let err_tx = err_tx.clone();
     wokio::spawn(
@@ -1755,7 +1889,7 @@ pub async fn send_reply<R, Codec>(
                     SendingErrorKind::Dropped => return,
                     _ => (),
                 }
-                let _ = err_tx.send(kind).await;
+                let _ = err_tx.send(kind.into()).await;
             }
 
             drop(dispatch_guard);

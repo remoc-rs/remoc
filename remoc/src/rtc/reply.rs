@@ -27,11 +27,20 @@ pub trait IsReply: Sized {
     /// The type the value is transferred as.
     type Compact: From<Self> + Into<Self>;
 
+    /// The same return type with its value replaced by `()`.
+    ///
+    /// This is used when the caller is not interested in the value of the call, but
+    /// only in whether it failed.
+    type WithoutValue: IsReply;
+
     /// Whether the method returned an error.
     fn is_error(&self) -> bool;
 
     /// Builds the return value from a failure of the call itself.
     fn from_call_error(err: super::CallError) -> Self;
+
+    /// The successful return value without a value.
+    fn without_value() -> Self::WithoutValue;
 }
 
 impl<T, E> IsReply for Result<T, E>
@@ -39,6 +48,7 @@ where
     E: From<super::CallError>,
 {
     type Compact = crate::versioned::result::Result<T, E>;
+    type WithoutValue = Result<(), E>;
 
     fn is_error(&self) -> bool {
         self.is_err()
@@ -46,6 +56,10 @@ where
 
     fn from_call_error(err: super::CallError) -> Self {
         Err(err.into())
+    }
+
+    fn without_value() -> Result<(), E> {
+        Ok(())
     }
 }
 
@@ -63,26 +77,16 @@ pub trait IsPipelinableReply: IsReply {
     /// The request receiver of the returned client.
     type ReqReceiver;
 
-    /// The return type of the generated method taking the request receiver.
-    ///
-    /// This is `Result<Option<T>, E>`, since the object may be consumed by a method
-    /// taking `self` by value while its requests are served.
-    type Pipelined: IsReply;
-
     /// Splits into the returned client, or the error converted into the return type
     /// of the method taking the request receiver.
-    fn split(self) -> Result<Self::Client, Self::Pipelined>;
+    fn split(self) -> Result<Self::Client, Self::WithoutValue>;
 
-    /// Builds the return value of the method taking the request receiver.
-    ///
-    /// `client` is [`None`] when the object was consumed while serving.
-    fn pipelined(client: Option<Self::Client>) -> Self::Pipelined;
-
-    /// Converts into the return type of the method taking the request receiver.
-    fn into_pipelined(self) -> Self::Pipelined {
+    /// Converts into the return type of the method taking the request receiver,
+    /// discarding the returned client.
+    fn into_without_value(self) -> Self::WithoutValue {
         match self.split() {
-            Ok(client) => Self::pipelined(Some(client)),
-            Err(pipelined) => pipelined,
+            Ok(_client) => Self::without_value(),
+            Err(without_value) => without_value,
         }
     }
 }
@@ -94,17 +98,12 @@ where
 {
     type Client = T;
     type ReqReceiver = T::ReqReceiver;
-    type Pipelined = Result<Option<T>, E>;
 
-    fn split(self) -> Result<T, Result<Option<T>, E>> {
+    fn split(self) -> Result<T, Result<(), E>> {
         match self {
             Ok(client) => Ok(client),
             Err(err) => Err(Err(err)),
         }
-    }
-
-    fn pipelined(client: Option<T>) -> Result<Option<T>, E> {
-        Ok(client)
     }
 }
 
@@ -209,16 +208,27 @@ where
 /// Use [complete](Self::complete) to send the result.
 ///
 /// Dropping this without sending makes the call fail at the caller.
-pub struct ReplyTo<R, Codec = codec::Default>(ReplySender<R, Codec>)
+pub struct ReplyTo<R, Codec = codec::Default>
 where
-    R: IsReply;
+    R: IsReply,
+{
+    /// Channel the reply is sent over.
+    tx: ReplySender<R, Codec>,
+    /// Whether the server may dispatch the call on its own task.
+    allow_spawn: bool,
+    /// Whether the server shall stop serving when the call fails.
+    stop_on_error: bool,
+}
 
 impl<R, Codec> std::fmt::Debug for ReplyTo<R, Codec>
 where
     R: IsReply,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.debug_struct("ReplyTo").finish()
+        f.debug_struct("ReplyTo")
+            .field("allow_spawn", &self.allow_spawn)
+            .field("stop_on_error", &self.stop_on_error)
+            .finish()
     }
 }
 
@@ -227,7 +237,7 @@ where
     R: IsReply,
 {
     fn from(reply_tx: ReplySender<R, Codec>) -> Self {
-        Self(reply_tx)
+        Self { tx: reply_tx, allow_spawn: true, stop_on_error: false }
     }
 }
 
@@ -236,7 +246,28 @@ where
     R: IsReply,
 {
     fn from(reply_to: ReplyTo<R, Codec>) -> Self {
-        reply_to.0
+        reply_to.tx
+    }
+}
+
+impl<R, Codec> ReplyTo<R, Codec>
+where
+    R: IsReply,
+{
+    /// Creates a new reply target with the specified call options.
+    #[doc(hidden)]
+    pub fn new(tx: ReplySender<R, Codec>, allow_spawn: bool, stop_on_error: bool) -> Self {
+        Self { tx, allow_spawn, stop_on_error }
+    }
+
+    /// Whether the server may dispatch the call on its own task.
+    pub fn allow_spawn(&self) -> bool {
+        self.allow_spawn
+    }
+
+    /// Whether the server shall stop serving when the call fails.
+    pub fn stop_on_error(&self) -> bool {
+        self.stop_on_error
     }
 }
 
@@ -259,110 +290,214 @@ where
     /// `Ok` means that the reply was queued for sending; the returned handle
     /// reports whether it was sent.
     pub fn send(self, reply: R) -> Result<Sending<Reply<R>>, oneshot::SendError<R>> {
-        self.0.send(reply)
+        self.tx.send(reply)
     }
 
     /// Completes when the caller is no longer interested in the reply, because
     /// the call was cancelled, the client was dropped or the connection failed.
     pub async fn closed(&self) {
-        self.0.closed().await
+        self.tx.closed().await
     }
 
     /// Whether the caller is no longer interested in the reply.
     pub fn is_closed(&self) -> bool {
-        self.0.is_closed()
+        self.tx.is_closed()
     }
 
     /// The maximum allowed size of the reply in bytes.
     pub fn max_item_size(&self) -> usize {
-        self.0.max_item_size()
+        self.tx.max_item_size()
     }
 
     /// Returns the underlying reply sender.
     pub fn into_sender(self) -> ReplySender<R, Codec> {
-        self.0
+        self.tx
     }
 }
 
-// The transported representation is an enum with a single variant, so that a method
-// can gain the `#[pipelinable]` attribute, which turns this into a
-// [`PipelinableReplyTo`], without changing the encoding of its requests.
+// The transported representation of [`ReplyTo`] and [`PipelinableReplyTo`].
+//
+// Both use the same representation, so that a method can gain the `#[pipelinable]`
+// attribute without changing the encoding of its requests.
+//
+// `Rx` is the request receiver the call may hand over; it is `()` for a method that
+// cannot be pipelined.
 //
 // Endpoints of Remoc versions before 0.20 expect the bare reply sender, thus the old
-// representation is that.
-mod reply_to_versioned {
+// representation is that. A request that uses any of the options has no old
+// representation and fails to serialize for such an endpoint.
+mod transported {
     use super::*;
 
+    /// Reply channel of a transported reply, for serialization.
     #[derive(Serialize)]
     #[serde(bound = "")]
-    pub enum CurrentRef<'transport, R, Codec>
+    pub enum SenderRef<'transport, R, Codec>
     where
         R: IsReply,
         Reply<R>: crate::RemoteSend,
+        Reply<<R as IsReply>::WithoutValue>: crate::RemoteSend,
         Codec: codec::Codec,
     {
         #[serde(rename = "_0")]
-        Normal(&'transport ReplySender<R, Codec>),
+        Full(&'transport ReplySender<R, Codec>),
+        #[serde(rename = "_1")]
+        WithoutValue(&'transport ReplySender<<R as IsReply>::WithoutValue, Codec>),
     }
 
+    /// Reply channel of a transported reply, for deserialization.
     #[derive(Deserialize)]
     #[serde(bound = "")]
-    pub enum Current<R, Codec>
+    pub enum Sender<R, Codec>
     where
         R: IsReply,
         Reply<R>: crate::RemoteSend,
+        Reply<<R as IsReply>::WithoutValue>: crate::RemoteSend,
         Codec: codec::Codec,
     {
         #[serde(rename = "_0")]
-        Normal(ReplySender<R, Codec>),
+        Full(ReplySender<R, Codec>),
+        #[serde(rename = "_1")]
+        WithoutValue(ReplySender<<R as IsReply>::WithoutValue, Codec>),
     }
 
-    impl<R, Codec> crate::versioned::Versioned for ReplyTo<R, Codec>
+    /// Transported reply, for serialization.
+    #[derive(Serialize)]
+    #[serde(bound = "")]
+    pub struct ReplyRef<'transport, R, Rx, Codec>
     where
         R: IsReply,
+        Rx: crate::RemoteSend,
         Reply<R>: crate::RemoteSend,
+        Reply<<R as IsReply>::WithoutValue>: crate::RemoteSend,
         Codec: codec::Codec,
     {
-        type Versioner = crate::versioned::compact::CompactVersioner;
+        #[serde(rename = "_0")]
+        pub tx: SenderRef<'transport, R, Codec>,
+        #[serde(rename = "_1")]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub req_rx: Option<&'transport Rx>,
+        #[serde(rename = "_2")]
+        #[serde(skip_serializing_if = "is_true")]
+        pub allow_spawn: bool,
+        #[serde(rename = "_3")]
+        #[serde(skip_serializing_if = "is_false")]
+        pub stop_on_error: bool,
+    }
 
-        type CurrentRef<'transport>
-            = CurrentRef<'transport, R, Codec>
-        where
-            Self: 'transport;
+    /// Transported reply, for deserialization.
+    #[derive(Deserialize)]
+    #[serde(bound = "")]
+    pub struct TransportedReply<R, Rx, Codec>
+    where
+        R: IsReply,
+        Rx: crate::RemoteSend,
+        Reply<R>: crate::RemoteSend,
+        Reply<<R as IsReply>::WithoutValue>: crate::RemoteSend,
+        Codec: codec::Codec,
+    {
+        #[serde(rename = "_0")]
+        pub tx: Sender<R, Codec>,
+        #[serde(rename = "_1")]
+        #[serde(default = "none")]
+        pub req_rx: Option<Rx>,
+        #[serde(rename = "_2")]
+        #[serde(default = "yes")]
+        pub allow_spawn: bool,
+        #[serde(rename = "_3")]
+        #[serde(default)]
+        pub stop_on_error: bool,
+    }
 
-        fn as_current<'transport>(
-            &'transport self,
-        ) -> Result<Self::CurrentRef<'transport>, crate::versioned::Error> {
-            Ok(CurrentRef::Normal(&self.0))
-        }
+    pub fn is_true(value: &bool) -> bool {
+        *value
+    }
 
-        type Current = Current<R, Codec>;
+    pub fn is_false(value: &bool) -> bool {
+        !*value
+    }
 
-        fn from_current(current: Self::Current) -> Result<Self, crate::versioned::Error> {
-            let Current::Normal(reply_tx) = current;
-            Ok(Self(reply_tx))
-        }
+    pub fn yes() -> bool {
+        true
+    }
 
-        type OldRef<'transport>
-            = &'transport ReplySender<R, Codec>
-        where
-            Self: 'transport;
+    pub fn none<T>() -> Option<T> {
+        None
+    }
 
-        fn as_old<'transport>(&'transport self) -> Result<Self::OldRef<'transport>, crate::versioned::Error> {
-            Ok(&self.0)
-        }
+    /// The request uses an option that the remote endpoint does not support.
+    pub fn unsupported() -> crate::versioned::Error {
+        "the remote endpoint does not support the options of this method call".into()
+    }
 
-        type Old = ReplySender<R, Codec>;
+    /// The request combines a reply channel and a request receiver in a way that is
+    /// not supported.
+    pub fn unsupported_combination() -> crate::versioned::Error {
+        "unsupported combination of reply channel and request receiver".into()
+    }
+}
 
-        fn from_old(old: Self::Old) -> Result<Self, crate::versioned::Error> {
-            Ok(Self(old))
+// Serialization of [`ReplyTo`].
+impl<R, Codec> crate::versioned::Versioned for ReplyTo<R, Codec>
+where
+    R: IsReply,
+    Reply<R>: crate::RemoteSend,
+    Reply<<R as IsReply>::WithoutValue>: crate::RemoteSend,
+    Codec: codec::Codec,
+{
+    type Versioner = crate::versioned::compact::CompactVersioner;
+
+    type CurrentRef<'transport>
+        = transported::ReplyRef<'transport, R, (), Codec>
+    where
+        Self: 'transport;
+
+    fn as_current<'transport>(&'transport self) -> Result<Self::CurrentRef<'transport>, crate::versioned::Error> {
+        Ok(transported::ReplyRef {
+            tx: transported::SenderRef::Full(&self.tx),
+            req_rx: None,
+            allow_spawn: self.allow_spawn,
+            stop_on_error: self.stop_on_error,
+        })
+    }
+
+    type Current = transported::TransportedReply<R, (), Codec>;
+
+    fn from_current(current: Self::Current) -> Result<Self, crate::versioned::Error> {
+        let transported::TransportedReply { tx, req_rx, allow_spawn, stop_on_error } = current;
+        match (tx, req_rx) {
+            (transported::Sender::Full(tx), None) => Ok(Self { tx, allow_spawn, stop_on_error }),
+            _ => Err(transported::unsupported_combination()),
         }
     }
 
-    crate::impl_serde! {
-        ReplyTo<R, Codec>
-        where R: IsReply + 'static, Reply<R>: crate::RemoteSend, Codec: codec::Codec
+    type OldRef<'transport>
+        = &'transport ReplySender<R, Codec>
+    where
+        Self: 'transport;
+
+    fn as_old<'transport>(&'transport self) -> Result<Self::OldRef<'transport>, crate::versioned::Error> {
+        if !self.allow_spawn || self.stop_on_error {
+            return Err(transported::unsupported());
+        }
+
+        Ok(&self.tx)
     }
+
+    type Old = ReplySender<R, Codec>;
+
+    fn from_old(old: Self::Old) -> Result<Self, crate::versioned::Error> {
+        Ok(Self::from(old))
+    }
+}
+
+crate::impl_serde! {
+    ReplyTo<R, Codec>
+    where
+        R: IsReply + 'static,
+        Reply<R>: crate::RemoteSend,
+        Reply<<R as IsReply>::WithoutValue>: crate::RemoteSend,
+        Codec: codec::Codec
 }
 
 /// Where the result of a remote method call is delivered for a pipelinable method.
@@ -379,7 +514,7 @@ where
     R: IsPipelinableReply,
 {
     /// Send the result of the method back to the caller.
-    Normal(ReplySender<R, Codec>),
+    Normal(ReplyTo<R, Codec>),
     /// Let the client returned by the method execute the requests of `req_rx`,
     /// then send the client back to the caller.
     Pipeline {
@@ -389,7 +524,7 @@ where
         ///
         /// The client is [`None`] when the object was consumed by a method taking
         /// `self` by value.
-        reply_tx: ReplySender<<R as IsPipelinableReply>::Pipelined, Codec>,
+        reply_tx: ReplyTo<<R as IsReply>::WithoutValue, Codec>,
     },
 }
 
@@ -408,8 +543,29 @@ where
 impl<R, Codec> PipelinableReplyTo<R, Codec>
 where
     R: IsPipelinableReply,
+{
+    /// Whether the server may dispatch the call on its own task.
+    pub fn allow_spawn(&self) -> bool {
+        match self {
+            Self::Normal(reply_to) => reply_to.allow_spawn(),
+            Self::Pipeline { reply_tx, .. } => reply_tx.allow_spawn(),
+        }
+    }
+
+    /// Whether the server shall stop serving when the call fails.
+    pub fn stop_on_error(&self) -> bool {
+        match self {
+            Self::Normal(reply_to) => reply_to.stop_on_error(),
+            Self::Pipeline { reply_tx, .. } => reply_tx.stop_on_error(),
+        }
+    }
+}
+
+impl<R, Codec> PipelinableReplyTo<R, Codec>
+where
+    R: IsPipelinableReply,
     Reply<R>: crate::RemoteSend,
-    Reply<<R as IsPipelinableReply>::Pipelined>: crate::RemoteSend,
+    Reply<<R as IsReply>::WithoutValue>: crate::RemoteSend,
     Codec: codec::Codec,
 {
     /// Completes the call with the result of the method.
@@ -417,16 +573,18 @@ where
     /// For [`Normal`](Self::Normal) the result is sent to the caller.
     ///
     /// For [`Pipeline`](Self::Pipeline) the returned client executes the requests of
-    /// the handed over request receiver and is then sent to the caller; an error
-    /// result is passed through unchanged. This does not return until every client
-    /// connected to the request receiver has been dropped.
+    /// the handed over request receiver in the background; an error result is passed
+    /// through unchanged. This returns as soon as serving has been started.
     ///
     /// The reply itself is only queued for sending; the returned handle reports whether
     /// it was transmitted and may be discarded.
     pub async fn complete(self, result: R) -> Completing<R>
     where
-        <R as IsPipelinableReply>::ReqReceiver:
-            super::ReqReceiver<Codec> + super::ServerBase<Client = <R as IsPipelinableReply>::Client>,
+        <R as IsPipelinableReply>::ReqReceiver: super::ReqReceiver<Codec>
+            + super::ServerBase<Client = <R as IsPipelinableReply>::Client>
+            + Send
+            + 'static,
+        <R as IsPipelinableReply>::Client: Send + 'static,
     {
         match self {
             Self::Normal(reply_tx) => {
@@ -434,10 +592,14 @@ where
             }
             Self::Pipeline { req_rx, reply_tx } => {
                 let pipelined = match result.split() {
-                    Ok(client) => match super::ReqReceiver::forward(req_rx, client).await {
-                        Ok(client) => R::pipelined(client),
-                        Err(err) => <R as IsPipelinableReply>::Pipelined::from_call_error(err.into()),
-                    },
+                    Ok(client) => {
+                        // Serving continues in the background, so that the caller can
+                        // keep using its client for as long as it likes.
+                        crate::rtc::spawn(tracing::Instrument::in_current_span(async move {
+                            let _ = super::ReqReceiver::forward(req_rx, client).await;
+                        }));
+                        R::without_value()
+                    }
                     Err(pipelined) => pipelined,
                 };
 
@@ -470,121 +632,80 @@ where
     }
 }
 
-// The transported representation mirrors that of [`ReplyTo`], with an additional
-// variant, so that a method can gain the `#[pipelinable]` attribute without changing
-// the encoding of its ordinary requests.
-//
-// Endpoints of Remoc versions before 0.20 expect the bare reply sender, thus the old
-// representation is that. A pipelined request has no old representation and fails to
-// serialize for such an endpoint.
-mod pipelinable_reply_to_versioned {
-    use super::*;
+// Serialization of [`PipelinableReplyTo`], using the same representation as
+// [`ReplyTo`], see there.
+impl<R, Codec> crate::versioned::Versioned for PipelinableReplyTo<R, Codec>
+where
+    R: IsPipelinableReply,
+    <R as IsPipelinableReply>::ReqReceiver: crate::RemoteSend,
+    Reply<R>: crate::RemoteSend,
+    Reply<<R as IsReply>::WithoutValue>: crate::RemoteSend,
+    Codec: codec::Codec,
+{
+    type Versioner = crate::versioned::compact::CompactVersioner;
 
-    #[derive(Serialize)]
-    #[serde(bound = "")]
-    pub enum CurrentRef<'transport, R, Codec>
+    type CurrentRef<'transport>
+        = transported::ReplyRef<'transport, R, <R as IsPipelinableReply>::ReqReceiver, Codec>
     where
-        R: IsPipelinableReply,
-        <R as IsPipelinableReply>::ReqReceiver: crate::RemoteSend,
-        Reply<R>: crate::RemoteSend,
-        Reply<<R as IsPipelinableReply>::Pipelined>: crate::RemoteSend,
-        Codec: codec::Codec,
-    {
-        #[serde(rename = "_0")]
-        Normal(&'transport ReplySender<R, Codec>),
-        #[serde(rename = "_1")]
-        Pipeline {
-            #[serde(rename = "_0")]
-            req_rx: &'transport <R as IsPipelinableReply>::ReqReceiver,
-            #[serde(rename = "_1")]
-            reply_tx: &'transport ReplySender<<R as IsPipelinableReply>::Pipelined, Codec>,
-        },
+        Self: 'transport;
+
+    fn as_current<'transport>(&'transport self) -> Result<Self::CurrentRef<'transport>, crate::versioned::Error> {
+        Ok(match self {
+            Self::Normal(reply_to) => transported::ReplyRef {
+                tx: transported::SenderRef::Full(&reply_to.tx),
+                req_rx: None,
+                allow_spawn: reply_to.allow_spawn,
+                stop_on_error: reply_to.stop_on_error,
+            },
+            Self::Pipeline { req_rx, reply_tx } => transported::ReplyRef {
+                tx: transported::SenderRef::WithoutValue(&reply_tx.tx),
+                req_rx: Some(req_rx),
+                allow_spawn: reply_tx.allow_spawn,
+                stop_on_error: reply_tx.stop_on_error,
+            },
+        })
     }
 
-    #[derive(Deserialize)]
-    #[serde(bound = "")]
-    pub enum Current<R, Codec>
-    where
-        R: IsPipelinableReply,
-        <R as IsPipelinableReply>::ReqReceiver: crate::RemoteSend,
-        Reply<R>: crate::RemoteSend,
-        Reply<<R as IsPipelinableReply>::Pipelined>: crate::RemoteSend,
-        Codec: codec::Codec,
-    {
-        #[serde(rename = "_0")]
-        Normal(ReplySender<R, Codec>),
-        #[serde(rename = "_1")]
-        Pipeline {
-            #[serde(rename = "_0")]
-            req_rx: <R as IsPipelinableReply>::ReqReceiver,
-            #[serde(rename = "_1")]
-            reply_tx: ReplySender<<R as IsPipelinableReply>::Pipelined, Codec>,
-        },
-    }
+    type Current = transported::TransportedReply<R, <R as IsPipelinableReply>::ReqReceiver, Codec>;
 
-    impl<R, Codec> crate::versioned::Versioned for PipelinableReplyTo<R, Codec>
-    where
-        R: IsPipelinableReply,
-        <R as IsPipelinableReply>::ReqReceiver: crate::RemoteSend,
-        Reply<R>: crate::RemoteSend,
-        Reply<<R as IsPipelinableReply>::Pipelined>: crate::RemoteSend,
-        Codec: codec::Codec,
-    {
-        type Versioner = crate::versioned::compact::CompactVersioner;
-
-        type CurrentRef<'transport>
-            = CurrentRef<'transport, R, Codec>
-        where
-            Self: 'transport;
-
-        fn as_current<'transport>(
-            &'transport self,
-        ) -> Result<Self::CurrentRef<'transport>, crate::versioned::Error> {
-            Ok(match self {
-                Self::Normal(reply_tx) => CurrentRef::Normal(reply_tx),
-                Self::Pipeline { req_rx, reply_tx } => CurrentRef::Pipeline { req_rx, reply_tx },
-            })
-        }
-
-        type Current = Current<R, Codec>;
-
-        fn from_current(current: Self::Current) -> Result<Self, crate::versioned::Error> {
-            Ok(match current {
-                Current::Normal(reply_tx) => Self::Normal(reply_tx),
-                Current::Pipeline { req_rx, reply_tx } => Self::Pipeline { req_rx, reply_tx },
-            })
-        }
-
-        type OldRef<'transport>
-            = &'transport ReplySender<R, Codec>
-        where
-            Self: 'transport;
-
-        fn as_old<'transport>(&'transport self) -> Result<Self::OldRef<'transport>, crate::versioned::Error> {
-            match self {
-                Self::Normal(reply_tx) => Ok(reply_tx),
-                Self::Pipeline { .. } => {
-                    Err("the remote endpoint does not support pipelined method calls".into())
-                }
+    fn from_current(current: Self::Current) -> Result<Self, crate::versioned::Error> {
+        let transported::TransportedReply { tx, req_rx, allow_spawn, stop_on_error } = current;
+        match (tx, req_rx) {
+            (transported::Sender::Full(tx), None) => Ok(Self::Normal(ReplyTo { tx, allow_spawn, stop_on_error })),
+            (transported::Sender::WithoutValue(tx), Some(req_rx)) => {
+                Ok(Self::Pipeline { req_rx, reply_tx: ReplyTo { tx, allow_spawn, stop_on_error } })
             }
-        }
-
-        type Old = ReplySender<R, Codec>;
-
-        fn from_old(old: Self::Old) -> Result<Self, crate::versioned::Error> {
-            Ok(Self::Normal(old))
+            _ => Err(transported::unsupported_combination()),
         }
     }
 
-    crate::impl_serde! {
-        PipelinableReplyTo<R, Codec>
-        where
-            R: IsPipelinableReply + 'static,
-            <R as IsPipelinableReply>::ReqReceiver: crate::RemoteSend,
-            Reply<R>: crate::RemoteSend,
-            Reply<<R as IsPipelinableReply>::Pipelined>: crate::RemoteSend,
-            Codec: codec::Codec
+    type OldRef<'transport>
+        = &'transport ReplySender<R, Codec>
+    where
+        Self: 'transport;
+
+    fn as_old<'transport>(&'transport self) -> Result<Self::OldRef<'transport>, crate::versioned::Error> {
+        match self {
+            Self::Normal(reply_to) => crate::versioned::Versioned::as_old(reply_to),
+            Self::Pipeline { .. } => Err(transported::unsupported()),
+        }
     }
+
+    type Old = ReplySender<R, Codec>;
+
+    fn from_old(old: Self::Old) -> Result<Self, crate::versioned::Error> {
+        Ok(Self::Normal(ReplyTo::from(old)))
+    }
+}
+
+crate::impl_serde! {
+    PipelinableReplyTo<R, Codec>
+    where
+        R: IsPipelinableReply + 'static,
+        <R as IsPipelinableReply>::ReqReceiver: crate::RemoteSend,
+        Reply<R>: crate::RemoteSend,
+        Reply<<R as IsReply>::WithoutValue>: crate::RemoteSend,
+        Codec: codec::Codec
 }
 
 /// Handle to obtain the result of [completing](PipelinableReplyTo::complete) a call.
@@ -603,7 +724,7 @@ where
     /// The reply of an ordinary call is being transmitted.
     Normal(Sending<Reply<R>>),
     /// The reply of a pipelined call is being transmitted.
-    Pipeline(Sending<Reply<<R as IsPipelinableReply>::Pipelined>>),
+    Pipeline(Sending<Reply<<R as IsReply>::WithoutValue>>),
 }
 
 impl<R> std::fmt::Debug for Completing<R>
@@ -622,14 +743,14 @@ impl<R> Future for Completing<R>
 where
     R: IsPipelinableReply,
 {
-    type Output = Result<(), SendingError<<R as IsPipelinableReply>::Pipelined>>;
+    type Output = Result<(), SendingError<<R as IsReply>::WithoutValue>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let res = match self.get_mut() {
             Self::Normal(sending) => ready!(sending.poll_unpin(cx))
-                .map_err(|err| err.map_item(|reply| Into::<R>::into(reply).into_pipelined())),
+                .map_err(|err| err.map_item(|reply| Into::<R>::into(reply).into_without_value())),
             Self::Pipeline(sending) => ready!(sending.poll_unpin(cx))
-                .map_err(|err| err.map_item(Into::<<R as IsPipelinableReply>::Pipelined>::into)),
+                .map_err(|err| err.map_item(Into::<<R as IsReply>::WithoutValue>::into)),
         };
         Poll::Ready(res)
     }

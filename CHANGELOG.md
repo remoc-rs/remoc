@@ -158,19 +158,23 @@ version can still talk to each other.
   client of another remotable trait. It generates a `<name>_pipelined` twin method taking
   the request receiver of that client, so that the caller can use the client while the
   call that provides the object is still in flight. The twin is a provided trait
-  method, whose default implementation forwards the requests to the returned client
-  and which can be overridden to serve the request receiver directly. Use
-  `#[pipelinable(name)]` to name the twin method differently.
+  method returning a `Call`, so that the request receiver is handed over immediately
+  and calls on the client can be started without waiting for the session call to
+  complete. Its default implementation forwards the requests to the returned client
+  in the background. Use `#[pipelinable(name)]` to name the twin method differently.
 - rtc: `Client` has a new associated type `ReqReceiver`, naming the request receiver
   whose requests can be forwarded to the client
+- rtc: `calls!` macro performing a series of calls, which may include calls handing
+  over a request receiver, without awaiting the result of each one; a failing call
+  returns from the enclosing function, like the `?` operator does
+- rtc: `Call::map_err` and `CallFutureExt::map_err` to bring calls with differing
+  error types to a common one, for example to await them together using `try_join!`
+  or `calls!`
 - rtc: `ReplyTo::complete` and `PipelinableReplyTo::complete` reply to a request,
   the latter handling both an ordinary call and a handed over request receiver, so
   that a request can be replied to the same way whether or not its method is
   pipelinable. The returned handle reports whether the reply was transmitted and, if
   not, the reply that could not be transmitted.
-- rtc: `CallError::Consumed` and `ConsumedExt::unconsumed`, for the case that
-  an object was consumed by a method taking `self` by value while its requests were
-  being served
 - rtc: [monitors](https://docs.rs/remoc/0.19/remoc/rtc/monitor/index.html) that
   observe and control every request of a client (`MonitorableClient::set_monitor`),
   server (`MonitorableServer::set_monitor`) and request receiver

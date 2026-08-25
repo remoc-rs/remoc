@@ -120,20 +120,26 @@ impl Parse for TraitDef {
             if content.peek(Token![type]) {
                 assoc_types.push(AssocType::parse_with_attrs(&content, attrs)?);
             } else {
-                let method = TraitMethod::parse_with_attrs(&content, attrs)?;
+                let method = TraitMethod::parse(&ident, attrs, &content)?;
                 methods.push(method);
             }
         }
 
-        // The twin method generated for a pipelinable method must not collide with a
-        // method of the trait.
-        for method in methods.iter().filter(|m| m.pipelinable) {
-            let twin = method.pipelined_ident();
-            if methods.iter().any(|m| m.ident == twin) {
-                return Err(syn::Error::new(
-                    method.ident.span(),
-                    format!("`{twin}` is generated for this method and must not be declared"),
-                ));
+        // The twin methods generated for a method must not collide with a method of
+        // the trait.
+        for method in &methods {
+            let mut twins = vec![method.call_ident()];
+            if method.pipelinable {
+                twins.push(method.pipelined_ident());
+            }
+
+            for twin in twins {
+                if methods.iter().any(|m| m.ident == twin) {
+                    return Err(syn::Error::new(
+                        method.ident.span(),
+                        format!("`{twin}` is generated for this method and must not be declared"),
+                    ));
+                }
             }
         }
 
@@ -326,8 +332,9 @@ impl TraitDef {
         // Trait methods.
         for m in &self.methods {
             defs.append_all(m.trait_method(!self.async_trait));
+            defs.append_all(m.call_trait_method(!self.async_trait));
             if m.pipelinable {
-                defs.append_all(m.pipelined_trait_method(!self.async_trait, &self.assoc_types));
+                defs.append_all(m.pipelined_trait_method(!self.async_trait));
             }
         }
 
@@ -599,22 +606,26 @@ impl TraitDef {
         let (mut value_entries, mut ref_entries, mut ref_mut_entries) = (quote! {}, quote! {}, quote! {});
         let (mut value_clauses, mut ref_clauses, mut ref_mut_clauses) = (quote! {}, quote! {}, quote! {});
         let (mut value_names, mut ref_names, mut ref_mut_names) = (quote! {}, quote! {}, quote! {});
+        let (mut value_spawns, mut ref_spawns, mut ref_mut_spawns) = (quote! {}, quote! {}, quote! {});
         for md in &self.methods {
             match md.self_ref {
                 SelfRef::Value => {
                     value_entries.append_all(md.request_enum_entry(assoc));
                     value_clauses.append_all(md.dispatch_discriminator());
                     value_names.append_all(md.method_name_clause());
+                    value_spawns.append_all(md.allow_spawn_clause());
                 }
                 SelfRef::Ref => {
                     ref_entries.append_all(md.request_enum_entry(assoc));
                     ref_clauses.append_all(md.dispatch_discriminator());
                     ref_names.append_all(md.method_name_clause());
+                    ref_spawns.append_all(md.allow_spawn_clause());
                 }
                 SelfRef::RefMut => {
                     ref_mut_entries.append_all(md.request_enum_entry(assoc));
                     ref_mut_clauses.append_all(md.dispatch_discriminator());
                     ref_mut_names.append_all(md.method_name_clause());
+                    ref_mut_spawns.append_all(md.allow_spawn_clause());
                 }
             }
         }
@@ -680,6 +691,13 @@ impl TraitDef {
                         #phantom_clause
                     }
                 }
+
+                fn allow_spawn(&self) -> bool {
+                    match self {
+                        #value_spawns
+                        #phantom_clause
+                    }
+                }
             }
 
             #[doc = #req_doc_ref]
@@ -724,6 +742,13 @@ impl TraitDef {
                         #phantom_clause
                     }
                 }
+
+                fn allow_spawn(&self) -> bool {
+                    match self {
+                        #ref_spawns
+                        #phantom_clause
+                    }
+                }
             }
 
             #[doc = #req_doc_ref_mut]
@@ -765,6 +790,13 @@ impl TraitDef {
                 fn method_name(&self) -> &'static str {
                     match self {
                         #ref_mut_names
+                        #phantom_clause
+                    }
+                }
+
+                fn allow_spawn(&self) -> bool {
+                    match self {
+                        #ref_mut_spawns
                         #phantom_clause
                     }
                 }
@@ -862,7 +894,7 @@ impl TraitDef {
                     let target_opt = loop {
                         ::remoc::rtc::select! {
                             biased;
-                            Some(err) = err_rx.recv() => return (Some(target), Err(err.into())),
+                            Some(err) = err_rx.recv() => return (Some(target), Err(err)),
                             req = req_rx.recv() => {
                                 let mut guard = ::remoc::rtc::server_monitor_pre_dispatch!(monitor, req, target);
                                 match req {
@@ -887,7 +919,7 @@ impl TraitDef {
                     drop(err_tx);
                     let res = match err_rx.recv().await {
                         None => Ok(()),
-                        Some(err) => Err(err.into()),
+                        Some(err) => Err(err),
                     };
 
                     (target_opt, res)
@@ -975,7 +1007,7 @@ impl TraitDef {
                     let ret = loop {
                         ::remoc::rtc::select! {
                             biased;
-                            Some(err) = err_rx.recv() => return Err(err.into()),
+                            Some(err) = err_rx.recv() => return Err(err),
                             req = req_rx.recv() => {
                                 let guard = ::remoc::rtc::server_monitor_pre_dispatch!(monitor, req);
                                 match req {
@@ -994,7 +1026,7 @@ impl TraitDef {
                     drop(err_tx);
                     match err_rx.recv().await {
                         None => Ok(ret),
-                        Some(err) => Err(err.into()),
+                        Some(err) => Err(err),
                     }
                 }
             }
@@ -1087,7 +1119,7 @@ impl TraitDef {
                     let ret = loop {
                         ::remoc::rtc::select! {
                             biased;
-                            Some(err) = err_rx.recv() => return Err(err.into()),
+                            Some(err) = err_rx.recv() => return Err(err),
                             req = req_rx.recv() => {
                                 let guard = ::remoc::rtc::server_monitor_pre_dispatch!(monitor, req);
                                 match req {
@@ -1109,7 +1141,7 @@ impl TraitDef {
                     drop(err_tx);
                     match err_rx.recv().await {
                         None => Ok(ret),
-                        Some(err) => Err(err.into()),
+                        Some(err) => Err(err),
                     }
                 }
             }
@@ -1193,13 +1225,13 @@ impl TraitDef {
                     let ret = loop {
                         ::remoc::rtc::select! {
                             biased;
-                            Some(err) = err_rx.recv() => return Err(err.into()),
+                            Some(err) = err_rx.recv() => return Err(err),
                             req = req_rx.recv() => {
                                 let guard = ::remoc::rtc::server_monitor_pre_dispatch!(monitor, req);
                                 match req {
                                     Ok(Some(::remoc::rtc::Req::Ref(req))) => {
                                         let err_tx = err_tx.clone();
-                                        if spawn {
+                                        if spawn && ::remoc::rtc::ReqEnum::allow_spawn(&req) {
                                             use ::remoc::rtc::Instrument;
                                             let target = target.clone();
                                             ::remoc::rtc::spawn(async move {
@@ -1221,7 +1253,7 @@ impl TraitDef {
                     drop(err_tx);
                     match err_rx.recv().await {
                         None => Ok(ret),
-                        Some(err) => Err(err.into()),
+                        Some(err) => Err(err),
                     }
                 }
             }
@@ -1311,13 +1343,13 @@ impl TraitDef {
                     let ret = loop {
                         ::remoc::rtc::select! {
                             biased;
-                            Some(err) = err_rx.recv() => return Err(err.into()),
+                            Some(err) = err_rx.recv() => return Err(err),
                             req = req_rx.recv() => {
                                 let guard = ::remoc::rtc::server_monitor_pre_dispatch!(monitor, req);
                                 match req {
                                     Ok(Some(::remoc::rtc::Req::Ref(req))) => {
                                         let err_tx = err_tx.clone();
-                                        if spawn {
+                                        if spawn && ::remoc::rtc::ReqEnum::allow_spawn(&req) {
                                             use ::remoc::rtc::Instrument;
                                             let target = target.clone().read_owned().await;
                                             ::remoc::rtc::spawn(async move {
@@ -1344,7 +1376,7 @@ impl TraitDef {
                     drop(err_tx);
                     match err_rx.recv().await {
                         None => Ok(ret),
-                        Some(err) => Err(err.into()),
+                        Some(err) => Err(err),
                     }
                 }
             }
@@ -1814,6 +1846,8 @@ impl TraitDef {
                         Self {
                             req_tx: self.req_tx.clone(),
                             max_reply_size: self.max_reply_size,
+                            allow_spawn: self.allow_spawn,
+                            stop_on_error: self.stop_on_error,
                             drop_tx: self.drop_tx.clone(),
                             monitor: self.monitor.clone(),
                         }
@@ -1839,6 +1873,8 @@ impl TraitDef {
                     Codec,
                 >,
                 max_reply_size: usize,
+                allow_spawn: bool,
+                stop_on_error: bool,
                 drop_tx: ::remoc::rtc::local_broadcast::Sender<()>,
                 monitor: ::std::sync::Arc<dyn ::remoc::rtc::ClientMonitor<#req_params>>,
             }
@@ -1855,6 +1891,8 @@ impl TraitDef {
                     max_reply_size: usize => "_1",
                 }
                 default {
+                    allow_spawn = true,
+                    stop_on_error = false,
                     drop_tx = ::remoc::rtc::empty_client_drop_tx(),
                     monitor = ::remoc::rtc::default_client_monitor(),
                 }
@@ -1882,6 +1920,26 @@ impl TraitDef {
                     (client, req_rx)
                 }
 
+                /// Creates the reply channel for a request, carrying the call
+                /// options of this client.
+                #[doc(hidden)]
+                pub fn __reply_to<__R>(
+                    &self,
+                ) -> (
+                    ::remoc::rtc::ReplyTo<__R, Codec>,
+                    ::remoc::rch::oneshot::Receiver<::remoc::rtc::Reply<__R>, Codec>,
+                )
+                where
+                    __R: ::remoc::rtc::IsReply,
+                    ::remoc::rtc::Reply<__R>: ::remoc::RemoteSend,
+                {
+                    let (reply_tx, reply_rx) = ::remoc::rtc::reply_channel(self.max_reply_size);
+                    let reply_to = ::remoc::rtc::ReplyTo::new(
+                        reply_tx, self.allow_spawn, self.stop_on_error,
+                    );
+                    (reply_to, reply_rx)
+                }
+
                 fn from_req_tx(req_tx: ::remoc::rch::mpsc::Sender<
                     ::remoc::rtc::Req<#req_value #req_generics, #req_ref #req_generics, #req_ref_mut #req_generics>,
                     Codec,
@@ -1890,6 +1948,8 @@ impl TraitDef {
                     Self {
                         req_tx,
                         max_reply_size: ::remoc::rch::DEFAULT_MAX_ITEM_SIZE,
+                        allow_spawn: true,
+                        stop_on_error: false,
                         drop_tx: ::remoc::rtc::empty_client_drop_tx(),
                         monitor: ::remoc::rtc::default_client_monitor(),
                     }
@@ -1932,6 +1992,22 @@ impl TraitDef {
 
                 fn set_max_reply_size(&mut self, max_reply_size: usize) {
                     self.max_reply_size = max_reply_size
+                }
+
+                fn allow_spawn(&self) -> bool {
+                    self.allow_spawn
+                }
+
+                fn set_allow_spawn(&mut self, allow_spawn: bool) {
+                    self.allow_spawn = allow_spawn
+                }
+
+                fn stop_on_error(&self) -> bool {
+                    self.stop_on_error
+                }
+
+                fn set_stop_on_error(&mut self, stop_on_error: bool) {
+                    self.stop_on_error = stop_on_error
                 }
             }
 

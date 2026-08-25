@@ -248,7 +248,7 @@ impl TraitDef {
                     Self {
                         target,
                         req_rx,
-                        monitor: ::std::boxed::Box::new(::remoc::rtc::DefaultMonitor),
+                        monitor: ::std::boxed::Box::new(::remoc::rtc::monitor::DefaultMonitor),
                         #extra_fields
                     },
                     Self::Client::from_req_tx(req_tx),
@@ -259,7 +259,7 @@ impl TraitDef {
                 Self {
                     target,
                     req_rx: req_rx.req_rx,
-                    monitor: ::remoc::rtc::req_receiver_monitor_as_server_monitor(req_rx.monitor),
+                    monitor: ::remoc::rtc::monitor::req_receiver_monitor_as_server_monitor(req_rx.monitor),
                     #extra_fields
                 }
             }
@@ -669,7 +669,7 @@ impl TraitDef {
                     self,
                     __target: Target,
                     __err_tx: ::remoc::rtc::ResponseErrorSender,
-                    mut __guard: ::std::boxed::Box<dyn ::remoc::rtc::DispatchGuard>,
+                    mut __guard: ::std::boxed::Box<dyn ::remoc::rtc::monitor::DispatchGuard>,
                 ) -> ::std::pin::Pin<::std::boxed::Box<dyn ::std::future::Future<Output = ()> + ::std::marker::Send>>
                 where
                     Target: #trait_path_dispatch,
@@ -720,7 +720,7 @@ impl TraitDef {
                     self,
                     __target: &'target Target,
                     __err_tx: ::remoc::rtc::ResponseErrorSender,
-                    mut __guard: ::std::boxed::Box<dyn ::remoc::rtc::DispatchGuard>,
+                    mut __guard: ::std::boxed::Box<dyn ::remoc::rtc::monitor::DispatchGuard>,
                 ) -> ::std::pin::Pin<::std::boxed::Box<dyn ::std::future::Future<Output = ()> + ::std::marker::Send + 'target>>
                 where
                     Target: #trait_path_dispatch,
@@ -771,7 +771,7 @@ impl TraitDef {
                     self,
                     __target: &'target mut Target,
                     __err_tx: ::remoc::rtc::ResponseErrorSender,
-                    mut __guard: ::std::boxed::Box<dyn ::remoc::rtc::DispatchGuard>,
+                    mut __guard: ::std::boxed::Box<dyn ::remoc::rtc::monitor::DispatchGuard>,
                 ) -> ::std::pin::Pin<::std::boxed::Box<dyn ::std::future::Future<Output = ()> + ::std::marker::Send + 'target>>
                 where
                     Target: #trait_path_dispatch,
@@ -869,7 +869,7 @@ impl TraitDef {
                     ::remoc::rtc::Req<#req_params>,
                     Codec,
                 >,
-                monitor: ::std::boxed::Box<dyn ::remoc::rtc::ServerMonitor<#req_params>>,
+                monitor: ::std::boxed::Box<dyn ::remoc::rtc::monitor::ServerMonitor<#req_params>>,
             }
 
             impl #impl_generics_impl ::remoc::rtc::ServerBase for #server #impl_generics_ty #impl_generics_where {
@@ -877,12 +877,12 @@ impl TraitDef {
                 type ReqReceiver = #req_receiver #req_generics;
             }
 
-            impl #impl_generics_impl ::remoc::rtc::MonitorableServer for #server #impl_generics_ty #impl_generics_where {
+            impl #impl_generics_impl ::remoc::rtc::monitor::MonitorableServer for #server #impl_generics_ty #impl_generics_where {
                 type Value = #req_value #req_generics;
                 type Ref = #req_ref #req_generics;
                 type RefMut = #req_ref_mut #req_generics;
 
-                fn set_monitor(&mut self, monitor: impl ::remoc::rtc::ServerMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static) {
+                fn set_monitor(&mut self, monitor: impl ::remoc::rtc::monitor::ServerMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static) {
                     self.monitor = ::std::boxed::Box::new(monitor);
                 }
             }
@@ -899,7 +899,7 @@ impl TraitDef {
                             biased;
                             Some(err) = err_rx.recv() => return (Some(target), Err(err)),
                             req = req_rx.recv() => {
-                                let mut guard = ::remoc::rtc::server_monitor_pre_dispatch!(monitor, req, target);
+                                let mut guard = ::remoc::rtc::monitor::server_monitor_pre_dispatch!(monitor, req, target);
                                 match req {
                                     Ok(Some(::remoc::rtc::Req::Value(req))) => {
                                         #dispatch_value
@@ -979,7 +979,7 @@ impl TraitDef {
                     ::remoc::rtc::Req<#req_params>,
                     Codec,
                 >,
-                monitor: ::std::boxed::Box<dyn ::remoc::rtc::ServerMonitor<#req_params>>,
+                monitor: ::std::boxed::Box<dyn ::remoc::rtc::monitor::ServerMonitor<#req_params>>,
             }
 
             impl #impl_generics_impl ::remoc::rtc::ServerBase for #server #impl_generics_ty #impl_generics_where
@@ -988,13 +988,13 @@ impl TraitDef {
                 type ReqReceiver = #req_receiver #req_generics;
             }
 
-            impl #impl_generics_impl ::remoc::rtc::MonitorableServer for #server #impl_generics_ty #impl_generics_where
+            impl #impl_generics_impl ::remoc::rtc::monitor::MonitorableServer for #server #impl_generics_ty #impl_generics_where
             {
                 type Value = #req_value #req_generics;
                 type Ref = #req_ref #req_generics;
                 type RefMut = #req_ref_mut #req_generics;
 
-                fn set_monitor(&mut self, monitor: impl ::remoc::rtc::ServerMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static) {
+                fn set_monitor(&mut self, monitor: impl ::remoc::rtc::monitor::ServerMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static) {
                     self.monitor = ::std::boxed::Box::new(monitor);
                 }
             }
@@ -1012,7 +1012,7 @@ impl TraitDef {
                             biased;
                             Some(err) = err_rx.recv() => return Err(err),
                             req = req_rx.recv() => {
-                                let guard = ::remoc::rtc::server_monitor_pre_dispatch!(monitor, req);
+                                let guard = ::remoc::rtc::monitor::server_monitor_pre_dispatch!(monitor, req);
                                 match req {
                                     Ok(Some(::remoc::rtc::Req::Ref(req))) => {
                                         #dispatch_ref
@@ -1091,7 +1091,7 @@ impl TraitDef {
                     ::remoc::rtc::Req<#req_params>,
                     Codec,
                 >,
-                monitor: ::std::boxed::Box<dyn ::remoc::rtc::ServerMonitor<#req_params>>,
+                monitor: ::std::boxed::Box<dyn ::remoc::rtc::monitor::ServerMonitor<#req_params>>,
             }
 
             impl #impl_generics_impl ::remoc::rtc::ServerBase for #server #impl_generics_ty #impl_generics_where
@@ -1100,13 +1100,13 @@ impl TraitDef {
                 type ReqReceiver = #req_receiver #req_generics;
             }
 
-            impl #impl_generics_impl ::remoc::rtc::MonitorableServer for #server #impl_generics_ty #impl_generics_where
+            impl #impl_generics_impl ::remoc::rtc::monitor::MonitorableServer for #server #impl_generics_ty #impl_generics_where
             {
                 type Value = #req_value #req_generics;
                 type Ref = #req_ref #req_generics;
                 type RefMut = #req_ref_mut #req_generics;
 
-                fn set_monitor(&mut self, monitor: impl ::remoc::rtc::ServerMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static) {
+                fn set_monitor(&mut self, monitor: impl ::remoc::rtc::monitor::ServerMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static) {
                     self.monitor = ::std::boxed::Box::new(monitor);
                 }
             }
@@ -1124,7 +1124,7 @@ impl TraitDef {
                             biased;
                             Some(err) = err_rx.recv() => return Err(err),
                             req = req_rx.recv() => {
-                                let guard = ::remoc::rtc::server_monitor_pre_dispatch!(monitor, req);
+                                let guard = ::remoc::rtc::monitor::server_monitor_pre_dispatch!(monitor, req);
                                 match req {
                                     Ok(Some(::remoc::rtc::Req::Ref(req))) => {
                                         #dispatch_ref
@@ -1200,7 +1200,7 @@ impl TraitDef {
                     ::remoc::rtc::Req<#req_params>,
                     Codec,
                 >,
-                monitor: ::std::boxed::Box<dyn ::remoc::rtc::ServerMonitor<#req_params>>,
+                monitor: ::std::boxed::Box<dyn ::remoc::rtc::monitor::ServerMonitor<#req_params>>,
                 parallelism: usize,
             }
 
@@ -1210,13 +1210,13 @@ impl TraitDef {
                 type ReqReceiver = #req_receiver #req_generics;
             }
 
-            impl #impl_generics_impl ::remoc::rtc::MonitorableServer for #server #impl_generics_ty #impl_generics_where
+            impl #impl_generics_impl ::remoc::rtc::monitor::MonitorableServer for #server #impl_generics_ty #impl_generics_where
             {
                 type Value = #req_value #req_generics;
                 type Ref = #req_ref #req_generics;
                 type RefMut = #req_ref_mut #req_generics;
 
-                fn set_monitor(&mut self, monitor: impl ::remoc::rtc::ServerMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static) {
+                fn set_monitor(&mut self, monitor: impl ::remoc::rtc::monitor::ServerMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static) {
                     self.monitor = ::std::boxed::Box::new(monitor);
                 }
             }
@@ -1243,7 +1243,7 @@ impl TraitDef {
                             biased;
                             Some(err) = err_rx.recv() => return Err(err),
                             req = req_rx.recv() => {
-                                let guard = ::remoc::rtc::server_monitor_pre_dispatch!(monitor, req);
+                                let guard = ::remoc::rtc::monitor::server_monitor_pre_dispatch!(monitor, req);
                                 match req {
                                     Ok(Some(::remoc::rtc::Req::Ref(req))) => {
                                         let err_tx = err_tx.clone();
@@ -1333,7 +1333,7 @@ impl TraitDef {
                     ::remoc::rtc::Req<#req_params>,
                     Codec,
                 >,
-                monitor: ::std::boxed::Box<dyn ::remoc::rtc::ServerMonitor<#req_params>>,
+                monitor: ::std::boxed::Box<dyn ::remoc::rtc::monitor::ServerMonitor<#req_params>>,
                 parallelism: usize,
             }
 
@@ -1343,13 +1343,13 @@ impl TraitDef {
                 type ReqReceiver = #req_receiver #req_generics;
             }
 
-            impl #impl_generics_impl ::remoc::rtc::MonitorableServer for #server #impl_generics_ty #impl_generics_where
+            impl #impl_generics_impl ::remoc::rtc::monitor::MonitorableServer for #server #impl_generics_ty #impl_generics_where
             {
                 type Value = #req_value #req_generics;
                 type Ref = #req_ref #req_generics;
                 type RefMut = #req_ref_mut #req_generics;
 
-                fn set_monitor(&mut self, monitor: impl ::remoc::rtc::ServerMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static) {
+                fn set_monitor(&mut self, monitor: impl ::remoc::rtc::monitor::ServerMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static) {
                     self.monitor = ::std::boxed::Box::new(monitor);
                 }
             }
@@ -1376,7 +1376,7 @@ impl TraitDef {
                             biased;
                             Some(err) = err_rx.recv() => return Err(err),
                             req = req_rx.recv() => {
-                                let guard = ::remoc::rtc::server_monitor_pre_dispatch!(monitor, req);
+                                let guard = ::remoc::rtc::monitor::server_monitor_pre_dispatch!(monitor, req);
                                 match req {
                                     Ok(Some(::remoc::rtc::Req::Ref(req))) => {
                                         let err_tx = err_tx.clone();
@@ -1456,7 +1456,7 @@ impl TraitDef {
                     ::remoc::rtc::Req<#req_params>,
                     Codec,
                 >,
-                monitor: ::std::boxed::Box<dyn ::remoc::rtc::ReqReceiverMonitor<#req_params>>,
+                monitor: ::std::boxed::Box<dyn ::remoc::rtc::monitor::ReqReceiverMonitor<#req_params>>,
             }
 
             ::remoc::versioned::compact::impl_struct! {
@@ -1468,7 +1468,7 @@ impl TraitDef {
                     > => "_0",
                 }
                 default {
-                    monitor = ::remoc::rtc::default_req_receiver_monitor(),
+                    monitor = ::remoc::rtc::monitor::default_req_receiver_monitor(),
                 }
                 where #impl_generics_where_pred
             }
@@ -1479,13 +1479,13 @@ impl TraitDef {
                 type ReqReceiver = Self;
             }
 
-            impl #impl_generics_impl ::remoc::rtc::MonitorableReqReceiver for #server #impl_generics_ty #impl_generics_where
+            impl #impl_generics_impl ::remoc::rtc::monitor::MonitorableReqReceiver for #server #impl_generics_ty #impl_generics_where
             {
                 type Value = #req_value #req_generics;
                 type Ref = #req_ref #req_generics;
                 type RefMut = #req_ref_mut #req_generics;
 
-                fn set_monitor(&mut self, monitor: impl ::remoc::rtc::ReqReceiverMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static) {
+                fn set_monitor(&mut self, monitor: impl ::remoc::rtc::monitor::ReqReceiverMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static) {
                     self.monitor = ::std::boxed::Box::new(monitor);
                 }
             }
@@ -1501,7 +1501,7 @@ impl TraitDef {
                     (
                         Self {
                             req_rx,
-                            monitor: ::std::boxed::Box::new(::remoc::rtc::DefaultMonitor),
+                            monitor: ::std::boxed::Box::new(::remoc::rtc::monitor::DefaultMonitor),
                         },
                         Self::Client::from_req_tx(req_tx),
                     )
@@ -1512,7 +1512,7 @@ impl TraitDef {
                 >, ::remoc::rch::mpsc::RecvError> {
                     loop {
                         let req = self.req_rx.recv().await;
-                        ::remoc::rtc::req_receiver_monitor_pre_recv!(self.monitor, req);
+                        ::remoc::rtc::monitor::req_receiver_monitor_pre_recv!(self.monitor, req);
                         break req
                     }
                 }
@@ -1551,10 +1551,10 @@ impl TraitDef {
                         };
 
                         match client.monitor.pre_call(&req).await {
-                            ::remoc::rtc::CallDecision::Pass => (),
+                            ::remoc::rtc::monitor::CallDecision::Pass => (),
                             // The response is not delivered through the client, thus the guard is released immediately.
-                            ::remoc::rtc::CallDecision::Guard(_guard) => (),
-                            ::remoc::rtc::CallDecision::Drop => continue,
+                            ::remoc::rtc::monitor::CallDecision::Guard(_guard) => (),
+                            ::remoc::rtc::monitor::CallDecision::Drop => continue,
                         }
 
                         let consumed = ::std::matches!(req, ::remoc::rtc::Req::Value(_));
@@ -1908,7 +1908,7 @@ impl TraitDef {
                 sequential: bool,
                 stop_on_error: bool,
                 drop_tx: ::remoc::rtc::local_broadcast::Sender<()>,
-                monitor: ::std::sync::Arc<dyn ::remoc::rtc::ClientMonitor<#req_params>>,
+                monitor: ::std::sync::Arc<dyn ::remoc::rtc::monitor::ClientMonitor<#req_params>>,
             }
 
             ::remoc::versioned::compact::impl_struct! {
@@ -1930,7 +1930,7 @@ impl TraitDef {
                 }
                 default {
                     drop_tx = ::remoc::rtc::empty_client_drop_tx(),
-                    monitor = ::remoc::rtc::default_client_monitor(),
+                    monitor = ::remoc::rtc::monitor::default_client_monitor(),
                 }
                 where #impl_generics_where_pred
             }
@@ -1969,7 +1969,7 @@ impl TraitDef {
                         sequential: false,
                         stop_on_error: false,
                         drop_tx: ::remoc::rtc::empty_client_drop_tx(),
-                        monitor: ::remoc::rtc::default_client_monitor(),
+                        monitor: ::remoc::rtc::monitor::default_client_monitor(),
                     }
                 }
             }
@@ -2038,12 +2038,12 @@ impl TraitDef {
                 }
             }
 
-            impl #impl_generics_impl ::remoc::rtc::MonitorableClient for #client_ident #impl_generics_ty #impl_generics_where {
+            impl #impl_generics_impl ::remoc::rtc::monitor::MonitorableClient for #client_ident #impl_generics_ty #impl_generics_where {
                 type Value = #req_value #req_generics;
                 type Ref = #req_ref #req_generics;
                 type RefMut = #req_ref_mut #req_generics;
 
-                fn set_monitor(&mut self, monitor: impl ::remoc::rtc::ClientMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static) {
+                fn set_monitor(&mut self, monitor: impl ::remoc::rtc::monitor::ClientMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static) {
                     self.monitor = ::std::sync::Arc::new(monitor);
                 }
             }

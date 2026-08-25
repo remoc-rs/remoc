@@ -754,9 +754,9 @@ impl TraitMethod {
                 let req = ::remoc::rtc::Req::#req_type(req_value);
 
                 let mut guard = match self.monitor.pre_call(&req).await {
-                    ::remoc::rtc::CallDecision::Pass => ::std::boxed::Box::new(::remoc::rtc::DefaultGuard),
-                    ::remoc::rtc::CallDecision::Guard(guard) => guard,
-                    ::remoc::rtc::CallDecision::Drop => return Err(::remoc::rtc::CallError::Dropped.into()),
+                    ::remoc::rtc::monitor::CallDecision::Pass => ::std::boxed::Box::new(::remoc::rtc::monitor::DefaultGuard),
+                    ::remoc::rtc::monitor::CallDecision::Guard(guard) => guard,
+                    ::remoc::rtc::monitor::CallDecision::Drop => return Err(::remoc::rtc::CallError::Dropped.into()),
                 };
 
                 self.req_tx.send(req).await.map_err(::remoc::rtc::CallError::from)?;
@@ -824,9 +824,9 @@ impl TraitMethod {
                 let req = ::remoc::rtc::Req::#req_type(req_value);
 
                 let mut guard = match self.monitor.pre_call(&req).await {
-                    ::remoc::rtc::CallDecision::Pass => ::std::boxed::Box::new(::remoc::rtc::DefaultGuard),
-                    ::remoc::rtc::CallDecision::Guard(guard) => guard,
-                    ::remoc::rtc::CallDecision::Drop => {
+                    ::remoc::rtc::monitor::CallDecision::Pass => ::std::boxed::Box::new(::remoc::rtc::monitor::DefaultGuard),
+                    ::remoc::rtc::monitor::CallDecision::Guard(guard) => guard,
+                    ::remoc::rtc::monitor::CallDecision::Drop => {
                         return ::remoc::rtc::Call::ready(
                             #full_name,
                             ::remoc::rtc::Response::from_call_error(::remoc::rtc::CallError::Dropped)
@@ -909,9 +909,9 @@ impl TraitMethod {
                 let req = ::remoc::rtc::Req::#req_type(req_value);
 
                 let mut guard = match self.monitor.pre_call(&req).await {
-                    ::remoc::rtc::CallDecision::Pass => ::std::boxed::Box::new(::remoc::rtc::DefaultGuard),
-                    ::remoc::rtc::CallDecision::Guard(guard) => guard,
-                    ::remoc::rtc::CallDecision::Drop => {
+                    ::remoc::rtc::monitor::CallDecision::Pass => ::std::boxed::Box::new(::remoc::rtc::monitor::DefaultGuard),
+                    ::remoc::rtc::monitor::CallDecision::Guard(guard) => guard,
+                    ::remoc::rtc::monitor::CallDecision::Drop => {
                         return ::remoc::rtc::Call::ready(#full_name, ::remoc::rtc::Response::from_call_error(
                             ::remoc::rtc::CallError::Dropped,
                         ));

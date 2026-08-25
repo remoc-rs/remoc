@@ -119,8 +119,8 @@
 //! of all trait functions must always be of the [Result] type.
 //! The error type must be able to convert from [CallError] and thus absorb the remote calling error.
 //!
-//! There is no timeout imposed on a remote call, but the underlying [chmux] connection
-//! [pings the remote endpoint](chmux::Cfg::connection_timeout) by default.
+//! There is no timeout imposed on a remote call, but the underlying [chmux](crate::chmux) connection
+//! [pings the remote endpoint](crate::chmux::Cfg::connection_timeout) by default.
 //! If the underlying connection fails, all remote calls will automatically fail.
 //! You can wrap remote calls using [tokio::time::timeout] if you need to use
 //! per-call timeouts.
@@ -305,18 +305,17 @@
 
 pub mod monitor;
 
-mod calls;
-pub use calls::calls;
+mod call;
+pub use call::{Call, CallError, CallFutureExt, calls};
 
 mod response;
 pub use response::ResponseSender;
-#[doc(hidden)]
 pub use response::{
-    Completing, PipelinableResponder, PipelinableResponse, Responder, Response, ResponseErrorSender,
-    TransportedResponse, complete_call, response_channel, response_error_channel,
+    Completing, PipelinableResponder, PipelinableResponse, Responder, Response, TransportedResponse,
 };
+#[doc(hidden)]
+pub use response::{ResponseErrorSender, complete_call, response_channel, response_error_channel};
 
-use futures::future::BoxFuture;
 use std::{
     error::Error,
     fmt,
@@ -328,8 +327,8 @@ use std::{
 use tokio_util::sync::ReusableBoxFuture;
 
 use crate::{
-    RemoteSend, chmux,
-    rch::{DEFAULT_BUFFER, SendingError, SendingErrorKind, base, mpsc, oneshot},
+    RemoteSend,
+    rch::{DEFAULT_BUFFER, SendingError, SendingErrorKind, mpsc},
 };
 
 /// Default maximum number of calls a server processes concurrently.
@@ -440,102 +439,10 @@ pub const DEFAULT_PARALLELISM: usize = 32;
 ///
 pub use remoc_macro::remote;
 
-/// Call a method on a remotable trait failed.
-#[derive(Debug, Clone)]
-pub enum CallError {
-    /// The object is not being served.
-    ///
-    /// The request was never accepted, because serving of the object had already
-    /// finished: [`serve`](ServerShared::serve) returned, or the server was dropped
-    /// without ever being served.
-    NotServed,
-    /// Processing the request failed.
-    ///
-    /// The request was accepted but no response arrived. The server may have panicked
-    /// while handling it, sending the response may have failed on the server side, or
-    /// the request may have been dropped by a client or server monitor.
-    Dropped,
-    /// Encoding or transferring the request failed; see [`base::SendErrorKind`].
-    Send(base::SendErrorKind),
-    /// Receiving or decoding the response failed; see [`base::RecvError`].
-    Receive(base::RecvError),
-    /// Opening a channel carried by the request or response failed; see [`chmux::ConnectError`].
-    Connect(chmux::ConnectError),
-    /// Preparing a channel carried by the request or response failed; see [`chmux::ListenerError`].
-    Listen(chmux::ListenerError),
-    /// An endpoint forwarding the call or response could not complete the transfer.
-    Forward,
-    /// A failure was reported by an endpoint forwarding the call or response.
-    ///
-    /// The nested error is [`None`] when that endpoint reported a newer error
-    /// variant that this version of Remoc does not recognize.
-    Remote(Option<Box<CallError>>),
-}
-
-crate::versioned::compact::impl_enum! {
-    CallError,
-    recover = CallError::Remote(None),
-    variants {
-        NotServed => "_0",
-        Dropped => "_1",
-        Send(err: base::SendErrorKind) => "_2",
-        Receive(err: base::RecvError) => "_3",
-        Connect(err: chmux::ConnectError) => "_4",
-        Listen(err: chmux::ListenerError) => "_5",
-        Forward => "_6",
-        Remote(err: Option<Box<CallError>>) => "_50",
-    }
-}
-
-impl fmt::Display for CallError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::NotServed => write!(f, "the remote object is no longer served"),
-            Self::Dropped => write!(f, "processing request failed"),
-            Self::Send(err) => write!(f, "send error: {err}"),
-            Self::Receive(err) => write!(f, "receive error: {err}"),
-            Self::Connect(err) => write!(f, "connect error: {err}"),
-            Self::Listen(err) => write!(f, "listen error: {err}"),
-            Self::Forward => write!(f, "forwarding error"),
-            Self::Remote(Some(err)) => write!(f, "remote {err}"),
-            Self::Remote(None) => write!(f, "unknown remote error"),
-        }
-    }
-}
-
-impl Error for CallError {}
-
-impl<T> From<mpsc::SendError<T>> for CallError {
-    fn from(err: mpsc::SendError<T>) -> Self {
-        match err {
-            mpsc::SendError::Closed(_) => Self::NotServed,
-            mpsc::SendError::Send(err) if err.is_closed() => Self::NotServed,
-            mpsc::SendError::Send(err) => Self::Send(err),
-            mpsc::SendError::Connect(err) => Self::Connect(err),
-            mpsc::SendError::Listen(err) => Self::Listen(err),
-            mpsc::SendError::Forward => Self::Forward,
-        }
-    }
-}
-
-impl From<oneshot::RecvError> for CallError {
-    fn from(err: oneshot::RecvError) -> Self {
-        match err {
-            oneshot::RecvError::Closed => Self::Dropped,
-            oneshot::RecvError::Receive(base::RecvError::Receive(chmux::RecvError::Rejected {
-                no_ports: false,
-            })) => Self::NotServed,
-            oneshot::RecvError::Connect(chmux::ConnectError::Rejected) => Self::NotServed,
-            oneshot::RecvError::Receive(err) => Self::Receive(err),
-            oneshot::RecvError::Connect(err) => Self::Connect(err),
-            oneshot::RecvError::Listen(err) => Self::Listen(err),
-            oneshot::RecvError::Remote(err) => Self::Remote(err.map(|err| Box::new(Self::from(*err)))),
-        }
-    }
-}
-
 /// The request enum of a remotely callable trait.
-#[doc(hidden)]
+///
+/// One is generated per remotable trait and kind of `self` reference, holding one
+/// variant per method. [Monitors](monitor) are generic over them.
 pub trait ReqEnum {
     /// The name of the remotely callable trait this request enum belongs to.
     fn trait_name() -> &'static str;
@@ -689,132 +596,6 @@ pub trait Client {
     fn set_stop_on_error(&mut self, stop_on_error: bool);
 }
 
-/// A remote method call that has been started.
-///
-/// This is returned by the `<name>_call` twin of every method of a remotable trait,
-/// which starts the call without waiting for its result. Await this to obtain the
-/// result.
-///
-/// Starting several calls before awaiting their results avoids one round trip per
-/// call, since the requests are transferred to the server without waiting for the
-/// response of the preceding one. The requests are transferred in the order the calls
-/// were started.
-///
-/// Dropping this without awaiting it cancels the call, unless the method is marked
-/// with `#[no_cancel]`. Note that the object may already have been called when the
-/// cancellation reaches the server.
-#[must_use = "the RTC call is cancelled when Call is dropped"]
-pub struct Call<R> {
-    method: &'static str,
-    inner: CallInner<R>,
-}
-
-enum CallInner<R> {
-    /// The result is already available, because the object was called locally.
-    Ready(Option<R>),
-    /// The result is awaited from the server.
-    Pending(BoxFuture<'static, R>),
-}
-
-impl<R> fmt::Debug for Call<R> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("Call").field("method", &self.method).finish()
-    }
-}
-
-impl<R> Call<R> {
-    /// A call that has already been performed, yielding `result`.
-    #[doc(hidden)]
-    pub fn ready(method: &'static str, result: R) -> Self {
-        Self { method, inner: CallInner::Ready(Some(result)) }
-    }
-
-    /// A call whose result is obtained by awaiting `result`.
-    #[doc(hidden)]
-    pub fn pending(method: &'static str, result: impl Future<Output = R> + Send + 'static) -> Self {
-        Self { method, inner: CallInner::Pending(result.boxed()) }
-    }
-}
-
-impl<T, E> Call<Result<T, E>> {
-    /// Applies `op` to the error of the call, leaving its value untouched.
-    ///
-    /// Use this to bring calls with differing error types to a common one, for
-    /// example to await them together using [`try_join`](tokio::try_join), which
-    /// requires all of them to have the same error type.
-    pub fn map_err<F>(self, op: impl FnOnce(E) -> F + Send + 'static) -> Call<Result<T, F>>
-    where
-        T: Send + 'static,
-        E: 'static,
-        F: Send + 'static,
-    {
-        let Self { method, inner } = self;
-
-        let inner = match inner {
-            CallInner::Ready(result) => CallInner::Ready(result.map(|result| result.map_err(op))),
-            CallInner::Pending(result) => CallInner::Pending(async move { result.await.map_err(op) }.boxed()),
-        };
-
-        Call { method, inner }
-    }
-}
-
-impl<T, E> Call<Result<T, E>>
-where
-    T: Send + 'static,
-    E: fmt::Display + Send + 'static,
-{
-    /// Lets the RTC call continue in the background.
-    ///
-    /// Errors are logged with [warning log level](tracing::Level::WARN).
-    pub fn spawn(self) {
-        wokio::spawn(
-            async move {
-                let method = self.method;
-                if let Err(err) = self.await {
-                    tracing::warn!(%err, method, "calling a remote method failed");
-                }
-            }
-            .in_current_span(),
-        );
-    }
-}
-
-/// Maps the error of a started call before it is awaited.
-///
-/// This is implemented for the future returned by every `<name>_call` method of a
-/// remotable trait, so that calls with differing error types can be brought to a
-/// common one before they are awaited together.
-pub trait CallFutureExt<T, E>: Future<Output = Call<Result<T, E>>> + Sized {
-    /// Applies `op` to the error of the call, leaving its value untouched.
-    ///
-    /// This is [`Call::map_err`] applied to the call once it has been started.
-    #[allow(clippy::async_yields_async)]
-    fn map_err<F>(self, op: impl FnOnce(E) -> F + Send + 'static) -> impl Future<Output = Call<Result<T, F>>>
-    where
-        T: Send + 'static,
-        E: 'static,
-        F: Send + 'static,
-    {
-        async move { self.await.map_err(op) }
-    }
-}
-
-impl<Fut, T, E> CallFutureExt<T, E> for Fut where Fut: Future<Output = Call<Result<T, E>>> {}
-
-impl<R> Unpin for Call<R> {}
-
-impl<R> Future for Call<R> {
-    type Output = R;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        match &mut self.get_mut().inner {
-            CallInner::Ready(result) => Poll::Ready(result.take().expect("Call polled after completion")),
-            CallInner::Pending(result) => result.poll_unpin(cx),
-        }
-    }
-}
-
 /// A future that completes when the server or client has been dropped
 /// or the connection between them has been lost.
 ///
@@ -839,151 +620,6 @@ impl Future for Closed {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         self.as_mut().0.poll_unpin(cx)
-    }
-}
-
-/// Allows setting the [client monitor](ClientMonitor) on a [client](Client).
-pub trait MonitorableClient {
-    /// Type of request by value (`self`).
-    type Value: ReqEnum;
-    /// Type of request by reference (`&self`).
-    type Ref: ReqEnum;
-    /// Type of request by mutable reference (`&mut self`).
-    type RefMut: ReqEnum;
-
-    /// Sets the [client monitor](ClientMonitor).
-    fn set_monitor(&mut self, monitor: impl ClientMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static);
-}
-
-/// Allows monitoring each request a client makes.
-pub trait ClientMonitor<Value, Ref, RefMut>: Send + Sync
-where
-    Value: ReqEnum,
-    Ref: ReqEnum,
-    RefMut: ReqEnum,
-{
-    /// Called for each request before sending it to server.
-    ///
-    /// The function can inspect the request and decide whether it should be
-    /// sent to the server for processing or dropped.
-    fn pre_call<'a>(&'a self, req: &'a Req<Value, Ref, RefMut>) -> BoxFuture<'a, CallDecision>;
-}
-
-/// Decision on how a request should be processed made by the [client monitor](ClientMonitor).
-pub enum CallDecision {
-    /// Process the request normally.
-    ///
-    /// The request is sent to the server for processing.
-    Pass,
-    /// Guard the request and process it normally.
-    ///
-    /// The request is processed as if [`Pass`](Self::Pass) is specified.
-    /// However, the supplied [`CallGuard`] is held during processing and dropped
-    /// once the request is finished.
-    Guard(Box<dyn CallGuard>),
-    /// Drop the request.
-    ///
-    /// The called client method fails with [`CallError::Dropped`].
-    Drop,
-}
-
-impl fmt::Debug for CallDecision {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Pass => write!(f, "Pass"),
-            Self::Guard(_) => write!(f, "Guard"),
-            Self::Drop => write!(f, "Drop"),
-        }
-    }
-}
-
-/// Request call guard.
-///
-/// It is held until the guarded request is processed and then dropped.
-pub trait CallGuard: Send {
-    /// Notifies the request call guard that the called method returned
-    /// an error.
-    fn failed(&mut self) {}
-
-    /// Notifies the request call guard that receiving the response from the
-    /// server failed.
-    fn response_failed(&mut self, err: &oneshot::RecvError) {
-        let _ = err;
-    }
-}
-
-/// Combines two [client](ClientMonitor) or [server](ServerMonitor) monitors into one.
-///
-/// Construct it directly from the two monitors to combine, for example
-/// `ChainedMonitor(first, second)`, and install the result on a client or server.
-/// To combine more than two monitors, nest the construction, e.g.
-/// `ChainedMonitor(a, ChainedMonitor(b, c))`.
-///
-/// For each request the two monitors are evaluated in order: first `self.0`, then
-/// `self.1`. The combined decision is formed as follows:
-///
-///  * If a monitor drops the request ([`CallDecision::Drop`] / [`DispatchDecision::Drop`]),
-///    the request is dropped and the remaining monitor is not evaluated.
-///  * For a server monitor, if a monitor returns [`DispatchDecision::Error`], serving
-///    stops with that error and the remaining monitor is not evaluated.
-///  * Otherwise the request passes. Any guard produced by either monitor is held for
-///    the duration of the request and released once it finishes. Guards are released
-///    in reverse order, i.e. `self.1`'s guard is dropped before `self.0`'s, and guard
-///    notifications ([`failed`](CallGuard::failed), [`response_failed`](CallGuard::response_failed)
-///    and [`failed`](DispatchGuard::failed)) are forwarded to both.
-///
-/// Because evaluation is sequential and short-circuits, the order matters for monitors
-/// that account for a request only while their returned future is awaited (such as the
-/// [rate](monitor::RateLimitMonitor) and [concurrent](monitor::ConcurrentLimitMonitor)
-/// limiters): a request dropped or rejected by `self.0` is never seen by `self.1`.
-pub struct ChainedMonitor<A, B>(pub A, pub B);
-
-impl<A, B, Value, Ref, RefMut> ClientMonitor<Value, Ref, RefMut> for ChainedMonitor<A, B>
-where
-    A: ClientMonitor<Value, Ref, RefMut>,
-    B: ClientMonitor<Value, Ref, RefMut>,
-    Value: ReqEnum,
-    Ref: ReqEnum,
-    RefMut: ReqEnum,
-{
-    fn pre_call<'a>(&'a self, req: &'a Req<Value, Ref, RefMut>) -> BoxFuture<'a, CallDecision> {
-        let pre_call_0 = self.0.pre_call(req);
-        let pre_call_1 = self.1.pre_call(req);
-
-        async move {
-            let guard_0 = match pre_call_0.await {
-                CallDecision::Pass => None,
-                CallDecision::Guard(guard) => Some(guard),
-                CallDecision::Drop => return CallDecision::Drop,
-            };
-
-            let guard_1 = match pre_call_1.await {
-                CallDecision::Pass => None,
-                CallDecision::Guard(guard) => Some(guard),
-                CallDecision::Drop => return CallDecision::Drop,
-            };
-
-            match (guard_0, guard_1) {
-                (None, None) => CallDecision::Pass,
-                (Some(guard0), None) => CallDecision::Guard(guard0),
-                (None, Some(guard1)) => CallDecision::Guard(guard1),
-                (Some(guard0), Some(guard1)) => CallDecision::Guard(Box::new(ChainedCallGuard(guard1, guard0))),
-            }
-        }
-        .boxed()
-    }
-}
-
-struct ChainedCallGuard(Box<dyn CallGuard>, Box<dyn CallGuard>);
-impl CallGuard for ChainedCallGuard {
-    fn failed(&mut self) {
-        self.0.failed();
-        self.1.failed();
-    }
-
-    fn response_failed(&mut self, err: &oneshot::RecvError) {
-        self.0.response_failed(err);
-        self.1.response_failed(err);
     }
 }
 
@@ -1033,8 +669,8 @@ where
     /// for example a client on a remote endpoint that sent the request receiver here.
     ///
     /// Requests that are already queued in the request receiver are processed by the
-    /// server. A [request receiver monitor](ReqReceiverMonitor) set on the request
-    /// receiver is converted into a [server monitor](ServerMonitor) and kept.
+    /// server. A [request receiver monitor](monitor::ReqReceiverMonitor) set on the request
+    /// receiver is converted into a [server monitor](monitor::ServerMonitor) and kept.
     fn from_req_receiver(target: Target, req_rx: Self::ReqReceiver) -> Self;
 
     /// Serves the target object.
@@ -1077,8 +713,8 @@ where
     /// for example a client on a remote endpoint that sent the request receiver here.
     ///
     /// Requests that are already queued in the request receiver are processed by the
-    /// server. A [request receiver monitor](ReqReceiverMonitor) set on the request
-    /// receiver is converted into a [server monitor](ServerMonitor) and kept.
+    /// server. A [request receiver monitor](monitor::ReqReceiverMonitor) set on the request
+    /// receiver is converted into a [server monitor](monitor::ServerMonitor) and kept.
     fn from_req_receiver(target: &'target Target, req_rx: Self::ReqReceiver) -> Self;
 
     /// Serves the target object.
@@ -1119,8 +755,8 @@ where
     /// for example a client on a remote endpoint that sent the request receiver here.
     ///
     /// Requests that are already queued in the request receiver are processed by the
-    /// server. A [request receiver monitor](ReqReceiverMonitor) set on the request
-    /// receiver is converted into a [server monitor](ServerMonitor) and kept.
+    /// server. A [request receiver monitor](monitor::ReqReceiverMonitor) set on the request
+    /// receiver is converted into a [server monitor](monitor::ServerMonitor) and kept.
     fn from_req_receiver(target: &'target mut Target, req_rx: Self::ReqReceiver) -> Self;
 
     /// Serves the target object.
@@ -1162,8 +798,8 @@ where
     /// for example a client on a remote endpoint that sent the request receiver here.
     ///
     /// Requests that are already queued in the request receiver are processed by the
-    /// server. A [request receiver monitor](ReqReceiverMonitor) set on the request
-    /// receiver is converted into a [server monitor](ServerMonitor) and kept.
+    /// server. A [request receiver monitor](monitor::ReqReceiverMonitor) set on the request
+    /// receiver is converted into a [server monitor](monitor::ServerMonitor) and kept.
     fn from_req_receiver(target: Arc<Target>, req_rx: Self::ReqReceiver) -> Self;
 
     /// The maximum number of calls that are dispatched concurrently.
@@ -1221,8 +857,8 @@ where
     /// for example a client on a remote endpoint that sent the request receiver here.
     ///
     /// Requests that are already queued in the request receiver are processed by the
-    /// server. A [request receiver monitor](ReqReceiverMonitor) set on the request
-    /// receiver is converted into a [server monitor](ServerMonitor) and kept.
+    /// server. A [request receiver monitor](monitor::ReqReceiverMonitor) set on the request
+    /// receiver is converted into a [server monitor](monitor::ServerMonitor) and kept.
     fn from_req_receiver(target: Arc<tokio::sync::RwLock<Target>>, req_rx: Self::ReqReceiver) -> Self;
 
     /// The maximum number of calls that are dispatched concurrently.
@@ -1258,7 +894,7 @@ where
 ///
 /// Unlike the other server types, a request receiver can be sent to a remote endpoint,
 /// which then handles the requests of the client. Any [request receiver
-/// monitor](ReqReceiverMonitor) that was set is not transferred and must be set again
+/// monitor](monitor::ReqReceiverMonitor) that was set is not transferred and must be set again
 /// on the receiving endpoint.
 ///
 /// A request receiver can also be turned into any other server variant, which then
@@ -1384,11 +1020,11 @@ where
     ///
     /// # Monitors
     ///
-    /// Each request passes through the [request receiver monitor](ReqReceiverMonitor)
+    /// Each request passes through the [request receiver monitor](monitor::ReqReceiverMonitor)
     /// of this request receiver, if one is set, and then through the
-    /// [client monitor](ClientMonitor) of `client`, if one is set.
+    /// [client monitor](monitor::ClientMonitor) of `client`, if one is set.
     ///
-    /// A [call guard](CallGuard) returned by its client monitor is released
+    /// A [call guard](monitor::CallGuard) returned by its client monitor is released
     /// after forwarding instead of being held until the request has been processed.
     ///
     /// The maximum response size of `client` does not apply.
@@ -1410,7 +1046,7 @@ where
 ///
 /// This is created by [`ReqReceiver::into_stream`] and yields the requests
 /// returned by [`ReqReceiver::recv`]. Each request passes through the
-/// [request receiver monitor](ReqReceiverMonitor), if one is set.
+/// [request receiver monitor](monitor::ReqReceiverMonitor), if one is set.
 pub struct ReqReceiverStream<R, Codec>
 where
     R: ReqReceiver<Codec> + Send + 'static,
@@ -1481,376 +1117,6 @@ where
 
 impl<R, Codec> Unpin for ReqReceiverStream<R, Codec> where R: ReqReceiver<Codec> + Send + 'static {}
 
-/// Allows setting the [server monitor](ServerMonitor) on a [server](ServerBase).
-pub trait MonitorableServer {
-    /// Type of request by value (`self`).
-    type Value: ReqEnum;
-    /// Type of request by reference (`&self`).
-    type Ref: ReqEnum;
-    /// Type of request by mutable reference (`&mut self`).
-    type RefMut: ReqEnum;
-
-    /// Sets the [server monitor](ServerMonitor).
-    fn set_monitor(&mut self, monitor: impl ServerMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static);
-}
-
-/// Allows monitoring each request a server handles.
-pub trait ServerMonitor<Value, Ref, RefMut>: Send
-where
-    Value: ReqEnum,
-    Ref: ReqEnum,
-    RefMut: ReqEnum,
-{
-    /// Called for each request before dispatch to its handling method.
-    ///
-    /// The function can inspect the request and decide whether it should be
-    /// handled, dropped or the server should fail with a custom error.
-    fn pre_dispatch<'a>(
-        &'a mut self, req: &'a Result<Option<Req<Value, Ref, RefMut>>, mpsc::RecvError>,
-    ) -> BoxFuture<'a, DispatchDecision>;
-}
-
-/// Allows setting the [request receiver monitor](ReqReceiverMonitor) on a
-/// [request receiver](ReqReceiver).
-pub trait MonitorableReqReceiver {
-    /// Type of request by value (`self`).
-    type Value: ReqEnum;
-    /// Type of request by reference (`&self`).
-    type Ref: ReqEnum;
-    /// Type of request by mutable reference (`&mut self`).
-    type RefMut: ReqEnum;
-
-    /// Sets the [request receiver monitor](ReqReceiverMonitor).
-    fn set_monitor(&mut self, monitor: impl ReqReceiverMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static);
-}
-
-/// Allows monitoring each request a [request receiver](ReqReceiver) receives.
-///
-/// Unlike a [server monitor](ServerMonitor), it cannot guard a request or stop
-/// the receiver with a custom error; it can only let a request [pass](RecvDecision::Pass)
-/// or [drop](RecvDecision::Drop) it.
-pub trait ReqReceiverMonitor<Value, Ref, RefMut>: Send
-where
-    Value: ReqEnum,
-    Ref: ReqEnum,
-    RefMut: ReqEnum,
-{
-    /// Called for each received request before it is returned from
-    /// [`ReqReceiver::recv`].
-    ///
-    /// The function can inspect the request and decide whether it should be
-    /// returned to the caller or dropped.
-    fn pre_recv<'a>(
-        &'a mut self, req: &'a Result<Option<Req<Value, Ref, RefMut>>, mpsc::RecvError>,
-    ) -> BoxFuture<'a, RecvDecision>;
-}
-
-impl<A, B, Value, Ref, RefMut> ReqReceiverMonitor<Value, Ref, RefMut> for ChainedMonitor<A, B>
-where
-    A: ReqReceiverMonitor<Value, Ref, RefMut>,
-    B: ReqReceiverMonitor<Value, Ref, RefMut>,
-    Value: ReqEnum,
-    Ref: ReqEnum,
-    RefMut: ReqEnum,
-{
-    fn pre_recv<'a>(
-        &'a mut self, req: &'a Result<Option<Req<Value, Ref, RefMut>>, mpsc::RecvError>,
-    ) -> BoxFuture<'a, RecvDecision> {
-        let pre_recv_0 = self.0.pre_recv(req);
-        let pre_recv_1 = self.1.pre_recv(req);
-
-        async move {
-            match pre_recv_0.await {
-                RecvDecision::Pass => (),
-                RecvDecision::Drop => return RecvDecision::Drop,
-            }
-
-            pre_recv_1.await
-        }
-        .boxed()
-    }
-}
-
-/// Decision on how a received request should be processed made by the
-/// [request receiver monitor](ReqReceiverMonitor).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RecvDecision {
-    /// Return the request to the caller of [`ReqReceiver::recv`].
-    Pass,
-    /// Drop the request and receive the next one.
-    ///
-    /// The client-side method fails with [`CallError::Dropped`].
-    Drop,
-}
-
-impl<A, B, Value, Ref, RefMut> ServerMonitor<Value, Ref, RefMut> for ChainedMonitor<A, B>
-where
-    A: ServerMonitor<Value, Ref, RefMut>,
-    B: ServerMonitor<Value, Ref, RefMut>,
-    Value: ReqEnum,
-    Ref: ReqEnum,
-    RefMut: ReqEnum,
-{
-    fn pre_dispatch<'a>(
-        &'a mut self, req: &'a Result<Option<Req<Value, Ref, RefMut>>, mpsc::RecvError>,
-    ) -> BoxFuture<'a, DispatchDecision> {
-        let pre_dispatch_0 = self.0.pre_dispatch(req);
-        let pre_dispatch_1 = self.1.pre_dispatch(req);
-
-        async move {
-            let guard_0 = match pre_dispatch_0.await {
-                DispatchDecision::Pass => None,
-                DispatchDecision::Guard(guard) => Some(guard),
-                DispatchDecision::Drop => return DispatchDecision::Drop,
-                DispatchDecision::Error(err) => return DispatchDecision::Error(err),
-            };
-
-            let guard_1 = match pre_dispatch_1.await {
-                DispatchDecision::Pass => None,
-                DispatchDecision::Guard(guard) => Some(guard),
-                DispatchDecision::Drop => return DispatchDecision::Drop,
-                DispatchDecision::Error(err) => return DispatchDecision::Error(err),
-            };
-
-            match (guard_0, guard_1) {
-                (None, None) => DispatchDecision::Pass,
-                (Some(guard0), None) => DispatchDecision::Guard(guard0),
-                (None, Some(guard1)) => DispatchDecision::Guard(guard1),
-                (Some(guard0), Some(guard1)) => {
-                    DispatchDecision::Guard(Box::new(ChainedDispatchGuard(guard1, guard0)))
-                }
-            }
-        }
-        .boxed()
-    }
-}
-
-struct ChainedDispatchGuard(Box<dyn DispatchGuard>, Box<dyn DispatchGuard>);
-impl DispatchGuard for ChainedDispatchGuard {
-    fn failed(&mut self) {
-        self.0.failed();
-        self.1.failed();
-    }
-}
-
-/// Request dispatch guard.
-///
-/// It is held until the guarded request is processed and then dropped.
-pub trait DispatchGuard: Send {
-    /// Notifies the request dispatch guard that the called method returned
-    /// an error.
-    fn failed(&mut self) {}
-}
-
-/// Decision on how a request should be processed made by the [server monitor](ServerMonitor).
-pub enum DispatchDecision {
-    /// Process the request normally.
-    ///
-    /// In case of the server monitor, the request is dispatched to the corresponding
-    /// function of the remotable trait implementation.
-    Pass,
-    /// Guard the request and process it normally.
-    ///
-    /// The request is processed as if [`Pass`](Self::Pass) is specified.
-    /// However, the supplied [`DispatchGuard`] is held during processing and dropped
-    /// once the request is finished.
-    Guard(Box<dyn DispatchGuard>),
-    /// Drop the request.
-    ///
-    /// The client-side method fails with [`CallError::Dropped`].
-    Drop,
-    /// Stop serving and fail returning [`ServeError::Monitor`].
-    Error(Box<dyn Error + Send>),
-}
-
-impl fmt::Debug for DispatchDecision {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Pass => write!(f, "Pass"),
-            Self::Guard(_) => write!(f, "Guard"),
-            Self::Drop => write!(f, "Drop"),
-            Self::Error(err) => f.debug_tuple("Error").field(err).finish(),
-        }
-    }
-}
-
-#[macro_export]
-#[doc(hidden)]
-macro_rules! server_monitor_pre_dispatch {
-    ($monitor:expr, $req:expr) => {
-        match $monitor.pre_dispatch(&$req).await {
-            ::remoc::rtc::DispatchDecision::Pass => ::std::boxed::Box::new(::remoc::rtc::DefaultGuard),
-            ::remoc::rtc::DispatchDecision::Guard(guard) => guard,
-            ::remoc::rtc::DispatchDecision::Drop => {
-                match &$req {
-                    Ok(None) => (),
-                    Err(err) if err.is_disconnected() => (),
-                    _ => continue,
-                }
-                ::std::boxed::Box::new(::remoc::rtc::DefaultGuard)
-            }
-            ::remoc::rtc::DispatchDecision::Error(err) => return Err(::remoc::rtc::ServeError::Monitor(err)),
-        }
-    };
-    ($monitor:expr, $req:expr, $target:expr) => {
-        match $monitor.pre_dispatch(&$req).await {
-            ::remoc::rtc::DispatchDecision::Pass => ::std::boxed::Box::new(::remoc::rtc::DefaultGuard),
-            ::remoc::rtc::DispatchDecision::Guard(guard) => guard,
-            ::remoc::rtc::DispatchDecision::Drop => {
-                match &$req {
-                    Ok(None) => (),
-                    Err(err) if err.is_disconnected() => (),
-                    _ => continue,
-                }
-                ::std::boxed::Box::new(::remoc::rtc::DefaultGuard)
-            }
-            ::remoc::rtc::DispatchDecision::Error(err) => {
-                return (Some($target), Err(::remoc::rtc::ServeError::Monitor(err)))
-            }
-        }
-    };
-}
-#[doc(hidden)]
-pub use crate::server_monitor_pre_dispatch;
-
-#[macro_export]
-#[doc(hidden)]
-macro_rules! req_receiver_monitor_pre_recv {
-    ($monitor:expr, $req:expr) => {
-        match $monitor.pre_recv(&$req).await {
-            ::remoc::rtc::RecvDecision::Pass => (),
-            ::remoc::rtc::RecvDecision::Drop => match &$req {
-                Ok(None) => (),
-                Err(err) if err.is_disconnected() => (),
-                _ => continue,
-            },
-        }
-    };
-}
-#[doc(hidden)]
-pub use crate::req_receiver_monitor_pre_recv;
-
-/// The default [client](ClientMonitor) and [server](ServerMonitor).
-///
-/// It passes all requests.
-#[doc(hidden)]
-#[derive(Debug, Default)]
-pub struct DefaultMonitor;
-
-impl<Value, Ref, RefMut> ClientMonitor<Value, Ref, RefMut> for DefaultMonitor
-where
-    Value: ReqEnum,
-    Ref: ReqEnum,
-    RefMut: ReqEnum,
-{
-    fn pre_call<'a>(&self, req: &'a Req<Value, Ref, RefMut>) -> BoxFuture<'a, CallDecision> {
-        let _ = req;
-        std::future::ready(CallDecision::Pass).boxed()
-    }
-}
-
-impl<Value, Ref, RefMut> ServerMonitor<Value, Ref, RefMut> for DefaultMonitor
-where
-    Value: ReqEnum,
-    Ref: ReqEnum,
-    RefMut: ReqEnum,
-{
-    fn pre_dispatch<'a>(
-        &mut self, req: &'a Result<Option<Req<Value, Ref, RefMut>>, mpsc::RecvError>,
-    ) -> BoxFuture<'a, DispatchDecision> {
-        let _ = req;
-        std::future::ready(DispatchDecision::Pass).boxed()
-    }
-}
-
-impl<Value, Ref, RefMut> ReqReceiverMonitor<Value, Ref, RefMut> for DefaultMonitor
-where
-    Value: ReqEnum,
-    Ref: ReqEnum,
-    RefMut: ReqEnum,
-{
-    fn pre_recv<'a>(
-        &mut self, req: &'a Result<Option<Req<Value, Ref, RefMut>>, mpsc::RecvError>,
-    ) -> BoxFuture<'a, RecvDecision> {
-        let _ = req;
-        std::future::ready(RecvDecision::Pass).boxed()
-    }
-}
-
-#[doc(hidden)]
-pub fn default_client_monitor<Value, Ref, RefMut>() -> Arc<dyn ClientMonitor<Value, Ref, RefMut>>
-where
-    Value: ReqEnum,
-    Ref: ReqEnum,
-    RefMut: ReqEnum,
-{
-    Arc::new(DefaultMonitor)
-}
-
-#[doc(hidden)]
-pub fn default_req_receiver_monitor<Value, Ref, RefMut>() -> Box<dyn ReqReceiverMonitor<Value, Ref, RefMut>>
-where
-    Value: ReqEnum,
-    Ref: ReqEnum,
-    RefMut: ReqEnum,
-{
-    Box::new(DefaultMonitor)
-}
-
-/// Adapts a [request receiver monitor](ReqReceiverMonitor) into a
-/// [server monitor](ServerMonitor).
-///
-/// Both are invoked at the same point of the request pipeline and
-/// [`RecvDecision`] is a subset of [`DispatchDecision`], thus every decision
-/// can be translated.
-struct ReqReceiverMonitorAsServerMonitor<Value, Ref, RefMut>(Box<dyn ReqReceiverMonitor<Value, Ref, RefMut>>);
-
-impl<Value, Ref, RefMut> ServerMonitor<Value, Ref, RefMut>
-    for ReqReceiverMonitorAsServerMonitor<Value, Ref, RefMut>
-where
-    Value: ReqEnum,
-    Ref: ReqEnum,
-    RefMut: ReqEnum,
-{
-    fn pre_dispatch<'a>(
-        &'a mut self, req: &'a Result<Option<Req<Value, Ref, RefMut>>, mpsc::RecvError>,
-    ) -> BoxFuture<'a, DispatchDecision> {
-        let pre_recv = self.0.pre_recv(req);
-
-        async move {
-            match pre_recv.await {
-                RecvDecision::Pass => DispatchDecision::Pass,
-                RecvDecision::Drop => DispatchDecision::Drop,
-            }
-        }
-        .boxed()
-    }
-}
-
-/// Converts the monitor of a [request receiver](ReqReceiver) into the monitor of a
-/// server, when the request receiver is converted into a server.
-#[doc(hidden)]
-pub fn req_receiver_monitor_as_server_monitor<Value, Ref, RefMut>(
-    monitor: Box<dyn ReqReceiverMonitor<Value, Ref, RefMut>>,
-) -> Box<dyn ServerMonitor<Value, Ref, RefMut>>
-where
-    Value: ReqEnum + 'static,
-    Ref: ReqEnum + 'static,
-    RefMut: ReqEnum + 'static,
-{
-    Box::new(ReqReceiverMonitorAsServerMonitor(monitor))
-}
-
-/// The default [call](CallGuard) and [dispatch](DispatchGuard).
-///
-/// It does nothing.
-#[doc(hidden)]
-#[derive(Debug, Default)]
-pub struct DefaultGuard;
-
-impl CallGuard for DefaultGuard {}
-impl DispatchGuard for DefaultGuard {}
-
 /// An error that terminates an RTC server.
 ///
 /// Individual application errors returned by trait methods are sent to the
@@ -1865,7 +1131,7 @@ pub enum ServeError {
     ///
     /// This can only occur while [forwarding](ReqReceiver::forward) requests.
     Forward(mpsc::SendError<()>),
-    /// Server failed because [server monitor](ServerMonitor) returned [`DispatchDecision::Error`].
+    /// Server failed because [server monitor](monitor::ServerMonitor) returned [`DispatchDecision::Error`](monitor::DispatchDecision::Error).
     Monitor(Box<dyn Error + Send>),
     /// A call failed and the caller requested the server to stop serving in that case.
     CallFailed {
@@ -1911,24 +1177,6 @@ impl fmt::Display for ServeError {
 }
 
 impl Error for ServeError {}
-
-impl From<ServeError> for CallError {
-    fn from(err: ServeError) -> Self {
-        match err {
-            ServeError::ReqReceive(err) => match err {
-                mpsc::RecvError::Receive(err) => Self::Receive(err),
-                mpsc::RecvError::Connect(err) => Self::Connect(err),
-                mpsc::RecvError::Listen(err) => Self::Listen(err),
-                mpsc::RecvError::Remote(_) => Self::Forward,
-            },
-            ServeError::ResponseSend(SendingErrorKind::Send(err)) => Self::Send(err),
-            ServeError::ResponseSend(SendingErrorKind::Dropped) => Self::Dropped,
-            ServeError::Forward(err) => Self::from(err),
-            ServeError::Monitor(_) => Self::Forward,
-            ServeError::CallFailed { .. } => Self::Forward,
-        }
-    }
-}
 
 // Re-exports for proc macro usage.
 #[doc(hidden)]

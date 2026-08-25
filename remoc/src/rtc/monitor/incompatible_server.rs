@@ -11,7 +11,8 @@ use wokio::time::{Instant, sleep};
 
 use crate::{
     rch::oneshot,
-    rtc::{CallDecision, CallGuard, ClientMonitor, Req, ReqEnum},
+    rtc::monitor::{CallDecision, CallGuard, ClientMonitor},
+    rtc::{Req, ReqEnum},
 };
 
 /// Shared state for [`IncompatibleServerMonitor`].
@@ -87,7 +88,7 @@ impl State {
 /// failures occur within [`10 seconds`](Self::DEFAULT_WINDOW).
 ///
 /// Install it on a client via
-/// [`set_monitor`](crate::rtc::MonitorableClient::set_monitor).
+/// [`set_monitor`](crate::rtc::monitor::MonitorableClient::set_monitor).
 #[derive(Debug)]
 pub struct IncompatibleServerMonitor {
     log_level: Option<Level>,

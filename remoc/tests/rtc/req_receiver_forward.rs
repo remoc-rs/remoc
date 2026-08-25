@@ -13,7 +13,8 @@ use tokio::sync::RwLock;
 
 use remoc::{
     prelude::*,
-    rtc::{CallDecision, CallError, ClientMonitor, RecvDecision, Req, ReqReceiverMonitor},
+    rtc::monitor::{CallDecision, ClientMonitor, RecvDecision, ReqReceiverMonitor},
+    rtc::{CallError, Req},
 };
 
 use crate::loop_channel;

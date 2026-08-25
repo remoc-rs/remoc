@@ -14,9 +14,11 @@ use futures::{FutureExt, future::BoxFuture};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use remoc::rtc::{
-    CallDecision, ChainedMonitor, ClientMonitor, DispatchDecision, DispatchGuard, MonitorableClient,
-    MonitorableReqReceiver, MonitorableServer, RecvDecision, Req, ReqReceiver, ReqReceiverMonitor, ServeError,
-    Server, ServerMonitor, ServerShared,
+    Req, ReqReceiver, ServeError, Server, ServerShared,
+    monitor::{
+        CallDecision, ChainedMonitor, ClientMonitor, DispatchDecision, DispatchGuard, MonitorableClient,
+        MonitorableReqReceiver, MonitorableServer, RecvDecision, ReqReceiverMonitor, ServerMonitor,
+    },
 };
 
 use crate::loop_channel;

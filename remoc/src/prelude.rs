@@ -63,7 +63,11 @@ pub use crate::rtc;
 
 #[cfg(feature = "rtc")]
 #[doc(no_inline)]
+pub use crate::rtc::monitor::{MonitorableClient, MonitorableReqReceiver, MonitorableServer};
+
+#[cfg(feature = "rtc")]
+#[doc(no_inline)]
 pub use crate::rtc::{
-    CallFutureExt, Client, MonitorableClient, MonitorableReqReceiver, MonitorableServer, ReqReceiver, Server,
-    ServerBase, ServerRef, ServerRefMut, ServerShared, ServerSharedMut,
+    CallFutureExt, Client, ReqReceiver, Server, ServerBase, ServerRef, ServerRefMut, ServerShared,
+    ServerSharedMut,
 };

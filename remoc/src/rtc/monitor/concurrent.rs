@@ -7,7 +7,8 @@ use tracing::Level;
 
 use crate::{
     rch,
-    rtc::{DispatchDecision, DispatchGuard, Req, ReqEnum, ServerMonitor},
+    rtc::monitor::{DispatchDecision, DispatchGuard, ServerMonitor},
+    rtc::{Req, ReqEnum},
 };
 
 /// A [server monitor](ServerMonitor) that limits the number of concurrent requests from clients.
@@ -18,7 +19,7 @@ use crate::{
 /// in the order they arrive.
 ///
 /// Construct a monitor using [`new`](Self::new) and install it on a server with
-/// [`set_monitor`](super::super::MonitorableServer::set_monitor).
+/// [`set_monitor`](super::MonitorableServer::set_monitor).
 ///
 /// # Clone
 /// Cloning the monitor produces a handle that shares the same concurrency limit,

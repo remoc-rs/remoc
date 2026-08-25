@@ -8,7 +8,8 @@ use wokio::time::{Instant, sleep};
 
 use crate::{
     rch,
-    rtc::{DispatchDecision, RecvDecision, Req, ReqEnum, ReqReceiverMonitor, ServerMonitor},
+    rtc::monitor::{DispatchDecision, RecvDecision, ReqReceiverMonitor, ServerMonitor},
+    rtc::{Req, ReqEnum},
 };
 
 /// A [server monitor](ServerMonitor) that rate-limits requests from clients.
@@ -19,7 +20,7 @@ use crate::{
 /// the order they arrive.
 ///
 /// Construct a monitor using [`new`](Self::new) and install it on a server with
-/// [`set_monitor`](super::super::MonitorableServer::set_monitor).
+/// [`set_monitor`](super::MonitorableServer::set_monitor).
 ///
 /// # Clone
 /// Cloning the monitor produces a handle that shares the same rate limit, i.e.

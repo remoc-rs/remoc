@@ -7,7 +7,8 @@ use wokio::time::Instant;
 
 use crate::{
     rch::mpsc,
-    rtc::{DispatchDecision, RecvDecision, Req, ReqEnum, ReqReceiverMonitor, ServerMonitor},
+    rtc::monitor::{DispatchDecision, RecvDecision, ReqReceiverMonitor, ServerMonitor},
+    rtc::{Req, ReqEnum},
 };
 
 /// Error returned by [`IncompatibleClientMonitor`] when too many requests fail
@@ -56,7 +57,7 @@ impl Error for IncompatibleClientLimitExceeded {}
 /// receive within [`10 seconds`](Self::DEFAULT_WINDOW).
 ///
 /// Install it on a server via
-/// [`set_monitor`](crate::rtc::MonitorableServer::set_monitor).
+/// [`set_monitor`](crate::rtc::monitor::MonitorableServer::set_monitor).
 #[derive(Debug)]
 pub struct IncompatibleClientMonitor {
     log_level: Option<Level>,

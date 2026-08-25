@@ -66,7 +66,7 @@
 //!
 //! The request receiver is also a server. However, instead of invoking the trait methods
 //! on a target object, it allows you to process each request as a message and send the result
-//! via a oneshot reply channel.
+//! via a oneshot response channel.
 //!
 //! Unlike the other server types, the request receiver can itself be sent to a remote
 //! endpoint, which then handles the requests of the client.
@@ -186,7 +186,7 @@
 //! new methods using the compact representation can be added to an existing trait
 //! without affecting its other methods.
 //!
-//! The name `_59` is reserved for the reply channel of a request and cannot be used.
+//! The name `_59` is reserved for the response channel of a request and cannot be used.
 //! It is only used when the corresponding method is renamed.
 //!
 //! # Alternatives
@@ -308,10 +308,14 @@ pub mod monitor;
 mod calls;
 pub use calls::calls;
 
-mod reply;
-pub use reply::ReplySender;
+mod response;
+pub use response::ResponseSender;
 #[doc(hidden)]
-pub use reply::{Completing, IsPipelinableReply, IsReply, PipelinableReplyTo, Reply, ReplyTo, reply_channel};
+pub use response::{
+    Completing, PipelinableResponder, PipelinableResponse, Responder, Response, ResponseErrorSender,
+    TransportedResponse, complete_call, missing_max_response_size, response_channel, response_error_channel,
+    serde_max_response_size,
+};
 
 use futures::future::BoxFuture;
 use std::{
@@ -325,7 +329,7 @@ use std::{
 use tokio_util::sync::ReusableBoxFuture;
 
 use crate::{
-    RemoteSend, chmux, codec,
+    RemoteSend, chmux,
     rch::{DEFAULT_BUFFER, SendingError, SendingErrorKind, base, mpsc, oneshot},
 };
 
@@ -448,21 +452,21 @@ pub enum CallError {
     NotServed,
     /// Processing the request failed.
     ///
-    /// The request was accepted but no reply arrived. The server may have panicked
-    /// while handling it, sending the reply may have failed on the server side, or
+    /// The request was accepted but no response arrived. The server may have panicked
+    /// while handling it, sending the response may have failed on the server side, or
     /// the request may have been dropped by a client or server monitor.
     Dropped,
     /// Encoding or transferring the request failed; see [`base::SendErrorKind`].
     Send(base::SendErrorKind),
-    /// Receiving or decoding the reply failed; see [`base::RecvError`].
+    /// Receiving or decoding the response failed; see [`base::RecvError`].
     Receive(base::RecvError),
-    /// Opening a channel carried by the request or reply failed; see [`chmux::ConnectError`].
+    /// Opening a channel carried by the request or response failed; see [`chmux::ConnectError`].
     Connect(chmux::ConnectError),
-    /// Preparing a channel carried by the request or reply failed; see [`chmux::ListenerError`].
+    /// Preparing a channel carried by the request or response failed; see [`chmux::ListenerError`].
     Listen(chmux::ListenerError),
-    /// An endpoint forwarding the call or reply could not complete the transfer.
+    /// An endpoint forwarding the call or response could not complete the transfer.
     Forward,
-    /// A failure was reported by an endpoint forwarding the call or reply.
+    /// A failure was reported by an endpoint forwarding the call or response.
     ///
     /// The nested error is [`None`] when that endpoint reported a newer error
     /// variant that this version of Remoc does not recognize.
@@ -657,11 +661,11 @@ pub trait Client {
     /// if this client has been received from a remote endpoint.
     fn set_max_request_size(&mut self, max_request_size: usize);
 
-    /// The maximum allowed size of a reply in bytes.
-    fn max_reply_size(&self) -> usize;
+    /// The maximum allowed size of a response in bytes.
+    fn max_response_size(&self) -> usize;
 
-    /// Sets the maximum allowed size of a reply in bytes.
-    fn set_max_reply_size(&mut self, max_reply_size: usize);
+    /// Sets the maximum allowed size of a response in bytes.
+    fn set_max_response_size(&mut self, max_response_size: usize);
 
     /// Whether the server processes the calls of this client one after another.
     ///
@@ -694,7 +698,7 @@ pub trait Client {
 ///
 /// Starting several calls before awaiting their results avoids one round trip per
 /// call, since the requests are transferred to the server without waiting for the
-/// reply of the preceding one. The requests are transferred in the order the calls
+/// response of the preceding one. The requests are transferred in the order the calls
 /// were started.
 ///
 /// Dropping this without awaiting it cancels the call, unless the method is marked
@@ -902,9 +906,9 @@ pub trait CallGuard: Send {
     /// an error.
     fn failed(&mut self) {}
 
-    /// Notifies the request call guard that receiving the reply from the
+    /// Notifies the request call guard that receiving the response from the
     /// server failed.
-    fn reply_failed(&mut self, err: &oneshot::RecvError) {
+    fn response_failed(&mut self, err: &oneshot::RecvError) {
         let _ = err;
     }
 }
@@ -926,7 +930,7 @@ pub trait CallGuard: Send {
 ///  * Otherwise the request passes. Any guard produced by either monitor is held for
 ///    the duration of the request and released once it finishes. Guards are released
 ///    in reverse order, i.e. `self.1`'s guard is dropped before `self.0`'s, and guard
-///    notifications ([`failed`](CallGuard::failed), [`reply_failed`](CallGuard::reply_failed)
+///    notifications ([`failed`](CallGuard::failed), [`response_failed`](CallGuard::response_failed)
 ///    and [`failed`](DispatchGuard::failed)) are forwarded to both.
 ///
 /// Because evaluation is sequential and short-circuits, the order matters for monitors
@@ -978,9 +982,9 @@ impl CallGuard for ChainedCallGuard {
         self.1.failed();
     }
 
-    fn reply_failed(&mut self, err: &oneshot::RecvError) {
-        self.0.reply_failed(err);
-        self.1.reply_failed(err);
+    fn response_failed(&mut self, err: &oneshot::RecvError) {
+        self.0.response_failed(err);
+        self.1.response_failed(err);
     }
 }
 
@@ -1250,7 +1254,7 @@ where
 /// Receives remote method calls as values instead of dispatching them to a target.
 ///
 /// This is useful when requests need custom scheduling, routing, persistence, or
-/// authorization. Every request contains a one-shot reply sender that must be used
+/// authorization. Every request contains a one-shot response sender that must be used
 /// to complete the corresponding client call.
 ///
 /// Unlike the other server types, a request receiver can be sent to a remote endpoint,
@@ -1290,12 +1294,12 @@ where
 ///     let mut value = 0;
 ///     while let Some(req) = req_rx.recv().await.unwrap() {
 ///         match req {
-///             Req::Ref(CounterReqRef::Value { __reply_tx }) => {
-///                 let _ = __reply_tx.send(Ok(value));
+///             Req::Ref(CounterReqRef::Value { __responder }) => {
+///                 let _ = __responder.send(Ok(value));
 ///             }
-///             Req::RefMut(CounterReqRefMut::Increase { __reply_tx, by }) => {
+///             Req::RefMut(CounterReqRefMut::Increase { __responder, by }) => {
 ///                 value += by;
-///                 let _ = __reply_tx.send(Ok(()));
+///                 let _ = __responder.send(Ok(()));
 ///             }
 ///             _ => (),
 ///         }
@@ -1344,8 +1348,8 @@ where
     /// Handle the request by first matching on the [`Req::Value`], [`Req::Ref`]
     /// and [`Req::RefMut`] variants, which group the methods by how they take
     /// `self`, and then on the variants of the contained per-kind request enum,
-    /// one per method. Reply with the result on the oneshot sender provided in
-    /// the `__reply_tx` field of each method variant.
+    /// one per method. Response with the result on the oneshot sender provided in
+    /// the `__responder` field of each method variant.
     ///
     /// Returns `Ok(None)` after all clients have been dropped and all queued
     /// requests have been received.
@@ -1388,7 +1392,7 @@ where
     /// A [call guard](CallGuard) returned by its client monitor is released
     /// after forwarding instead of being held until the request has been processed.
     ///
-    /// The maximum reply size of `client` does not apply.
+    /// The maximum response size of `client` does not apply.
     fn forward(
         self, client: Self::Client,
     ) -> impl Future<Output = Result<Option<Self::Client>, ServeError>> + Send;
@@ -1856,8 +1860,8 @@ impl DispatchGuard for DefaultGuard {}
 pub enum ServeError {
     /// Receiving a request from the client failed.
     ReqReceive(mpsc::RecvError),
-    /// Sending a reply to the client failed,
-    ReplySend(SendingErrorKind),
+    /// Sending a response to the client failed,
+    ResponseSend(SendingErrorKind),
     /// Forwarding a request to another client failed.
     ///
     /// This can only occur while [forwarding](ReqReceiver::forward) requests.
@@ -1879,13 +1883,13 @@ impl From<mpsc::RecvError> for ServeError {
 
 impl<T> From<SendingError<T>> for ServeError {
     fn from(err: SendingError<T>) -> Self {
-        Self::ReplySend(err.kind())
+        Self::ResponseSend(err.kind())
     }
 }
 
 impl From<SendingErrorKind> for ServeError {
     fn from(err: SendingErrorKind) -> Self {
-        Self::ReplySend(err)
+        Self::ResponseSend(err)
     }
 }
 
@@ -1899,7 +1903,7 @@ impl fmt::Display for ServeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::ReqReceive(err) => write!(f, "failed to receive RTC request: {err}"),
-            Self::ReplySend(err) => write!(f, "failed to send reply to RTC request: {err}"),
+            Self::ResponseSend(err) => write!(f, "failed to send response to RTC request: {err}"),
             Self::Forward(err) => write!(f, "failed to forward RTC request: {err}"),
             Self::Monitor(err) => write!(f, "failed by server monitor: {err}"),
             Self::CallFailed { method } => write!(f, "RTC call to {method} failed"),
@@ -1918,8 +1922,8 @@ impl From<ServeError> for CallError {
                 mpsc::RecvError::Listen(err) => Self::Listen(err),
                 mpsc::RecvError::Remote(_) => Self::Forward,
             },
-            ServeError::ReplySend(SendingErrorKind::Send(err)) => Self::Send(err),
-            ServeError::ReplySend(SendingErrorKind::Dropped) => Self::Dropped,
+            ServeError::ResponseSend(SendingErrorKind::Send(err)) => Self::Send(err),
+            ServeError::ResponseSend(SendingErrorKind::Dropped) => Self::Dropped,
             ServeError::Forward(err) => Self::from(err),
             ServeError::Monitor(_) => Self::Forward,
             ServeError::CallFailed { .. } => Self::Forward,
@@ -1928,6 +1932,12 @@ impl From<ServeError> for CallError {
 }
 
 // Re-exports for proc macro usage.
+#[doc(hidden)]
+pub use futures::future::FutureExt;
+#[doc(hidden)]
+pub use futures::stream::Stream;
+#[doc(hidden)]
+pub use futures::stream::StreamExt;
 #[doc(hidden)]
 pub use serde::{Deserialize, Serialize};
 #[doc(hidden)]
@@ -1939,17 +1949,9 @@ pub use tokio::sync::broadcast as local_broadcast;
 #[doc(hidden)]
 pub use tokio::sync::mpsc as local_mpsc;
 #[doc(hidden)]
-pub use wokio::task::spawn;
-#[doc(hidden)]
-pub type ReplyErrorSender = tokio::sync::mpsc::Sender<ServeError>;
-#[doc(hidden)]
-pub use futures::future::FutureExt;
-#[doc(hidden)]
-pub use futures::stream::Stream;
-#[doc(hidden)]
-pub use futures::stream::StreamExt;
-#[doc(hidden)]
 pub use tracing::Instrument;
+#[doc(hidden)]
+pub use wokio::task::spawn;
 
 /// Semaphore limiting the number of concurrently dispatched calls.
 #[doc(hidden)]
@@ -1965,87 +1967,8 @@ pub async fn acquire_dispatch_permit(
     std::sync::Arc::clone(semaphore).acquire_owned().await.expect("dispatch semaphore is never closed")
 }
 
-/// Create channel for queueing reply sending errors.
-#[doc(hidden)]
-pub fn reply_error_channel() -> (ReplyErrorSender, tokio::sync::mpsc::Receiver<ServeError>) {
-    tokio::sync::mpsc::channel(16)
-}
-
 /// Broadcast sender with no subscribers.
 #[doc(hidden)]
 pub fn empty_client_drop_tx() -> local_broadcast::Sender<()> {
     local_broadcast::channel(1).0
-}
-
-/// Missing maximum reply size value for backwards compatibility.
-#[doc(hidden)]
-pub const fn missing_max_reply_size() -> usize {
-    usize::MAX
-}
-
-/// Completes a call by replying to the request.
-#[doc(hidden)]
-pub async fn complete_call<R, Codec>(
-    reply_to: ReplyTo<R, Codec>, method: &'static str, err_tx: &ReplyErrorSender,
-    mut dispatch_guard: Box<dyn DispatchGuard>, result: R,
-) where
-    R: IsReply,
-    Reply<R>: RemoteSend,
-    Codec: codec::Codec,
-{
-    if result.is_error() {
-        dispatch_guard.failed();
-        if reply_to.stop_on_error() {
-            let _ = err_tx.send(ServeError::CallFailed { method }).await;
-        }
-    }
-
-    let Ok(sending) = reply_to.send(result) else { return };
-
-    let err_tx = err_tx.clone();
-    wokio::spawn(
-        async move {
-            if let Err(err) = sending.await {
-                let kind = err.kind();
-                match &kind {
-                    SendingErrorKind::Send(base::SendErrorKind::Send(_)) => return,
-                    SendingErrorKind::Dropped => return,
-                    _ => (),
-                }
-                let _ = err_tx.send(kind.into()).await;
-            }
-
-            drop(dispatch_guard);
-        }
-        .in_current_span(),
-    );
-}
-
-/// Serialization for `max_reply_size` field.
-#[doc(hidden)]
-pub mod serde_max_reply_size {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-    use std::borrow::Borrow;
-
-    /// Serialization function.
-    ///
-    /// This is generic over `T` so that it can also be used for a field holding
-    /// a reference, as used by the generated serialization types.
-    pub fn serialize<T, S>(max_reply_size: &T, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        T: Borrow<usize>,
-        S: Serializer,
-    {
-        let max_reply_size = u64::try_from(*max_reply_size.borrow()).unwrap_or(u64::MAX);
-        max_reply_size.serialize(serializer)
-    }
-
-    /// Deserialization function.
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<usize, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let max_reply_size = u64::deserialize(deserializer)?;
-        Ok(usize::try_from(max_reply_size).unwrap_or(usize::MAX))
-    }
 }

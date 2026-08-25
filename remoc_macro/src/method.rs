@@ -27,7 +27,7 @@ pub enum SelfRef {
     RefMut,
 }
 
-/// The numerical name reserved by remoc for the reply channel field within
+/// The numerical name reserved by remoc for the response channel field within
 /// generated request enums.
 const REPLY_TX_NAME: &str = "_59";
 
@@ -74,7 +74,7 @@ fn numerical_serde_rename(attrs: &[Attribute]) -> syn::Result<bool> {
                 let name: LitStr = value.parse()?;
 
                 // Reject the reserved name, since it would silently collide with
-                // the reply channel field of the generated request enum.
+                // the response channel field of the generated request enum.
                 if name.value() == REPLY_TX_NAME {
                     return Err(syn::Error::new(
                         name.span(),
@@ -510,13 +510,13 @@ impl TraitMethod {
     /// The return type of the twin method taking a request receiver.
     fn pipelined_ret_ty(&self, assoc: &[AssocType]) -> TokenStream {
         let ret_ty = remove_self_type(&self.ret_ty, assoc);
-        quote! { <#ret_ty as ::remoc::rtc::IsReply>::WithoutValue }
+        quote! { <#ret_ty as ::remoc::rtc::Response>::WithoutValue }
     }
 
     /// The type of the request receiver handed over to the twin method.
     fn pipelined_req_rx_ty(&self, assoc: &[AssocType]) -> TokenStream {
         let ret_ty = remove_self_type(&self.ret_ty, assoc);
-        quote! { <#ret_ty as ::remoc::rtc::IsPipelinableReply>::ReqReceiver }
+        quote! { <#ret_ty as ::remoc::rtc::PipelinableResponse>::ReqReceiver }
     }
 
     /// The bound the target object must satisfy so that the future of a twin method,
@@ -592,22 +592,22 @@ impl TraitMethod {
 
         // When the user renames the request enum variant or one of its fields to a
         // numerical identifier, they opted into the compact serialized representation
-        // for this method. Thus the reply channel field also uses the numerical name
+        // for this method. Thus the response channel field also uses the numerical name
         // reserved by remoc.
-        let reply_tx_rename = self.numerical_rename.then(|| quote! { #[serde(rename = #REPLY_TX_NAME)] });
+        let responder_rename = self.numerical_rename.then(|| quote! { #[serde(rename = #REPLY_TX_NAME)] });
 
-        let reply_tx_ty = if self.pipelinable {
-            quote! { ::remoc::rtc::PipelinableReplyTo<#ret_ty, Codec> }
+        let responder_ty = if self.pipelinable {
+            quote! { ::remoc::rtc::PipelinableResponder<#ret_ty, Codec> }
         } else {
-            quote! { ::remoc::rtc::ReplyTo<#ret_ty, Codec> }
+            quote! { ::remoc::rtc::Responder<#ret_ty, Codec> }
         };
 
         let mut entries = quote! {
-            #[doc="Reply channel for sending the result of the method invocation.\n\n"]
+            #[doc="Response channel for sending the result of the method invocation.\n\n"]
             #[doc="The channel is closed when the calling async method is cancelled "]
             #[doc="or a connection error occurs."]
-            #reply_tx_rename
-            __reply_tx: #reply_tx_ty,
+            #responder_rename
+            __responder: #responder_ty,
         };
 
         for NamedArg { attrs, ident, ty } in &self.args {
@@ -641,12 +641,12 @@ impl TraitMethod {
             args.append_all(quote! { #arg_ident, });
         }
 
-        // Invokes `method` with the request arguments and replies on `reply_tx`.
+        // Invokes `method` with the request arguments and replies on `responder`.
         //
         // `is_call` is true when the method returns a started call instead of the
         // result, which must then be awaited as well.
         let full_name = self.full_name_str();
-        let invoke = |method: TokenStream, reply_tx: TokenStream, extra_args: TokenStream, is_call: bool| {
+        let invoke = |method: TokenStream, responder: TokenStream, extra_args: TokenStream, is_call: bool| {
             let perform = if is_call {
                 quote! { async { #method(#args #extra_args).await.await } }
             } else {
@@ -657,38 +657,38 @@ impl TraitMethod {
                 quote! {
                     ::remoc::rtc::select! {
                         biased;
-                        () = #reply_tx.closed() => (),
+                        () = #responder.closed() => (),
                         result = #perform => {
-                            ::remoc::rtc::complete_call(#reply_tx, #full_name, &__err_tx, __guard, result).await;
+                            ::remoc::rtc::complete_call(#responder, #full_name, &__err_tx, __guard, result).await;
                         }
                     }
                 }
             } else {
                 quote! {
                     let result = #perform.await;
-                    ::remoc::rtc::complete_call(#reply_tx, #full_name, &__err_tx, __guard, result).await;
+                    ::remoc::rtc::complete_call(#responder, #full_name, &__err_tx, __guard, result).await;
                 }
             }
         };
 
         let call = if self.pipelinable {
             let pipelined_ident = self.pipelined_ident();
-            let normal = invoke(quote! { __target.#ident }, quote! { __reply_tx }, quote! {}, false);
+            let normal = invoke(quote! { __target.#ident }, quote! { __responder }, quote! {}, false);
             let pipeline =
-                invoke(quote! { __target.#pipelined_ident }, quote! { reply_tx }, quote! { req_rx, }, true);
+                invoke(quote! { __target.#pipelined_ident }, quote! { responder }, quote! { req_rx, }, true);
             quote! {
-                match __reply_tx {
-                    ::remoc::rtc::PipelinableReplyTo::Normal(__reply_tx) => { #normal }
-                    ::remoc::rtc::PipelinableReplyTo::Pipeline { req_rx, reply_tx } => { #pipeline }
+                match __responder {
+                    ::remoc::rtc::PipelinableResponder::Normal(__responder) => { #normal }
+                    ::remoc::rtc::PipelinableResponder::Pipeline { req_rx, responder } => { #pipeline }
                 }
             }
         } else {
-            invoke(quote! { __target.#ident }, quote! { __reply_tx }, quote! {}, false)
+            invoke(quote! { __target.#ident }, quote! { __responder }, quote! {}, false)
         };
 
         // Generate match clause.
         quote! {
-            Self :: #enum_ident { #args __reply_tx } => {
+            Self :: #enum_ident { #args __responder } => {
                 async move { #call }.boxed()
             },
         }
@@ -707,7 +707,7 @@ impl TraitMethod {
     pub fn sequential_clause(&self) -> TokenStream {
         let enum_ident = to_pascal_case(&self.ident);
         quote! {
-            Self :: #enum_ident { __reply_tx, .. } => __reply_tx.sequential(),
+            Self :: #enum_ident { __responder, .. } => __responder.sequential(),
         }
     }
 
@@ -735,12 +735,12 @@ impl TraitMethod {
             entries.append_all(quote! { #ident , });
         }
 
-        // A pipelinable method wraps the reply channel, so that a request receiver can
+        // A pipelinable method wraps the response channel, so that a request receiver can
         // be handed over in its place.
-        let reply_to = if self.pipelinable {
-            quote! { ::remoc::rtc::PipelinableReplyTo::Normal(__reply_to) }
+        let responder = if self.pipelinable {
+            quote! { ::remoc::rtc::PipelinableResponder::Normal(__responder) }
         } else {
-            quote! { __reply_to }
+            quote! { __responder }
         };
 
         let pipelined_method = self.pipelinable.then(|| self.pipelined_client_method(req_enum, &req_type, assoc));
@@ -748,9 +748,9 @@ impl TraitMethod {
 
         quote! {
             async fn #ident (#self_ref, #args) -> #ret_ty {
-                let (__reply_to, reply_rx) = self.__reply_to();
+                let (__responder, response_rx) = self.__responder();
 
-                let req_value = #req_enum :: #req_case { __reply_tx: #reply_to, #entries };
+                let req_value = #req_enum :: #req_case { __responder: #responder, #entries };
                 let req = ::remoc::rtc::Req::#req_type(req_value);
 
                 let mut guard = match self.monitor.pre_call(&req).await {
@@ -761,16 +761,16 @@ impl TraitMethod {
 
                 self.req_tx.send(req).await.map_err(::remoc::rtc::CallError::from)?;
 
-                match reply_rx.await {
-                    Ok(reply) => {
-                        let reply: #ret_ty = ::std::convert::Into::into(reply);
-                        if reply.is_err() {
+                match response_rx.await {
+                    Ok(response) => {
+                        let response: #ret_ty = ::std::convert::Into::into(response);
+                        if response.is_err() {
                             guard.failed();
                         }
-                        reply
+                        response
                     }
                     Err(err) => {
-                        guard.reply_failed(&err);
+                        guard.response_failed(&err);
                         Err(::remoc::rtc::CallError::from(err).into())
                     }
                 }
@@ -785,7 +785,7 @@ impl TraitMethod {
     /// Implementation of the twin method starting the call for the client.
     ///
     /// It sends the same request as the normal method, but returns once the request has
-    /// been queued, instead of awaiting the reply.
+    /// been queued, instead of awaiting the response.
     fn call_client_method(&self, req_enum: &Ident, req_type: &TokenStream, assoc: &[AssocType]) -> TokenStream {
         let full_name = self.full_name_str();
         let call_ident = self.call_ident();
@@ -799,10 +799,10 @@ impl TraitMethod {
             SelfRef::RefMut => quote! { &mut self, },
         };
 
-        let reply_to = if self.pipelinable {
-            quote! { ::remoc::rtc::PipelinableReplyTo::Normal(__reply_to) }
+        let responder = if self.pipelinable {
+            quote! { ::remoc::rtc::PipelinableResponder::Normal(__responder) }
         } else {
-            quote! { __reply_to }
+            quote! { __responder }
         };
 
         let mut args = quote! {};
@@ -818,9 +818,9 @@ impl TraitMethod {
             async fn #call_ident (#self_ref #args) -> ::remoc::rtc::Call<#ret_ty>
             #self_bound
             {
-                let (__reply_to, reply_rx) = self.__reply_to();
+                let (__responder, response_rx) = self.__responder();
 
-                let req_value = #req_enum :: #req_case { __reply_tx: #reply_to, #entries };
+                let req_value = #req_enum :: #req_case { __responder: #responder, #entries };
                 let req = ::remoc::rtc::Req::#req_type(req_value);
 
                 let mut guard = match self.monitor.pre_call(&req).await {
@@ -829,7 +829,7 @@ impl TraitMethod {
                     ::remoc::rtc::CallDecision::Drop => {
                         return ::remoc::rtc::Call::ready(
                             #full_name,
-                            ::remoc::rtc::IsReply::from_call_error(::remoc::rtc::CallError::Dropped)
+                            ::remoc::rtc::Response::from_call_error(::remoc::rtc::CallError::Dropped)
                         );
                     }
                 };
@@ -837,22 +837,22 @@ impl TraitMethod {
                 if let ::std::result::Result::Err(err) = self.req_tx.send(req).await {
                     return ::remoc::rtc::Call::ready(
                         #full_name,
-                        ::remoc::rtc::IsReply::from_call_error(::remoc::rtc::CallError::from(err))
+                        ::remoc::rtc::Response::from_call_error(::remoc::rtc::CallError::from(err))
                     );
                 }
 
                 ::remoc::rtc::Call::pending(#full_name, async move {
-                    match reply_rx.await {
-                        Ok(reply) => {
-                            let reply: #ret_ty = ::std::convert::Into::into(reply);
-                            if ::remoc::rtc::IsReply::is_error(&reply) {
+                    match response_rx.await {
+                        Ok(response) => {
+                            let response: #ret_ty = ::std::convert::Into::into(response);
+                            if ::remoc::rtc::Response::is_error(&response) {
                                 guard.failed();
                             }
-                            reply
+                            response
                         }
                         Err(err) => {
-                            guard.reply_failed(&err);
-                            ::remoc::rtc::IsReply::from_call_error(::remoc::rtc::CallError::from(err))
+                            guard.response_failed(&err);
+                            ::remoc::rtc::Response::from_call_error(::remoc::rtc::CallError::from(err))
                         }
                     }
                 })
@@ -863,11 +863,11 @@ impl TraitMethod {
     /// Implementation of the twin method taking a request receiver for the client.
     ///
     /// It sends the same request as the normal method, but hands the request receiver
-    /// over in place of the reply channel.
+    /// over in place of the response channel.
     /// Implementation of the twin method starting a pipelined call for the client.
     ///
     /// It sends the same request as the pipelined method, but returns once the request
-    /// has been queued, instead of awaiting the reply.
+    /// has been queued, instead of awaiting the response.
     fn pipelined_client_method(
         &self, req_enum: &Ident, req_type: &TokenStream, assoc: &[AssocType],
     ) -> TokenStream {
@@ -898,11 +898,11 @@ impl TraitMethod {
                 -> ::remoc::rtc::Call<#ret_ty>
             #self_bound
             {
-                let (__reply_to, reply_rx) = self.__reply_to();
+                let (__responder, response_rx) = self.__responder();
 
                 let req_value = #req_enum :: #req_case {
-                    __reply_tx: ::remoc::rtc::PipelinableReplyTo::Pipeline {
-                        req_rx: __req_rx, reply_tx: __reply_to,
+                    __responder: ::remoc::rtc::PipelinableResponder::Pipeline {
+                        req_rx: __req_rx, responder: __responder,
                     },
                     #entries
                 };
@@ -912,30 +912,30 @@ impl TraitMethod {
                     ::remoc::rtc::CallDecision::Pass => ::std::boxed::Box::new(::remoc::rtc::DefaultGuard),
                     ::remoc::rtc::CallDecision::Guard(guard) => guard,
                     ::remoc::rtc::CallDecision::Drop => {
-                        return ::remoc::rtc::Call::ready(#full_name, ::remoc::rtc::IsReply::from_call_error(
+                        return ::remoc::rtc::Call::ready(#full_name, ::remoc::rtc::Response::from_call_error(
                             ::remoc::rtc::CallError::Dropped,
                         ));
                     }
                 };
 
                 if let ::std::result::Result::Err(err) = self.req_tx.send(req).await {
-                    return ::remoc::rtc::Call::ready(#full_name, ::remoc::rtc::IsReply::from_call_error(
+                    return ::remoc::rtc::Call::ready(#full_name, ::remoc::rtc::Response::from_call_error(
                         ::remoc::rtc::CallError::from(err),
                     ));
                 }
 
                 ::remoc::rtc::Call::pending(#full_name, async move {
-                    match reply_rx.await {
-                        Ok(reply) => {
-                            let reply: #ret_ty = ::std::convert::Into::into(reply);
-                            if ::remoc::rtc::IsReply::is_error(&reply) {
+                    match response_rx.await {
+                        Ok(response) => {
+                            let response: #ret_ty = ::std::convert::Into::into(response);
+                            if ::remoc::rtc::Response::is_error(&response) {
                                 guard.failed();
                             }
-                            reply
+                            response
                         }
                         Err(err) => {
-                            guard.reply_failed(&err);
-                            ::remoc::rtc::IsReply::from_call_error(::remoc::rtc::CallError::from(err))
+                            guard.response_failed(&err);
+                            ::remoc::rtc::Response::from_call_error(::remoc::rtc::CallError::from(err))
                         }
                     }
                 })

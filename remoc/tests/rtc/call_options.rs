@@ -134,7 +134,7 @@ async fn stop_on_error_stops_the_server() {
         client.set_stop_on_error(true);
         assert!(client.stop_on_error());
 
-        // The reply is queued before the server is stopped, thus the error of the
+        // The response is queued before the server is stopped, thus the error of the
         // call itself is received.
         assert!(matches!(client.fail().await, Err(WorkError::Failed)));
     };

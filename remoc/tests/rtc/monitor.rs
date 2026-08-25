@@ -387,7 +387,7 @@ async fn incompatible_client_tolerates() {
 }
 
 /// Server monitor that counts non-final decode failures and drops the offending
-/// requests, so the server keeps serving and the client observes a reply
+/// requests, so the server keeps serving and the client observes a response
 /// failure for each of them.
 struct DecodeFailCounter {
     count: Arc<AtomicUsize>,
@@ -841,15 +841,15 @@ where
     Codec: remoc::codec::Codec,
 {
     match req {
-        Req::Value(CounterReqValue::Value { __reply_tx }) => {
-            let _ = __reply_tx.send(Ok(*value));
+        Req::Value(CounterReqValue::Value { __responder }) => {
+            let _ = __responder.send(Ok(*value));
         }
-        Req::Ref(CounterReqRef::ValueRef { __reply_tx }) => {
-            let _ = __reply_tx.send(Ok(*value));
+        Req::Ref(CounterReqRef::ValueRef { __responder }) => {
+            let _ = __responder.send(Ok(*value));
         }
-        Req::RefMut(CounterReqRefMut::Increase { __reply_tx, by }) => {
+        Req::RefMut(CounterReqRefMut::Increase { __responder, by }) => {
             *value += by;
-            let _ = __reply_tx.send(Ok(()));
+            let _ = __responder.send(Ok(()));
         }
         _ => (),
     }

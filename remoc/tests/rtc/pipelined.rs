@@ -222,7 +222,7 @@ async fn pipelined_call_consuming_the_object() {
 }
 
 /// A request receiver consumer handling requests as messages replies with
-/// `PipelinableReplyTo::complete`, which handles both the normal and the pipelined case.
+/// `PipelinableResponder::complete`, which handles both the normal and the pipelined case.
 #[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
 #[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn manual_req_receiver_completes_pipelined_call() {
@@ -237,7 +237,7 @@ async fn manual_req_receiver_completes_pipelined_call() {
 
     wokio::spawn(async move {
         while let Some(req) = req_rx.recv().await.unwrap() {
-            if let Req::Ref(DirectoryReqRef::OpenCounter { __reply_tx, name }) = req {
+            if let Req::Ref(DirectoryReqRef::OpenCounter { __responder, name }) = req {
                 let result = if name == "allowed" {
                     let obj = Arc::new(RwLock::new(CounterObj { value: 0 }));
                     let (server, client) = CounterServerSharedMut::new(obj);
@@ -249,11 +249,11 @@ async fn manual_req_receiver_completes_pipelined_call() {
 
                 // Completing a pipelined request runs the whole session, so it is
                 // spawned to keep receiving further requests.
-                assert!(__reply_tx.is_pipelined());
+                assert!(__responder.is_pipelined());
                 wokio::spawn(async move {
-                    // Awaiting the returned handle reports whether the reply, which is
+                    // Awaiting the returned handle reports whether the response, which is
                     // sent once the session has finished, was transmitted.
-                    __reply_tx.complete(result).await.await.unwrap();
+                    __responder.complete(result).await.await.unwrap();
                 });
             }
         }

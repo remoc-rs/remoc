@@ -184,7 +184,7 @@ where
             log_level: self.log_level,
             trait_name,
             method_name,
-            reply_failed: false,
+            response_failed: false,
         };
 
         async move {
@@ -207,12 +207,12 @@ struct IncompatibleServerGuard {
     log_level: Option<Level>,
     trait_name: &'static str,
     method_name: &'static str,
-    reply_failed: bool,
+    response_failed: bool,
 }
 
 impl CallGuard for IncompatibleServerGuard {
-    fn reply_failed(&mut self, err: &oneshot::RecvError) {
-        self.reply_failed = true;
+    fn response_failed(&mut self, err: &oneshot::RecvError) {
+        self.response_failed = true;
 
         let (trait_name, method_name) = (self.trait_name, self.method_name);
         let target = format!("{trait_name}::{method_name}");
@@ -223,7 +223,7 @@ impl CallGuard for IncompatibleServerGuard {
 impl Drop for IncompatibleServerGuard {
     fn drop(&mut self) {
         let mut state = self.state.lock().unwrap();
-        if self.reply_failed {
+        if self.response_failed {
             // The method failed to be received: remember it and count the failure.
             state.failed_methods.insert(self.method_name);
             state.record_failure(self.window);

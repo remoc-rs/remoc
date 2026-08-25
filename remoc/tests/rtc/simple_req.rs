@@ -40,19 +40,19 @@ impl CounterObj {
         Codec: remoc::codec::Codec,
     {
         match req {
-            remoc::rtc::Req::Ref(CounterReqRef::Value { __reply_tx }) => {
-                let _ = __reply_tx.send(Ok(self.value));
+            remoc::rtc::Req::Ref(CounterReqRef::Value { __responder }) => {
+                let _ = __responder.send(Ok(self.value));
             }
-            remoc::rtc::Req::RefMut(CounterReqRefMut::Watch { __reply_tx }) => {
+            remoc::rtc::Req::RefMut(CounterReqRefMut::Watch { __responder }) => {
                 let (tx, rx) = remoc::rch::watch::channel(self.value);
                 self.watchers.push(tx);
-                let _ = __reply_tx.send(Ok(rx));
+                let _ = __responder.send(Ok(rx));
             }
-            remoc::rtc::Req::RefMut(CounterReqRefMut::Increase { __reply_tx, by }) => {
+            remoc::rtc::Req::RefMut(CounterReqRefMut::Increase { __responder, by }) => {
                 match self.value.checked_add(by) {
                     Some(new_value) => self.value = new_value,
                     None => {
-                        let _ = __reply_tx.send(Err(IncreaseError::Overflow));
+                        let _ = __responder.send(Err(IncreaseError::Overflow));
                         return;
                     }
                 }
@@ -61,7 +61,7 @@ impl CounterObj {
                     let _ = watch.send(self.value);
                 }
 
-                let _ = __reply_tx.send(Ok(()));
+                let _ = __responder.send(Ok(()));
             }
             _ => (),
         }

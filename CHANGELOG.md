@@ -170,11 +170,11 @@ version can still talk to each other.
 - rtc: `Call::map_err` and `CallFutureExt::map_err` to bring calls with differing
   error types to a common one, for example to await them together using `try_join!`
   or `calls!`
-- rtc: `ReplyTo::complete` and `PipelinableReplyTo::complete` reply to a request,
+- rtc: `Responder::complete` and `PipelinableResponder::complete` respond to a request,
   the latter handling both an ordinary call and a handed over request receiver, so
-  that a request can be replied to the same way whether or not its method is
-  pipelinable. The returned handle reports whether the reply was transmitted and, if
-  not, the reply that could not be transmitted.
+  that a request can be responded to the same way whether or not its method is
+  pipelinable. The returned handle reports whether the response was transmitted and, if
+  not, the response that could not be transmitted.
 - rtc: [monitors](https://docs.rs/remoc/0.19/remoc/rtc/monitor/index.html) that
   observe and control every request of a client (`MonitorableClient::set_monitor`),
   server (`MonitorableServer::set_monitor`) and request receiver
@@ -228,12 +228,12 @@ version can still talk to each other.
   a request to another client fails
 - **BREAKING**: rtc: `ReqReceiver::forward` returns the client it forwarded to, or
   `None` when the object was consumed by a method taking `self` by value
-- **BREAKING**: rtc: the reply channel of a request is now transferred as `ReplyTo`
-  instead of the bare `ReplySender`, so that a method can later gain the `#[pipelinable]`
-  attribute without breaking its clients. `ReplyTo` offers the same functions as
-  `ReplySender`, thus code handling requests of a request receiver is unaffected.
+- **BREAKING**: rtc: the response channel of a request is now transferred as `Responder`
+  instead of the bare `ResponseSender`, so that a method can later gain the `#[pipelinable]`
+  attribute without breaking its clients. `Responder` offers the same functions as
+  `ResponseSender`, thus code handling requests of a request receiver is unaffected.
   Endpoints of Remoc 0.19 and earlier are unaffected as well, since they continue to
-  receive the bare reply sender.
+  receive the bare response sender.
 - **BREAKING**: rtc: `ReqReceiver` is no longer accepted as a server variant in the
   `server(...)` argument of the `remote` attribute; the request receiver is now always
   generated

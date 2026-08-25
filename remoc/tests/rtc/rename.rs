@@ -41,7 +41,7 @@ pub trait Counter {
 
     /// Method with renamed fields, but without renamed request variant.
     ///
-    /// The renamed field also opts the reply channel field into the compact
+    /// The renamed field also opts the response channel field into the compact
     /// serialized representation.
     async fn decrease(&mut self, #[serde(rename = "_0")] by: u32) -> Result<(), IncreaseError>;
 }

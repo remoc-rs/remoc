@@ -32,7 +32,7 @@ impl Slow for SlowObj {
 }
 
 /// A call that is in flight when the connection fails must report the failure
-/// instead of waiting for a reply that can never arrive.
+/// instead of waiting for a response that can never arrive.
 #[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
 #[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn call_in_flight_fails_when_connection_is_lost() {
@@ -69,7 +69,7 @@ async fn call_in_flight_fails_when_connection_is_lost() {
 }
 
 /// A call issued after the connection failed must report the failure rather than
-/// waiting for a reply.
+/// waiting for a response.
 #[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
 #[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn call_after_connection_loss_fails() {

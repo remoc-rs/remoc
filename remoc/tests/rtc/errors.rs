@@ -41,8 +41,8 @@ async fn max_item_size_exceeded() {
         println!("Receiving client");
         let mut client = b_rx.recv().await.unwrap().unwrap();
 
-        client.set_max_reply_size(16777);
-        let max_item_size = client.max_reply_size();
+        client.set_max_response_size(16777);
+        let max_item_size = client.max_response_size();
 
         let elems = max_item_size / 10;
         println!("Getting {elems} elements, which is under limit");
@@ -59,7 +59,7 @@ async fn max_item_size_exceeded() {
     let ((), res) = tokio::join!(client_task, server.serve());
     assert!(matches!(
         res,
-        Err(remoc::rtc::ServeError::ReplySend(remoc::rch::SendingErrorKind::Send(
+        Err(remoc::rtc::ServeError::ResponseSend(remoc::rch::SendingErrorKind::Send(
             remoc::rch::base::SendErrorKind::MaxItemSizeExceeded
         )))
     ));

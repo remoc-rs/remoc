@@ -668,7 +668,7 @@ impl TraitDef {
                 fn dispatch<Target>(
                     self,
                     __target: Target,
-                    __err_tx: ::remoc::rtc::ReplyErrorSender,
+                    __err_tx: ::remoc::rtc::ResponseErrorSender,
                     mut __guard: ::std::boxed::Box<dyn ::remoc::rtc::DispatchGuard>,
                 ) -> ::std::pin::Pin<::std::boxed::Box<dyn ::std::future::Future<Output = ()> + ::std::marker::Send>>
                 where
@@ -719,7 +719,7 @@ impl TraitDef {
                 fn dispatch<'target, Target>(
                     self,
                     __target: &'target Target,
-                    __err_tx: ::remoc::rtc::ReplyErrorSender,
+                    __err_tx: ::remoc::rtc::ResponseErrorSender,
                     mut __guard: ::std::boxed::Box<dyn ::remoc::rtc::DispatchGuard>,
                 ) -> ::std::pin::Pin<::std::boxed::Box<dyn ::std::future::Future<Output = ()> + ::std::marker::Send + 'target>>
                 where
@@ -770,7 +770,7 @@ impl TraitDef {
                 fn dispatch<'target, Target>(
                     self,
                     __target: &'target mut Target,
-                    __err_tx: ::remoc::rtc::ReplyErrorSender,
+                    __err_tx: ::remoc::rtc::ResponseErrorSender,
                     mut __guard: ::std::boxed::Box<dyn ::remoc::rtc::DispatchGuard>,
                 ) -> ::std::pin::Pin<::std::boxed::Box<dyn ::std::future::Future<Output = ()> + ::std::marker::Send + 'target>>
                 where
@@ -892,7 +892,7 @@ impl TraitDef {
 
                 async fn serve(self) -> (::std::option::Option<Target>, ::std::result::Result<(), ::remoc::rtc::ServeError>) {
                     let Self { mut target, mut req_rx, mut monitor } = self;
-                    let (err_tx, mut err_rx) = ::remoc::rtc::reply_error_channel();
+                    let (err_tx, mut err_rx) = ::remoc::rtc::response_error_channel();
 
                     let target_opt = loop {
                         ::remoc::rtc::select! {
@@ -1005,7 +1005,7 @@ impl TraitDef {
 
                 async fn serve(self) -> ::std::result::Result<(), ::remoc::rtc::ServeError> {
                     let Self { target, mut req_rx, mut monitor } = self;
-                    let (err_tx, mut err_rx) = ::remoc::rtc::reply_error_channel();
+                    let (err_tx, mut err_rx) = ::remoc::rtc::response_error_channel();
 
                     let ret = loop {
                         ::remoc::rtc::select! {
@@ -1117,7 +1117,7 @@ impl TraitDef {
 
                 async fn serve(self) -> ::std::result::Result<(), ::remoc::rtc::ServeError> {
                     let Self { target, mut req_rx, mut monitor } = self;
-                    let (err_tx, mut err_rx) = ::remoc::rtc::reply_error_channel();
+                    let (err_tx, mut err_rx) = ::remoc::rtc::response_error_channel();
 
                     let ret = loop {
                         ::remoc::rtc::select! {
@@ -1235,7 +1235,7 @@ impl TraitDef {
 
                 async fn serve(self) -> ::std::result::Result<(), ::remoc::rtc::ServeError> {
                     let Self { target, mut req_rx, mut monitor, parallelism } = self;
-                    let (err_tx, mut err_rx) = ::remoc::rtc::reply_error_channel();
+                    let (err_tx, mut err_rx) = ::remoc::rtc::response_error_channel();
                     let semaphore = ::remoc::rtc::dispatch_semaphore(parallelism);
 
                     let ret = loop {
@@ -1368,7 +1368,7 @@ impl TraitDef {
 
                 async fn serve(self) -> ::std::result::Result<(), ::remoc::rtc::ServeError> {
                     let Self { target, mut req_rx, mut monitor, parallelism } = self;
-                    let (err_tx, mut err_rx) = ::remoc::rtc::reply_error_channel();
+                    let (err_tx, mut err_rx) = ::remoc::rtc::response_error_channel();
                     let semaphore = ::remoc::rtc::dispatch_semaphore(parallelism);
 
                     let ret = loop {
@@ -1552,7 +1552,7 @@ impl TraitDef {
 
                         match client.monitor.pre_call(&req).await {
                             ::remoc::rtc::CallDecision::Pass => (),
-                            // The reply is not delivered through the client, thus the guard is released immediately.
+                            // The response is not delivered through the client, thus the guard is released immediately.
                             ::remoc::rtc::CallDecision::Guard(_guard) => (),
                             ::remoc::rtc::CallDecision::Drop => continue,
                         }
@@ -1877,7 +1877,7 @@ impl TraitDef {
                     fn clone(&self) -> Self {
                         Self {
                             req_tx: self.req_tx.clone(),
-                            max_reply_size: self.max_reply_size,
+                            max_response_size: self.max_response_size,
                             sequential: self.sequential,
                             stop_on_error: self.stop_on_error,
                             drop_tx: self.drop_tx.clone(),
@@ -1904,7 +1904,7 @@ impl TraitDef {
                     ::remoc::rtc::Req<#req_value #req_generics, #req_ref #req_generics, #req_ref_mut #req_generics>,
                     Codec,
                 >,
-                max_reply_size: usize,
+                max_response_size: usize,
                 sequential: bool,
                 stop_on_error: bool,
                 drop_tx: ::remoc::rtc::local_broadcast::Sender<()>,
@@ -1918,9 +1918,9 @@ impl TraitDef {
                         ::remoc::rtc::Req<#req_value #req_generics, #req_ref #req_generics, #req_ref_mut #req_generics>,
                         Codec,
                     > => "_0",
-                    #[serde(default = "::remoc::rtc::missing_max_reply_size")]
-                    #[serde(with = "::remoc::rtc::serde_max_reply_size")]
-                    max_reply_size: usize => "_1",
+                    #[serde(default = "::remoc::rtc::missing_max_response_size")]
+                    #[serde(with = "::remoc::rtc::serde_max_response_size")]
+                    max_response_size: usize => "_1",
                 }
                 default {
                     sequential = false,
@@ -1934,24 +1934,24 @@ impl TraitDef {
             #clone
 
             impl #impl_generics_impl #client_ident #impl_generics_ty #impl_generics_where {
-                /// Creates the reply channel for a request, carrying the call
+                /// Creates the response channel for a request, carrying the call
                 /// options of this client.
                 #[doc(hidden)]
-                pub fn __reply_to<__R>(
+                pub fn __responder<__R>(
                     &self,
                 ) -> (
-                    ::remoc::rtc::ReplyTo<__R, Codec>,
-                    ::remoc::rch::oneshot::Receiver<::remoc::rtc::Reply<__R>, Codec>,
+                    ::remoc::rtc::Responder<__R, Codec>,
+                    ::remoc::rch::oneshot::Receiver<::remoc::rtc::TransportedResponse<__R>, Codec>,
                 )
                 where
-                    __R: ::remoc::rtc::IsReply,
-                    ::remoc::rtc::Reply<__R>: ::remoc::RemoteSend,
+                    __R: ::remoc::rtc::Response,
+                    ::remoc::rtc::TransportedResponse<__R>: ::remoc::RemoteSend,
                 {
-                    let (reply_tx, reply_rx) = ::remoc::rtc::reply_channel(self.max_reply_size);
-                    let reply_to = ::remoc::rtc::ReplyTo::new(
-                        reply_tx, self.sequential, self.stop_on_error,
+                    let (responder, response_rx) = ::remoc::rtc::response_channel(self.max_response_size);
+                    let responder = ::remoc::rtc::Responder::new(
+                        responder, self.sequential, self.stop_on_error,
                     );
-                    (reply_to, reply_rx)
+                    (responder, response_rx)
                 }
 
                 fn from_req_tx(req_tx: ::remoc::rch::mpsc::Sender<
@@ -1961,7 +1961,7 @@ impl TraitDef {
                 {
                     Self {
                         req_tx,
-                        max_reply_size: ::remoc::rch::DEFAULT_MAX_ITEM_SIZE,
+                        max_response_size: ::remoc::rch::DEFAULT_MAX_ITEM_SIZE,
                         sequential: false,
                         stop_on_error: false,
                         drop_tx: ::remoc::rtc::empty_client_drop_tx(),
@@ -2008,12 +2008,12 @@ impl TraitDef {
                     self.req_tx.set_max_item_size(max_request_size);
                 }
 
-                fn max_reply_size(&self) -> usize {
-                    self.max_reply_size
+                fn max_response_size(&self) -> usize {
+                    self.max_response_size
                 }
 
-                fn set_max_reply_size(&mut self, max_reply_size: usize) {
-                    self.max_reply_size = max_reply_size
+                fn set_max_response_size(&mut self, max_response_size: usize) {
+                    self.max_response_size = max_response_size
                 }
 
                 fn sequential(&self) -> bool {

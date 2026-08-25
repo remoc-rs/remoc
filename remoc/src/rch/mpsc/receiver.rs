@@ -227,10 +227,13 @@ crate::versioned::compact::impl_struct! {
         #[serde(default)]
         codec: PhantomData<()> = PhantomData,
         #[serde(default)]
+        #[serde(skip_serializing_if = "crate::codec::skip::if_default_ref")]
         closed: bool => "_1",
-        #[serde(default)]
+        #[serde(default = "crate::rch::default_max_item_size")]
+        #[serde(skip_serializing_if = "crate::rch::is_default_max_item_size")]
         max_item_size: u64 => "_2",
         #[serde(default)]
+        #[serde(skip_serializing_if = "crate::codec::skip::if_default_ref")]
         parallel: Vec<u32> => "_3",
     }
 }

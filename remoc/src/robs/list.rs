@@ -579,6 +579,8 @@ crate::versioned::compact::impl_struct! {
     fields {
         initial_len: usize => "_0",
         events: Option<rch::mpsc::Receiver<ListEvent<T>, Codec>> => "_1",
+        #[serde(default)]
+        #[serde(skip_serializing_if = "crate::codec::skip::if_default_ref")]
         len: usize => "_2",
     }
     default { complete }

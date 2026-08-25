@@ -16,7 +16,7 @@ use super::{
         DEFAULT_MAX_ITEM_SIZE, RemoteSendError,
         base::{self, PortDeserializer, PortSerializer},
     },
-    RateLimitSender, Ref, TransferStrategy, default_max_item_size, default_rate_limit, rate_limit_channel,
+    RateLimitSender, Ref, TransferStrategy, rate_limit_channel,
 };
 use crate::{
     RemoteSend, chmux,
@@ -168,12 +168,15 @@ crate::versioned::compact::impl_struct! {
         data: Result<T, RecvError> => "_1",
         #[serde(default)]
         codec: PhantomData<()> = PhantomData,
-        #[serde(default = "default_max_item_size")]
+        #[serde(default = "crate::rch::default_max_item_size")]
+        #[serde(skip_serializing_if = "crate::rch::is_default_max_item_size")]
         max_item_size: u64 => "_2",
         #[compact]
-        #[serde(default = "default_rate_limit")]
+        #[serde(default)]
+        #[serde(skip_serializing_if = "crate::codec::skip::if_default_ref")]
         rate_limit: Duration => "_3",
         #[serde(default)]
+        #[serde(skip_serializing_if = "crate::codec::skip::if_default_ref")]
         transfer_strategy: TransferStrategy => "_4",
     }
     where T: RemoteSend + Clone

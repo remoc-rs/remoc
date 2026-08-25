@@ -144,8 +144,8 @@ where
 {
     let (tx, rx) = tokio::sync::watch::channel(Ok(init));
     let (remote_send_err_tx, remote_send_err_rx) = tokio::sync::mpsc::unbounded_channel();
-    let (sender_rate_limit_tx, sender_rate_limit_rx) = tokio::sync::watch::channel(default_rate_limit());
-    let (receiver_rate_limit_tx, receiver_rate_limit_rx) = rate_limit_channel(default_rate_limit());
+    let (sender_rate_limit_tx, sender_rate_limit_rx) = tokio::sync::watch::channel(Duration::ZERO);
+    let (receiver_rate_limit_tx, receiver_rate_limit_rx) = rate_limit_channel(Duration::ZERO);
 
     let sender = Sender::new(
         tx,
@@ -620,12 +620,4 @@ impl RateLimitReceiver {
     pub fn get_and_update(&mut self) -> Duration {
         Self::compute(&self.0.borrow_and_update())
     }
-}
-
-const fn default_max_item_size() -> u64 {
-    u64::MAX
-}
-
-const fn default_rate_limit() -> Duration {
-    Duration::ZERO
 }

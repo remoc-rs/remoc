@@ -1,6 +1,7 @@
 //! Establishing connections over the provided transports.
 
 mod capabilities;
+mod skip_fields;
 
 use futures::{StreamExt, future::try_join};
 use std::time::Duration;

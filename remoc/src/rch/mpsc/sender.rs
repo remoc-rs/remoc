@@ -343,10 +343,6 @@ struct TransportedSender {
     parallel: Vec<u32>,
 }
 
-const fn default_max_item_size() -> u64 {
-    u64::MAX
-}
-
 crate::versioned::compact::impl_struct! {
     TransportedSender,
     fields {
@@ -355,9 +351,11 @@ crate::versioned::compact::impl_struct! {
         data: PhantomData<()> = PhantomData,
         #[serde(default)]
         codec: PhantomData<()> = PhantomData,
-        #[serde(default = "default_max_item_size")]
+        #[serde(default = "crate::rch::default_max_item_size")]
+        #[serde(skip_serializing_if = "crate::rch::is_default_max_item_size")]
         max_item_size: u64 => "_1",
         #[serde(default)]
+        #[serde(skip_serializing_if = "crate::codec::skip::if_default_ref")]
         parallel: Vec<u32> => "_2",
     }
 }

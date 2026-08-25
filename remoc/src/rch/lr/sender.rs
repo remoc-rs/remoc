@@ -169,17 +169,14 @@ struct TransportedSender {
     max_item_size: u64,
 }
 
-const fn default_max_item_size() -> u64 {
-    u64::MAX
-}
-
 crate::versioned::compact::impl_struct! {
     TransportedSender,
     fields {
         port: u32 => "_0",
         data: PhantomData<()> = PhantomData,
         codec: PhantomData<()> = PhantomData,
-        #[serde(default = "default_max_item_size")]
+        #[serde(default = "crate::rch::default_max_item_size")]
+        #[serde(skip_serializing_if = "crate::rch::is_default_max_item_size")]
         max_item_size: u64 => "_1",
     }
 }

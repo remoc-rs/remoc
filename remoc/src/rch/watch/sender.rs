@@ -6,8 +6,7 @@ use super::{
         ClosedReason, RemoteSendError, SendErrorExt,
         base::{self, PortDeserializer, PortSerializer},
     },
-    RateLimitReceiver, RateLimitSender, Receiver, Ref, TransferStrategy, default_max_item_size,
-    default_rate_limit, rate_limit_channel,
+    RateLimitReceiver, RateLimitSender, Receiver, Ref, TransferStrategy, rate_limit_channel,
     receiver::RecvError,
 };
 use crate::{
@@ -178,15 +177,19 @@ crate::versioned::compact::impl_struct! {
         data: Result<T, RecvError> => "_1",
         #[serde(default)]
         codec: PhantomData<()> = PhantomData,
-        #[serde(default = "default_max_item_size")]
+        #[serde(default = "crate::rch::default_max_item_size")]
+        #[serde(skip_serializing_if = "crate::rch::is_default_max_item_size")]
         max_item_size: u64 => "_2",
         #[compact]
-        #[serde(default = "default_rate_limit")]
+        #[serde(default)]
+        #[serde(skip_serializing_if = "crate::codec::skip::if_default_ref")]
         sender_rate_limit: Duration => "_3",
         #[compact]
-        #[serde(default = "default_rate_limit")]
+        #[serde(default)]
+        #[serde(skip_serializing_if = "crate::codec::skip::if_default_ref")]
         receiver_rate_limit: Duration => "_4",
         #[serde(default)]
+        #[serde(skip_serializing_if = "crate::codec::skip::if_default_ref")]
         transfer_strategy: TransferStrategy => "_5",
     }
     where T: RemoteSend + Clone

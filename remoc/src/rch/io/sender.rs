@@ -76,6 +76,8 @@ crate::versioned::compact::impl_struct! {
     fields {
         bin_sender: Option<bin::Sender> => "_0",
         size_mode: SizeMode<Codec> => "_1",
+        #[serde(default)]
+        #[serde(skip_serializing_if = "crate::codec::skip::if_default_ref")]
         bytes_written: u64 => "_2",
     }
     where Codec: codec::Codec

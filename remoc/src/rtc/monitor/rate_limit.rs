@@ -8,8 +8,10 @@ use wokio::time::{Instant, sleep};
 
 use crate::{
     rch,
-    rtc::monitor::{DispatchDecision, RecvDecision, ReqReceiverMonitor, ServerMonitor},
-    rtc::{Req, ReqEnum},
+    rtc::{
+        Req, ReqEnum,
+        monitor::{DispatchDecision, RecvDecision, ReqReceiverMonitor, ServerMonitor},
+    },
 };
 
 /// A [server monitor](ServerMonitor) that rate-limits requests from clients.

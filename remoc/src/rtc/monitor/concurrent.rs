@@ -7,8 +7,10 @@ use tracing::Level;
 
 use crate::{
     rch,
-    rtc::monitor::{DispatchDecision, DispatchGuard, ServerMonitor},
-    rtc::{Req, ReqEnum},
+    rtc::{
+        Req, ReqEnum,
+        monitor::{DispatchDecision, DispatchGuard, ServerMonitor},
+    },
 };
 
 /// A [server monitor](ServerMonitor) that limits the number of concurrent requests from clients.

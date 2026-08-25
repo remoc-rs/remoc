@@ -113,6 +113,45 @@
 //! instead of three, which matters as soon as the endpoints are not next to each other.
 //! Note that the processing order of the calls on the server side is undefined.
 //!
+//! When the calls do depend on each other, the `<name>_call` twin of every method starts
+//! a call without awaiting its result and returns a [`Call`]. The [`calls!`] macro writes
+//! a series of such calls, awaiting the results only at the end:
+//!
+//! ```ignore
+//! let value = calls!(client.increase_call(20); client.multiply_call(2); client.value_call());
+//! ```
+//!
+//! Use [`Client::set_sequential`] to have the server process the calls of a client one
+//! after another, so that they take effect in the order they were made.
+//!
+//! # Pipelining
+//!
+//! A method that returns a [client](Client) of another remotable trait normally costs a
+//! round trip before that object can be used: the caller must wait for the client to
+//! arrive. Mark the method `#[pipelinable]` and the caller can skip that wait by
+//! creating the client itself and handing its [request receiver](ReqReceiver) into the
+//! call:
+//!
+//! ```ignore
+//! let (mut counter, counter_rx) = CounterClient::new();
+//!
+//! // Opening the counter and using it takes a single round trip.
+//! let value = calls!(
+//!     dir.open_counter_pipelined("mine".to_string(), counter_rx);
+//!     counter.increase_call(20);
+//!     counter.value_call()
+//! );
+//! ```
+//!
+//! See the [pipelining] module for how it works and a worked example.
+//!
+//! # Monitoring
+//!
+//! Every request a client makes, a server handles or a request receiver receives can be
+//! observed and controlled by a [monitor], which can delay, drop or reject it.
+//! Rate limiting, limiting the number of concurrent calls and rejecting incompatible
+//! endpoints are [provided](monitor#structs).
+//!
 //! # Error handling
 //!
 //! Since a remote trait call can fail due to connection problems, the return type
@@ -305,13 +344,16 @@
 
 pub mod monitor;
 
+#[cfg(doc)]
+pub mod pipelining;
+
 mod call;
 pub use call::{Call, CallError, CallFutureExt, calls};
 
 mod response;
-pub use response::ResponseSender;
 pub use response::{
-    Completing, PipelinableResponder, PipelinableResponse, Responder, Response, TransportedResponse,
+    Completing, PipelinableResponder, PipelinableResponse, Responder, Response, ResponseSender,
+    TransportedResponse,
 };
 #[doc(hidden)]
 pub use response::{ResponseErrorSender, complete_call, response_channel, response_error_channel};
@@ -580,6 +622,9 @@ pub trait Client {
     ///
     /// Only [`ServerShared`] and [`ServerSharedMut`] dispatch concurrently, and only
     /// calls to methods taking `&self`, thus this has no effect otherwise.
+    ///
+    /// Since the call is dispatched inline, the server receives no requests at all while
+    /// it runs, including those of other clients it may serve.
     fn sequential(&self) -> bool;
 
     /// Sets whether the server processes the calls of this client one after another.
@@ -590,6 +635,10 @@ pub trait Client {
     /// This is `false` by default. When set to `true` a call that returns an error
     /// makes the server stop with [`ServeError::CallFailed`] after the error has been
     /// sent to this client.
+    ///
+    /// Serving stops entirely, not just for this client. That is the intended effect
+    /// when the server object belongs to this client, as is usual, but a server shared
+    /// between unrelated clients stops serving all of them.
     fn stop_on_error(&self) -> bool;
 
     /// Sets whether the server shall stop serving when a call made by this client fails.

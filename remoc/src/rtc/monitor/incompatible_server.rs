@@ -11,8 +11,10 @@ use wokio::time::{Instant, sleep};
 
 use crate::{
     rch::oneshot,
-    rtc::monitor::{CallDecision, CallGuard, ClientMonitor},
-    rtc::{Req, ReqEnum},
+    rtc::{
+        Req, ReqEnum,
+        monitor::{CallDecision, CallGuard, ClientMonitor},
+    },
 };
 
 /// Shared state for [`IncompatibleServerMonitor`].

@@ -4,32 +4,33 @@ All notable changes to Remoc will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## 0.20.0 - 2026-08-13
-This release makes reduces the size of transmitted data, increases throughput and 
-introduces a system for evolving the serialized representation of your own types 
-while staying compatible with older versions.
+## 0.20.0 - 2026-08-26
+This release adds pipelining for remote trait calls (RTC). Previously, a method returning
+another remote object introduced an extra round trip: the caller had to wait for the new
+client before it could make another call. With pipelining, the caller can use the new
+client immediately, without waiting for the original call to finish. This allows entire
+chains of dependent remote objects to be reached in a single round trip. 
 
-Remoc 0.20 remains wire-compatible with Remoc 0.19 and 0.18.
+In addition, this release improves throughput and introduces a system for evolving 
+the serialized representation of your own types while remaining compatible with older 
+versions.
 
 The default codec is now always Postbag and can no longer be changed using crate
 features. If you were selecting a codec via a `default-codec-*` feature, see the
 notes under *Deprecated* and *Removed* below.
 
+Remoc 0.20 remains wire-compatible with previous versions.
+
 ### Added
+- rtc: pipelining via the `#[pipelinable]` attribute on a trait method returning the
+  client of another remotable trait. Allows pipelining calls to multiple remote 
+  objects while only using one roundtrip.
 - performance: data of a newly opened channel is now sent immediately, without
   waiting for the remote endpoint to confirm the port; this removes one round-trip
   of latency when a channel is used for the first time
-- performance: messages of the channel multiplexer use variable integer encoding,
-  which reduces the per-message overhead; furthermore Remoc's own types, such as 
-  the headers exchanged by the channels, use a compact serialized representation
-- new [transports module](https://docs.rs/remoc/0.20/remoc/transports/index.html)
-  containing worked, copy-and-paste ready examples for connecting over different 
-  transports
+- performance: reduced size of messages
 - new [versioned module](https://docs.rs/remoc/0.20/remoc/versioned/index.html) for
   evolving the serialized representation of a type
-- performance: endpoints agree on the newest Postbag data format both can read,
-  so a connection to Remoc 0.19 or 0.18 keeps using the format those understand
-  while two current endpoints use the newer, smaller one
 - rch::mpsc: optional additional parallel transfer channels, which serialize and
   deserialize items concurrently and thus increase throughput over high-bandwidth
   links
@@ -40,14 +41,13 @@ notes under *Deprecated* and *Removed* below.
 - chmux: `AnyStorage` can now store values indexed by their type using `insert`,
   `get`, `with` and `remove`, and exposes the configuration of the connection
   via `AnyStorage::cfg`
-- chmux, rch::base: `Receiver::set_global_credits_allowed` lets the receiving side
-  keep a channel out of the receive buffer shared by all channels, for when it
-  expects to consume the received data slowly; global credits are used only when
-  both endpoints allow it
+- rtc: `LogMonitor` logs every request and its outcome
+- rtc: the `debug` argument of the `remote` attribute makes the generated request enums
+  implement `Debug`
 
 ### Changed
 - connect: the connection future is no longer required to be `Send`, which allows
-  using transports based on JavaScript objects in a web browser
+  using non-Send transports
 - **BREAKING**: rch, chmux: `is_final` has been removed from the error types of send
   and receive operations; use `is_disconnected` instead
 - **BREAKING**: chmux: `Cfg::ports_exhausted` has been remodelled and is now 
@@ -65,6 +65,27 @@ notes under *Deprecated* and *Removed* below.
 - **BREAKING**: connect: `Connect` is now generic over the type of its connection
   future; use `BoxConnect` (obtained via `Connect::boxed`) where the previous type
   parameters are required
+- **BREAKING**: rtc: `ServerBase` has a new associated type `ReqReceiver`, naming the
+  request receiver every server variant can be created from
+- **BREAKING**: rtc: `ServeError` has a new `Forward` variant, reported when forwarding
+  a request to another client fails
+- **BREAKING**: rtc: `ReqReceiver::forward` returns the client it forwarded to, or
+  `None` when the object was consumed by a method taking `self` by value
+- **BREAKING**: rch::mpsc: `channel` no longer takes a local buffer size and uses
+  `DEFAULT_BUFFER`; use `with_local_buffer` where a specific size is required.
+- **BREAKING**: rtc: the constructors of clients, request receivers and all server
+  variants no longer take a `request_buffer` argument and use `rch::DEFAULT_BUFFER`;
+  use `with_request_buffer` where a specific size is required.
+- **BREAKING**: rtc: `ServerShared::serve` and `ServerSharedMut::serve` no longer take a
+  `spawn` argument. Calls are dispatched concurrently up to `set_parallelism`, which
+  defaults to `rtc::DEFAULT_PARALLELISM`
+- **BREAKING**: rtc: the monitoring traits and types have moved into the
+  [monitor module](https://docs.rs/remoc/0.20/remoc/rtc/monitor/index.html), where the
+  monitors themselves already lived; `MonitorableClient`, `MonitorableServer` and
+  `MonitorableReqReceiver` remain in the prelude
+- **BREAKING**: rtc: `ReqReceiver` is no longer accepted as a server variant in the
+  `server(...)` argument of the `remote` attribute; the request receiver is now always
+  generated
 
 ### Deprecated
 - codec: selecting the default codec via a `default-codec-*` crate feature is
@@ -74,7 +95,7 @@ notes under *Deprecated* and *Removed* below.
 - rch::lr: the local/remote channel is deprecated in favor of an `rch::mpsc` channel.
 
 ### Removed
-- **BREAKING**: codec: the crate features `codec-postbag` and `default-codec-postbag`
+- codec: the crate features `codec-postbag` and `default-codec-postbag`
   have been removed, since the Postbag codec is always available and the default;
   remove them from your `Cargo.toml`
 
@@ -132,49 +153,10 @@ version can still talk to each other.
   remote endpoint, plus `Receiver::forwarded` constructors for mpsc, oneshot and watch
 - rch: `broadcast::WeakSender` and `broadcast::Sender::downgrade`, `strong_count`
   and `weak_count`
-- rch: `Sending::dropped` creates a handle for a value that was never queued for
-  sending, because the receiving half was already gone
-- rch: `SendingError::map_item` and `base::SendError::map_item` replace the unsent
-  value of a send error
 - rch: `bin` channels can now be used fully locally; when both ends stay in the same
   process a lightweight loopback is used and no serialization takes place
 - rch: `base::Sender::into_inner` and `base::Receiver::into_inner` to obtain the
   underlying chmux channel
-- rtc: the request receiver (`TraitReqReceiver`) can now be sent to a remote endpoint,
-  which then handles the requests of the client; a set request receiver monitor is not
-  transferred
-- rtc: every server variant can now be created from a request receiver, either using
-  `TraitReqReceiver::into_server`, `into_server_ref`, `into_server_ref_mut`,
-  `into_server_shared` and `into_server_shared_mut`, or using the `from_req_receiver`
-  function of the corresponding server trait; together with the above this allows a
-  remote endpoint to attach a target object to a client that is already connected
-- rtc: `ReqReceiver::forward` hands the requests of a request receiver over to another
-  client, which lets whatever that client is connected to execute them; replies are
-  delivered from there directly to the original caller
-- rtc: `TraitClient::new(request_buffer)` creates a client together with the request
-  receiver connected to it, mirroring `ReqReceiver::new`; calls made on the client
-  before the request receiver is attached to a target object are queued
-- rtc: pipelining via the `#[pipelinable]` attribute on a trait method returning the
-  client of another remotable trait. It generates a `<name>_pipelined` twin method taking
-  the request receiver of that client, so that the caller can use the client while the
-  call that provides the object is still in flight. The twin is a provided trait
-  method returning a `Call`, so that the request receiver is handed over immediately
-  and calls on the client can be started without waiting for the session call to
-  complete. Its default implementation forwards the requests to the returned client
-  in the background. Use `#[pipelinable(name)]` to name the twin method differently.
-- rtc: `Client` has a new associated type `ReqReceiver`, naming the request receiver
-  whose requests can be forwarded to the client
-- rtc: `calls!` macro performing a series of calls, which may include calls handing
-  over a request receiver, without awaiting the result of each one; a failing call
-  returns from the enclosing function, like the `?` operator does
-- rtc: `Call::map_err` and `CallFutureExt::map_err` to bring calls with differing
-  error types to a common one, for example to await them together using `try_join!`
-  or `calls!`
-- rtc: `Responder::complete` and `PipelinableResponder::complete` respond to a request,
-  the latter handling both an ordinary call and a handed over request receiver, so
-  that a request can be responded to the same way whether or not its method is
-  pipelinable. The returned handle reports whether the response was transmitted and, if
-  not, the response that could not be transmitted.
 - rtc: [monitors](https://docs.rs/remoc/0.19/remoc/rtc/monitor/index.html) that
   observe and control every request of a client (`MonitorableClient::set_monitor`),
   server (`MonitorableServer::set_monitor`) and request receiver
@@ -222,21 +204,6 @@ version can still talk to each other.
   `...ReqRef` and `...ReqRefMut` enums instead of a single `...Req` enum.
 - **BREAKING**: rtc: `ReqReceiver` no longer implements `Stream` directly; call
   `ReqReceiver::into_stream()` to obtain a `ReqReceiverStream`
-- **BREAKING**: rtc: `ServerBase` has a new associated type `ReqReceiver`, naming the
-  request receiver every server variant can be created from
-- **BREAKING**: rtc: `ServeError` has a new `Forward` variant, reported when forwarding
-  a request to another client fails
-- **BREAKING**: rtc: `ReqReceiver::forward` returns the client it forwarded to, or
-  `None` when the object was consumed by a method taking `self` by value
-- **BREAKING**: rtc: the response channel of a request is now transferred as `Responder`
-  instead of the bare `ResponseSender`, so that a method can later gain the `#[pipelinable]`
-  attribute without breaking its clients. `Responder` offers the same functions as
-  `ResponseSender`, thus code handling requests of a request receiver is unaffected.
-  Endpoints of Remoc 0.19 and earlier are unaffected as well, since they continue to
-  receive the bare response sender.
-- **BREAKING**: rtc: `ReqReceiver` is no longer accepted as a server variant in the
-  `server(...)` argument of the `remote` attribute; the request receiver is now always
-  generated
 - **BREAKING**: rtc: `OnReqReceiveError` and `ServerBase::set_on_req_receive_error`
   have been removed; use a [server monitor](https://docs.rs/remoc/0.19/remoc/rtc/trait.ServerMonitor.html)
   to react to failing requests
@@ -253,7 +220,6 @@ version can still talk to each other.
 - rch: `watch::Receiver::changed` on a receiver that was sent to a
   remote endpoint no longer returns immediately for the initial value; it now waits
   for an actual change of the value
-
 
 ## 0.18.3 - 2025-09-19
 ### Added

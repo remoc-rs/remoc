@@ -196,6 +196,23 @@ jobs:
           RUSTFLAGS: -A deprecated
         run: cargo test --no-default-features --features full --features default-codec-${{ matrix.codec }}
 
+  test-postbag-fast-compile:
+    name: Test with Postbag fast compile
+    needs: [test]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v7
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run cargo test
+        env:
+          RUSTFLAGS: --cfg postbag_fast_compile
+        run: cargo test
+
   test-features:
     name: Test ${{ matrix.feature }} feature
     needs: [test]

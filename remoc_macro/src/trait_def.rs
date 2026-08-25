@@ -1904,7 +1904,7 @@ impl TraitDef {
                     ::remoc::rtc::Req<#req_value #req_generics, #req_ref #req_generics, #req_ref_mut #req_generics>,
                     Codec,
                 >,
-                max_response_size: usize,
+                max_response_size: u64,
                 sequential: bool,
                 stop_on_error: bool,
                 drop_tx: ::remoc::rtc::local_broadcast::Sender<()>,
@@ -1918,13 +1918,17 @@ impl TraitDef {
                         ::remoc::rtc::Req<#req_value #req_generics, #req_ref #req_generics, #req_ref_mut #req_generics>,
                         Codec,
                     > => "_0",
-                    #[serde(default = "::remoc::rtc::missing_max_response_size")]
-                    #[serde(with = "::remoc::rtc::serde_max_response_size")]
-                    max_response_size: usize => "_1",
+                    #[serde(default = "::remoc::rch::default_max_item_size")]
+                    #[serde(skip_serializing_if = "::remoc::rch::is_default_max_item_size")]
+                    max_response_size: u64 => "_1",
+                    #[serde(default)]
+                    #[serde(skip_serializing_if = "::remoc::codec::skip::if_default_ref")]
+                    sequential: bool => "_2",
+                    #[serde(default)]
+                    #[serde(skip_serializing_if = "::remoc::codec::skip::if_default_ref")]
+                    stop_on_error: bool => "_3",
                 }
                 default {
-                    sequential = false,
-                    stop_on_error = false,
                     drop_tx = ::remoc::rtc::empty_client_drop_tx(),
                     monitor = ::remoc::rtc::default_client_monitor(),
                 }
@@ -1947,7 +1951,7 @@ impl TraitDef {
                     __R: ::remoc::rtc::Response,
                     ::remoc::rtc::TransportedResponse<__R>: ::remoc::RemoteSend,
                 {
-                    let (responder, response_rx) = ::remoc::rtc::response_channel(self.max_response_size);
+                    let (responder, response_rx) = ::remoc::rtc::response_channel(::remoc::rtc::Client::max_response_size(self));
                     let responder = ::remoc::rtc::Responder::new(
                         responder, self.sequential, self.stop_on_error,
                     );
@@ -1961,7 +1965,7 @@ impl TraitDef {
                 {
                     Self {
                         req_tx,
-                        max_response_size: ::remoc::rch::DEFAULT_MAX_ITEM_SIZE,
+                        max_response_size: ::remoc::rch::default_max_item_size(),
                         sequential: false,
                         stop_on_error: false,
                         drop_tx: ::remoc::rtc::empty_client_drop_tx(),
@@ -2009,11 +2013,12 @@ impl TraitDef {
                 }
 
                 fn max_response_size(&self) -> usize {
-                    self.max_response_size
+                    ::std::convert::TryFrom::try_from(self.max_response_size).unwrap_or(::std::usize::MAX)
                 }
 
                 fn set_max_response_size(&mut self, max_response_size: usize) {
-                    self.max_response_size = max_response_size
+                    self.max_response_size =
+                        ::std::convert::TryFrom::try_from(max_response_size).unwrap_or(u64::MAX)
                 }
 
                 fn sequential(&self) -> bool {

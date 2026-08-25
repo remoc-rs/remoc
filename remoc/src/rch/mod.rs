@@ -448,12 +448,14 @@ pub const DEFAULT_MAX_ITEM_SIZE: usize = 16_777_216;
 
 /// Maximum item size to assume for a `max_item_size` field that the received data
 /// does not contain, which is [`DEFAULT_MAX_ITEM_SIZE`].
-pub(crate) fn default_max_item_size() -> u64 {
+#[doc(hidden)]
+pub fn default_max_item_size() -> u64 {
     DEFAULT_MAX_ITEM_SIZE as u64
 }
 
 /// Whether a `max_item_size` field holding [`DEFAULT_MAX_ITEM_SIZE`] may be left out.
-pub(crate) fn is_default_max_item_size(value: &&u64) -> bool {
+#[doc(hidden)]
+pub fn is_default_max_item_size(value: &&u64) -> bool {
     crate::codec::skip::allow_skip() && **value == default_max_item_size()
 }
 

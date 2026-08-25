@@ -190,3 +190,54 @@ async fn parallelism_of_one_serves_sequentially() {
 async fn parallelism_of_zero_dispatches_inline() {
     assert_eq!(max_concurrent_with(false, Some(0)).await, 1);
 }
+
+/// The call options of a client are transferred together with it, so that a
+/// pre-configured client behaves the same at the endpoint it is sent to.
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
+async fn call_options_are_transferred() {
+    crate::init();
+    let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<WorkerClient>().await;
+
+    let (server, mut client) = WorkerServerShared::new(Arc::new(WorkerObj::default()));
+    client.set_sequential(true);
+    client.set_stop_on_error(true);
+    client.set_max_response_size(4096);
+    a_tx.send(client).await.unwrap();
+
+    let client_task = async move {
+        let client = b_rx.recv().await.unwrap().unwrap();
+        assert!(client.sequential(), "sequential was not transferred");
+        assert!(client.stop_on_error(), "stop_on_error was not transferred");
+        assert_eq!(client.max_response_size(), 4096, "max_response_size was not transferred");
+
+        client.work().await.unwrap();
+    };
+
+    let ((), res) = tokio::join!(client_task, server.serve());
+    res.unwrap();
+}
+
+/// Call options holding their default value are left out of the serialized client and
+/// restored at the endpoint it is sent to.
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
+async fn default_call_options_are_restored() {
+    crate::init();
+    let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<WorkerClient>().await;
+
+    let (server, client) = WorkerServerShared::new(Arc::new(WorkerObj::default()));
+    a_tx.send(client).await.unwrap();
+
+    let client_task = async move {
+        let client = b_rx.recv().await.unwrap().unwrap();
+        assert!(!client.sequential());
+        assert!(!client.stop_on_error());
+        assert_eq!(client.max_response_size(), remoc::rch::DEFAULT_MAX_ITEM_SIZE);
+
+        client.work().await.unwrap();
+    };
+
+    let ((), res) = tokio::join!(client_task, server.serve());
+    res.unwrap();
+}

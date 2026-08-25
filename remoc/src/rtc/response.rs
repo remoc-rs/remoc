@@ -749,38 +749,3 @@ mod transported {
         "unsupported combination of response channel and request receiver".into()
     }
 }
-
-/// Missing maximum response size value for backwards compatibility.
-#[doc(hidden)]
-pub const fn missing_max_response_size() -> usize {
-    usize::MAX
-}
-
-/// Serialization for `max_response_size` field.
-#[doc(hidden)]
-pub mod serde_max_response_size {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-    use std::borrow::Borrow;
-
-    /// Serialization function.
-    ///
-    /// This is generic over `T` so that it can also be used for a field holding
-    /// a reference, as used by the generated serialization types.
-    pub fn serialize<T, S>(max_response_size: &T, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        T: Borrow<usize>,
-        S: Serializer,
-    {
-        let max_response_size = u64::try_from(*max_response_size.borrow()).unwrap_or(u64::MAX);
-        max_response_size.serialize(serializer)
-    }
-
-    /// Deserialization function.
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<usize, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let max_response_size = u64::deserialize(deserializer)?;
-        Ok(usize::try_from(max_response_size).unwrap_or(usize::MAX))
-    }
-}

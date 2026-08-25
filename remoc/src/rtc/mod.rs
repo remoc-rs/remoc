@@ -313,8 +313,7 @@ pub use response::ResponseSender;
 #[doc(hidden)]
 pub use response::{
     Completing, PipelinableResponder, PipelinableResponse, Responder, Response, ResponseErrorSender,
-    TransportedResponse, complete_call, missing_max_response_size, response_channel, response_error_channel,
-    serde_max_response_size,
+    TransportedResponse, complete_call, response_channel, response_error_channel,
 };
 
 use futures::future::BoxFuture;

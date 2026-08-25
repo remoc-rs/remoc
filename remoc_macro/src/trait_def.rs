@@ -609,26 +609,26 @@ impl TraitDef {
         let (mut value_entries, mut ref_entries, mut ref_mut_entries) = (quote! {}, quote! {}, quote! {});
         let (mut value_clauses, mut ref_clauses, mut ref_mut_clauses) = (quote! {}, quote! {}, quote! {});
         let (mut value_names, mut ref_names, mut ref_mut_names) = (quote! {}, quote! {}, quote! {});
-        let (mut value_spawns, mut ref_spawns, mut ref_mut_spawns) = (quote! {}, quote! {}, quote! {});
+        let (mut value_seqs, mut ref_seqs, mut ref_mut_seqs) = (quote! {}, quote! {}, quote! {});
         for md in &self.methods {
             match md.self_ref {
                 SelfRef::Value => {
                     value_entries.append_all(md.request_enum_entry(assoc));
                     value_clauses.append_all(md.dispatch_discriminator());
                     value_names.append_all(md.method_name_clause());
-                    value_spawns.append_all(md.allow_spawn_clause());
+                    value_seqs.append_all(md.sequential_clause());
                 }
                 SelfRef::Ref => {
                     ref_entries.append_all(md.request_enum_entry(assoc));
                     ref_clauses.append_all(md.dispatch_discriminator());
                     ref_names.append_all(md.method_name_clause());
-                    ref_spawns.append_all(md.allow_spawn_clause());
+                    ref_seqs.append_all(md.sequential_clause());
                 }
                 SelfRef::RefMut => {
                     ref_mut_entries.append_all(md.request_enum_entry(assoc));
                     ref_mut_clauses.append_all(md.dispatch_discriminator());
                     ref_mut_names.append_all(md.method_name_clause());
-                    ref_mut_spawns.append_all(md.allow_spawn_clause());
+                    ref_mut_seqs.append_all(md.sequential_clause());
                 }
             }
         }
@@ -695,9 +695,9 @@ impl TraitDef {
                     }
                 }
 
-                fn allow_spawn(&self) -> bool {
+                fn sequential(&self) -> bool {
                     match self {
-                        #value_spawns
+                        #value_seqs
                         #phantom_clause
                     }
                 }
@@ -746,9 +746,9 @@ impl TraitDef {
                     }
                 }
 
-                fn allow_spawn(&self) -> bool {
+                fn sequential(&self) -> bool {
                     match self {
-                        #ref_spawns
+                        #ref_seqs
                         #phantom_clause
                     }
                 }
@@ -797,9 +797,9 @@ impl TraitDef {
                     }
                 }
 
-                fn allow_spawn(&self) -> bool {
+                fn sequential(&self) -> bool {
                     match self {
-                        #ref_mut_spawns
+                        #ref_mut_seqs
                         #phantom_clause
                     }
                 }
@@ -1247,7 +1247,7 @@ impl TraitDef {
                                 match req {
                                     Ok(Some(::remoc::rtc::Req::Ref(req))) => {
                                         let err_tx = err_tx.clone();
-                                        if parallelism > 0 && ::remoc::rtc::ReqEnum::allow_spawn(&req) {
+                                        if parallelism > 0 && !::remoc::rtc::ReqEnum::sequential(&req) {
                                             use ::remoc::rtc::Instrument;
                                             let permit = ::remoc::rtc::acquire_dispatch_permit(&semaphore).await;
                                             let target = target.clone();
@@ -1380,7 +1380,7 @@ impl TraitDef {
                                 match req {
                                     Ok(Some(::remoc::rtc::Req::Ref(req))) => {
                                         let err_tx = err_tx.clone();
-                                        if parallelism > 0 && ::remoc::rtc::ReqEnum::allow_spawn(&req) {
+                                        if parallelism > 0 && !::remoc::rtc::ReqEnum::sequential(&req) {
                                             use ::remoc::rtc::Instrument;
                                             let permit = ::remoc::rtc::acquire_dispatch_permit(&semaphore).await;
                                             let target = target.clone().read_owned().await;
@@ -1878,7 +1878,7 @@ impl TraitDef {
                         Self {
                             req_tx: self.req_tx.clone(),
                             max_reply_size: self.max_reply_size,
-                            allow_spawn: self.allow_spawn,
+                            sequential: self.sequential,
                             stop_on_error: self.stop_on_error,
                             drop_tx: self.drop_tx.clone(),
                             monitor: self.monitor.clone(),
@@ -1905,7 +1905,7 @@ impl TraitDef {
                     Codec,
                 >,
                 max_reply_size: usize,
-                allow_spawn: bool,
+                sequential: bool,
                 stop_on_error: bool,
                 drop_tx: ::remoc::rtc::local_broadcast::Sender<()>,
                 monitor: ::std::sync::Arc<dyn ::remoc::rtc::ClientMonitor<#req_params>>,
@@ -1923,7 +1923,7 @@ impl TraitDef {
                     max_reply_size: usize => "_1",
                 }
                 default {
-                    allow_spawn = true,
+                    sequential = false,
                     stop_on_error = false,
                     drop_tx = ::remoc::rtc::empty_client_drop_tx(),
                     monitor = ::remoc::rtc::default_client_monitor(),
@@ -1949,7 +1949,7 @@ impl TraitDef {
                 {
                     let (reply_tx, reply_rx) = ::remoc::rtc::reply_channel(self.max_reply_size);
                     let reply_to = ::remoc::rtc::ReplyTo::new(
-                        reply_tx, self.allow_spawn, self.stop_on_error,
+                        reply_tx, self.sequential, self.stop_on_error,
                     );
                     (reply_to, reply_rx)
                 }
@@ -1962,7 +1962,7 @@ impl TraitDef {
                     Self {
                         req_tx,
                         max_reply_size: ::remoc::rch::DEFAULT_MAX_ITEM_SIZE,
-                        allow_spawn: true,
+                        sequential: false,
                         stop_on_error: false,
                         drop_tx: ::remoc::rtc::empty_client_drop_tx(),
                         monitor: ::remoc::rtc::default_client_monitor(),
@@ -2016,12 +2016,12 @@ impl TraitDef {
                     self.max_reply_size = max_reply_size
                 }
 
-                fn allow_spawn(&self) -> bool {
-                    self.allow_spawn
+                fn sequential(&self) -> bool {
+                    self.sequential
                 }
 
-                fn set_allow_spawn(&mut self, allow_spawn: bool) {
-                    self.allow_spawn = allow_spawn
+                fn set_sequential(&mut self, sequential: bool) {
+                    self.sequential = sequential
                 }
 
                 fn stop_on_error(&self) -> bool {

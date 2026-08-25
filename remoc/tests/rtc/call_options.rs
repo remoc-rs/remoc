@@ -1,4 +1,4 @@
-//! The `allow_spawn` and `stop_on_error` call options of a client.
+//! The `sequential` and `stop_on_error` call options of a client.
 
 #[cfg(all(target_family = "wasm", feature = "js"))]
 use wasm_bindgen_test::wasm_bindgen_test;
@@ -70,7 +70,7 @@ impl Worker for WorkerObj {
 /// concurrently.
 ///
 /// `parallelism` is applied to the server when given, otherwise it keeps its default.
-async fn max_concurrent_with(allow_spawn: bool, parallelism: Option<usize>) -> usize {
+async fn max_concurrent_with(sequential: bool, parallelism: Option<usize>) -> usize {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<WorkerClient>().await;
 
@@ -85,8 +85,8 @@ async fn max_concurrent_with(allow_spawn: bool, parallelism: Option<usize>) -> u
 
     let client_task = async move {
         let mut client = b_rx.recv().await.unwrap().unwrap();
-        client.set_allow_spawn(allow_spawn);
-        assert_eq!(client.allow_spawn(), allow_spawn);
+        client.set_sequential(sequential);
+        assert_eq!(client.sequential(), sequential);
 
         // Start all calls before awaiting any of them, so that they reach the
         // server while the preceding ones are still running.
@@ -110,14 +110,14 @@ async fn max_concurrent_with(allow_spawn: bool, parallelism: Option<usize>) -> u
 
 #[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
 #[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
-async fn allow_spawn_is_default() {
-    assert_eq!(max_concurrent_with(true, None).await, 4);
+async fn concurrent_dispatch_is_default() {
+    assert_eq!(max_concurrent_with(false, None).await, 4);
 }
 
 #[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
 #[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
-async fn allow_spawn_disabled_serves_sequentially() {
-    assert_eq!(max_concurrent_with(false, None).await, 1);
+async fn sequential_client_is_dispatched_inline() {
+    assert_eq!(max_concurrent_with(true, None).await, 1);
 }
 
 #[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
@@ -174,19 +174,19 @@ async fn stop_on_error_is_off_by_default() {
 #[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
 #[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn parallelism_limits_concurrent_calls() {
-    assert_eq!(max_concurrent_with(true, Some(2)).await, 2);
+    assert_eq!(max_concurrent_with(false, Some(2)).await, 2);
 }
 
 /// A parallelism of one runs a single call at a time, but on its own task.
 #[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
 #[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn parallelism_of_one_serves_sequentially() {
-    assert_eq!(max_concurrent_with(true, Some(1)).await, 1);
+    assert_eq!(max_concurrent_with(false, Some(1)).await, 1);
 }
 
 /// A parallelism of zero dispatches calls inline.
 #[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
 #[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn parallelism_of_zero_dispatches_inline() {
-    assert_eq!(max_concurrent_with(true, Some(0)).await, 1);
+    assert_eq!(max_concurrent_with(false, Some(0)).await, 1);
 }

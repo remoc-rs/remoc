@@ -543,11 +543,11 @@ pub trait ReqEnum {
     /// Panics when called on the `__Phantom` variant.
     fn method_name(&self) -> &'static str;
 
-    /// Whether the caller permits the server to dispatch this request on its own task.
+    /// Whether the caller requests the server to dispatch this request inline.
     ///
     /// # Panics
     /// Panics when called on the `__Phantom` variant.
-    fn allow_spawn(&self) -> bool;
+    fn sequential(&self) -> bool;
 }
 
 /// A request from client to server.
@@ -663,20 +663,17 @@ pub trait Client {
     /// Sets the maximum allowed size of a reply in bytes.
     fn set_max_reply_size(&mut self, max_reply_size: usize);
 
-    /// Whether the server may dispatch calls made by this client on their own tasks.
+    /// Whether the server processes the calls of this client one after another.
     ///
-    /// This is `true` by default. When set to `false` the server serves the calls of
-    /// this client sequentially, in the order they were made, even when it was started
-    /// with `spawn` enabled. Calls of other clients are unaffected.
+    /// This is `false` by default. When set to `true` each call is dispatched inline,
+    /// i.e. the server runs it to completion before receiving the next request.
     ///
-    /// Only [`ServerShared`] and [`ServerSharedMut`] dispatch in parallel at all, and
-    /// only calls to methods taking `&self`. A call to a method taking `&mut self`
-    /// requires exclusive access to the target and is always served sequentially,
-    /// thus this has no effect on it.
-    fn allow_spawn(&self) -> bool;
+    /// Only [`ServerShared`] and [`ServerSharedMut`] dispatch concurrently, and only
+    /// calls to methods taking `&self`, thus this has no effect otherwise.
+    fn sequential(&self) -> bool;
 
-    /// Sets whether the server may dispatch calls made by this client on their own tasks.
-    fn set_allow_spawn(&mut self, allow_spawn: bool);
+    /// Sets whether the server processes the calls of this client one after another.
+    fn set_sequential(&mut self, sequential: bool);
 
     /// Whether the server shall stop serving when a call made by this client fails.
     ///

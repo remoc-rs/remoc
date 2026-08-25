@@ -703,11 +703,11 @@ impl TraitMethod {
         }
     }
 
-    /// Match clause yielding whether the request permits dispatching on an own task.
-    pub fn allow_spawn_clause(&self) -> TokenStream {
+    /// Match clause yielding whether the request must be dispatched inline.
+    pub fn sequential_clause(&self) -> TokenStream {
         let enum_ident = to_pascal_case(&self.ident);
         quote! {
-            Self :: #enum_ident { __reply_tx, .. } => __reply_tx.allow_spawn(),
+            Self :: #enum_ident { __reply_tx, .. } => __reply_tx.sequential(),
         }
     }
 

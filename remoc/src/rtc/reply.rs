@@ -214,8 +214,9 @@ where
 {
     /// Channel the reply is sent over.
     tx: ReplySender<R, Codec>,
-    /// Whether the server may dispatch the call on its own task.
-    allow_spawn: bool,
+    /// Whether the server shall dispatch the call inline, i.e. process it before
+    /// receiving further requests.
+    sequential: bool,
     /// Whether the server shall stop serving when the call fails.
     stop_on_error: bool,
 }
@@ -226,7 +227,7 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         f.debug_struct("ReplyTo")
-            .field("allow_spawn", &self.allow_spawn)
+            .field("sequential", &self.sequential)
             .field("stop_on_error", &self.stop_on_error)
             .finish()
     }
@@ -237,7 +238,7 @@ where
     R: IsReply,
 {
     fn from(reply_tx: ReplySender<R, Codec>) -> Self {
-        Self { tx: reply_tx, allow_spawn: true, stop_on_error: false }
+        Self { tx: reply_tx, sequential: false, stop_on_error: false }
     }
 }
 
@@ -256,13 +257,14 @@ where
 {
     /// Creates a new reply target with the specified call options.
     #[doc(hidden)]
-    pub fn new(tx: ReplySender<R, Codec>, allow_spawn: bool, stop_on_error: bool) -> Self {
-        Self { tx, allow_spawn, stop_on_error }
+    pub fn new(tx: ReplySender<R, Codec>, sequential: bool, stop_on_error: bool) -> Self {
+        Self { tx, sequential, stop_on_error }
     }
 
-    /// Whether the server may dispatch the call on its own task.
-    pub fn allow_spawn(&self) -> bool {
-        self.allow_spawn
+    /// Whether the server shall dispatch the call inline, i.e. process it before
+    /// receiving further requests.
+    pub fn sequential(&self) -> bool {
+        self.sequential
     }
 
     /// Whether the server shall stop serving when the call fails.
@@ -378,8 +380,8 @@ mod transported {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub req_rx: Option<&'transport Rx>,
         #[serde(rename = "_2")]
-        #[serde(skip_serializing_if = "is_true")]
-        pub allow_spawn: bool,
+        #[serde(skip_serializing_if = "is_false")]
+        pub sequential: bool,
         #[serde(rename = "_3")]
         #[serde(skip_serializing_if = "is_false")]
         pub stop_on_error: bool,
@@ -402,23 +404,15 @@ mod transported {
         #[serde(default = "none")]
         pub req_rx: Option<Rx>,
         #[serde(rename = "_2")]
-        #[serde(default = "yes")]
-        pub allow_spawn: bool,
+        #[serde(default)]
+        pub sequential: bool,
         #[serde(rename = "_3")]
         #[serde(default)]
         pub stop_on_error: bool,
     }
 
-    pub fn is_true(value: &bool) -> bool {
-        *value
-    }
-
     pub fn is_false(value: &bool) -> bool {
         !*value
-    }
-
-    pub fn yes() -> bool {
-        true
     }
 
     pub fn none<T>() -> Option<T> {
@@ -456,7 +450,7 @@ where
         Ok(transported::ReplyRef {
             tx: transported::SenderRef::Full(&self.tx),
             req_rx: None,
-            allow_spawn: self.allow_spawn,
+            sequential: self.sequential,
             stop_on_error: self.stop_on_error,
         })
     }
@@ -464,9 +458,9 @@ where
     type Current = transported::TransportedReply<R, (), Codec>;
 
     fn from_current(current: Self::Current) -> Result<Self, crate::versioned::Error> {
-        let transported::TransportedReply { tx, req_rx, allow_spawn, stop_on_error } = current;
+        let transported::TransportedReply { tx, req_rx, sequential, stop_on_error } = current;
         match (tx, req_rx) {
-            (transported::Sender::Full(tx), None) => Ok(Self { tx, allow_spawn, stop_on_error }),
+            (transported::Sender::Full(tx), None) => Ok(Self { tx, sequential, stop_on_error }),
             _ => Err(transported::unsupported_combination()),
         }
     }
@@ -477,7 +471,7 @@ where
         Self: 'transport;
 
     fn as_old<'transport>(&'transport self) -> Result<Self::OldRef<'transport>, crate::versioned::Error> {
-        if !self.allow_spawn || self.stop_on_error {
+        if self.sequential || self.stop_on_error {
             return Err(transported::unsupported());
         }
 
@@ -544,11 +538,12 @@ impl<R, Codec> PipelinableReplyTo<R, Codec>
 where
     R: IsPipelinableReply,
 {
-    /// Whether the server may dispatch the call on its own task.
-    pub fn allow_spawn(&self) -> bool {
+    /// Whether the server shall dispatch the call inline, i.e. process it before
+    /// receiving further requests.
+    pub fn sequential(&self) -> bool {
         match self {
-            Self::Normal(reply_to) => reply_to.allow_spawn(),
-            Self::Pipeline { reply_tx, .. } => reply_tx.allow_spawn(),
+            Self::Normal(reply_to) => reply_to.sequential(),
+            Self::Pipeline { reply_tx, .. } => reply_tx.sequential(),
         }
     }
 
@@ -654,13 +649,13 @@ where
             Self::Normal(reply_to) => transported::ReplyRef {
                 tx: transported::SenderRef::Full(&reply_to.tx),
                 req_rx: None,
-                allow_spawn: reply_to.allow_spawn,
+                sequential: reply_to.sequential,
                 stop_on_error: reply_to.stop_on_error,
             },
             Self::Pipeline { req_rx, reply_tx } => transported::ReplyRef {
                 tx: transported::SenderRef::WithoutValue(&reply_tx.tx),
                 req_rx: Some(req_rx),
-                allow_spawn: reply_tx.allow_spawn,
+                sequential: reply_tx.sequential,
                 stop_on_error: reply_tx.stop_on_error,
             },
         })
@@ -669,11 +664,11 @@ where
     type Current = transported::TransportedReply<R, <R as IsPipelinableReply>::ReqReceiver, Codec>;
 
     fn from_current(current: Self::Current) -> Result<Self, crate::versioned::Error> {
-        let transported::TransportedReply { tx, req_rx, allow_spawn, stop_on_error } = current;
+        let transported::TransportedReply { tx, req_rx, sequential, stop_on_error } = current;
         match (tx, req_rx) {
-            (transported::Sender::Full(tx), None) => Ok(Self::Normal(ReplyTo { tx, allow_spawn, stop_on_error })),
+            (transported::Sender::Full(tx), None) => Ok(Self::Normal(ReplyTo { tx, sequential, stop_on_error })),
             (transported::Sender::WithoutValue(tx), Some(req_rx)) => {
-                Ok(Self::Pipeline { req_rx, reply_tx: ReplyTo { tx, allow_spawn, stop_on_error } })
+                Ok(Self::Pipeline { req_rx, reply_tx: ReplyTo { tx, sequential, stop_on_error } })
             }
             _ => Err(transported::unsupported_combination()),
         }

@@ -48,7 +48,7 @@ async fn simple() {
 
     println!("Creating default server");
     let mut counter_obj = CounterObj::new();
-    let (server, client) = DefaultTraitServerRefMut::new(&mut counter_obj, 1);
+    let (server, client) = DefaultTraitServerRefMut::new(&mut counter_obj);
 
     println!("Sending default client");
     a_tx.send(client).await.unwrap();

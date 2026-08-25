@@ -72,7 +72,7 @@ async fn simple() {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<StorageClient<u32>>().await;
 
     let mut obj = StorageObj::new(0u32);
-    let (server, client) = StorageServerRefMut::new(&mut obj, 1);
+    let (server, client) = StorageServerRefMut::new(&mut obj);
 
     a_tx.send(client).await.unwrap();
 
@@ -96,7 +96,7 @@ async fn fixed() {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<StorageClient<String>>().await;
 
     let mut obj = FixedStorage::new();
-    let (server, client) = StorageServerRefMut::new(&mut obj, 1);
+    let (server, client) = StorageServerRefMut::new(&mut obj);
 
     a_tx.send(client).await.unwrap();
 

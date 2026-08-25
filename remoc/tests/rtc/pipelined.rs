@@ -87,7 +87,7 @@ impl Directory for DirectoryObj {
         }
 
         let obj = Arc::new(RwLock::new(CounterObj { value: 0 }));
-        let (server, client) = CounterServerSharedMut::new(obj, 1);
+        let (server, client) = CounterServerSharedMut::new(obj);
         wokio::spawn(server.serve(true));
 
         Ok(client)
@@ -98,7 +98,7 @@ impl Directory for DirectoryObj {
 async fn directory_client() -> DirectoryClient {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<DirectoryClient>().await;
 
-    let (server, client) = DirectoryServerShared::new(Arc::new(DirectoryObj), 1);
+    let (server, client) = DirectoryServerShared::new(Arc::new(DirectoryObj));
     wokio::spawn(server.serve(true));
     a_tx.send(client).await.unwrap();
 
@@ -124,7 +124,7 @@ async fn pipelined_call() {
     crate::init();
     let dir = directory_client().await;
 
-    let (mut counter, counter_rx) = CounterClient::new(4);
+    let (mut counter, counter_rx) = CounterClient::new();
 
     // The request receiver is handed over immediately, so the counter can be used
     // without waiting for the session call to complete.
@@ -148,7 +148,7 @@ async fn pipelined_call_denied() {
     crate::init();
     let dir = directory_client().await;
 
-    let (mut counter, counter_rx) = CounterClient::new(4);
+    let (mut counter, counter_rx) = CounterClient::new();
 
     let (value, opened) = tokio::join!(
         async move { counter.increase(20).await },
@@ -186,7 +186,7 @@ pub struct SessionsObj;
 
 impl Sessions for SessionsObj {
     async fn open(&self) -> Result<SessionClient, CallError> {
-        let (server, client) = SessionServer::new(SessionObj, 1);
+        let (server, client) = SessionServer::new(SessionObj);
         wokio::spawn(server.serve());
         Ok(client)
     }
@@ -199,12 +199,12 @@ async fn pipelined_call_consuming_the_object() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<SessionsClient>().await;
 
-    let (server, client) = SessionsServerShared::new(Arc::new(SessionsObj), 1);
+    let (server, client) = SessionsServerShared::new(Arc::new(SessionsObj));
     wokio::spawn(server.serve(true));
     a_tx.send(client).await.unwrap();
     let sessions = b_rx.recv().await.unwrap().unwrap();
 
-    let (session, session_rx) = SessionClient::new(4);
+    let (session, session_rx) = SessionClient::new();
 
     let (value, opened) = tokio::join!(
         async move {
@@ -231,7 +231,7 @@ async fn manual_req_receiver_completes_pipelined_call() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<DirectoryClient>().await;
 
-    let (mut req_rx, client) = DirectoryReqReceiver::new(1);
+    let (mut req_rx, client) = DirectoryReqReceiver::new();
     a_tx.send(client).await.unwrap();
     let dir = b_rx.recv().await.unwrap().unwrap();
 
@@ -240,7 +240,7 @@ async fn manual_req_receiver_completes_pipelined_call() {
             if let Req::Ref(DirectoryReqRef::OpenCounter { __reply_tx, name }) = req {
                 let result = if name == "allowed" {
                     let obj = Arc::new(RwLock::new(CounterObj { value: 0 }));
-                    let (server, client) = CounterServerSharedMut::new(obj, 1);
+                    let (server, client) = CounterServerSharedMut::new(obj);
                     wokio::spawn(server.serve(true));
                     Ok(client)
                 } else {
@@ -259,7 +259,7 @@ async fn manual_req_receiver_completes_pipelined_call() {
         }
     });
 
-    let (mut counter, counter_rx) = CounterClient::new(4);
+    let (mut counter, counter_rx) = CounterClient::new();
 
     let session = dir.open_counter_pipelined("allowed".to_string(), counter_rx).await;
 
@@ -279,7 +279,7 @@ async fn calls_macro() -> Result<(), WorkError> {
     crate::init();
     let dir = directory_client().await;
 
-    let (mut counter, counter_rx) = CounterClient::new(8);
+    let (mut counter, counter_rx) = CounterClient::new();
 
     // The session and the calls have differing error types, which are converted into
     // the error type of this function.
@@ -304,7 +304,7 @@ async fn calls_macro_without_value() -> Result<(), WorkError> {
     crate::init();
     let dir = directory_client().await;
 
-    let (mut counter, counter_rx) = CounterClient::new(8);
+    let (mut counter, counter_rx) = CounterClient::new();
 
     rtc::calls!(
         dir.open_counter_pipelined("allowed".to_string(), counter_rx);
@@ -344,7 +344,7 @@ async fn calls_macro_reports_session_error() {
     crate::init();
     let dir = directory_client().await;
 
-    let (mut counter, counter_rx) = CounterClient::new(8);
+    let (mut counter, counter_rx) = CounterClient::new();
 
     // Obtaining the result as a value, rather than propagating it, requires an async
     // block that states the error type.
@@ -368,7 +368,7 @@ async fn call_map_err() {
     crate::init();
     let dir = directory_client().await;
 
-    let (mut counter, counter_rx) = CounterClient::new(8);
+    let (mut counter, counter_rx) = CounterClient::new();
 
     // Error type `OpenError`.
     let session = dir.open_counter_pipelined("allowed".to_string(), counter_rx).await;

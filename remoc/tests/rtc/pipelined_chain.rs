@@ -52,7 +52,7 @@ impl Middle for MiddleObj {
     }
 
     async fn open_leaf(&self) -> Result<LeafClient, CallError> {
-        let (server, client) = LeafServerSharedMut::new(self.leaf.clone(), 1);
+        let (server, client) = LeafServerSharedMut::new(self.leaf.clone());
         wokio::spawn(server.serve(true));
         Ok(client)
     }
@@ -70,7 +70,7 @@ pub struct RootObj {
 
 impl Root for RootObj {
     async fn open_middle(&self) -> Result<MiddleClient, CallError> {
-        let (server, client) = MiddleServerSharedMut::new(self.middle.clone(), 1);
+        let (server, client) = MiddleServerSharedMut::new(self.middle.clone());
         wokio::spawn(server.serve(true));
         Ok(client)
     }
@@ -82,7 +82,7 @@ async fn root_client() -> RootClient {
 
     let leaf = Arc::new(RwLock::new(LeafObj { value: 0 }));
     let middle = Arc::new(RwLock::new(MiddleObj { leaf }));
-    let (server, client) = RootServerShared::new(Arc::new(RootObj { middle }), 1);
+    let (server, client) = RootServerShared::new(Arc::new(RootObj { middle }));
     wokio::spawn(server.serve(true));
     a_tx.send(client).await.unwrap();
 
@@ -98,8 +98,8 @@ async fn chained_pipelines() -> Result<(), CallError> {
     crate::init();
     let root = root_client().await;
 
-    let (mut middle, middle_rx) = MiddleClient::new(4);
-    let (mut leaf, leaf_rx) = LeafClient::new(4);
+    let (mut middle, middle_rx) = MiddleClient::new();
+    let (mut leaf, leaf_rx) = LeafClient::new();
 
     // `set` reaches the middle object before `open_leaf` does, and the leaf object is
     // only served once `open_leaf` has been handled, so `increase` sees the value set

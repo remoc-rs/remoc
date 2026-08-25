@@ -72,7 +72,7 @@ async fn max_concurrent_with(allow_spawn: bool) -> usize {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<WorkerClient>().await;
 
-    let (server, client) = WorkerServerShared::new(Arc::new(WorkerObj::default()), 16);
+    let (server, client) = WorkerServerShared::new(Arc::new(WorkerObj::default()));
     a_tx.send(client).await.unwrap();
 
     let client_task = async move {
@@ -113,7 +113,7 @@ async fn stop_on_error_stops_the_server() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<WorkerClient>().await;
 
-    let (server, client) = WorkerServerShared::new(Arc::new(WorkerObj::default()), 16);
+    let (server, client) = WorkerServerShared::new(Arc::new(WorkerObj::default()));
     a_tx.send(client).await.unwrap();
 
     let client_task = async move {
@@ -139,7 +139,7 @@ async fn stop_on_error_is_off_by_default() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<WorkerClient>().await;
 
-    let (server, client) = WorkerServerShared::new(Arc::new(WorkerObj::default()), 16);
+    let (server, client) = WorkerServerShared::new(Arc::new(WorkerObj::default()));
     a_tx.send(client).await.unwrap();
 
     let client_task = async move {

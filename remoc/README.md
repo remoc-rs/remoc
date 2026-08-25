@@ -461,7 +461,7 @@ async fn connect_server() {
     // Create the server and its client for the counter object.
     let counter_obj = Arc::new(RwLock::new(CounterObj { value: 0 }));
     let (server, client) =
-        CounterServerSharedMut::<_, remoc::codec::Default>::new(counter_obj, 1);
+        CounterServerSharedMut::<_, remoc::codec::Default>::new(counter_obj);
 
     // Establish the Remoc connection and send the client to the remote endpoint.
     remoc::Connect::io(remoc::Cfg::default(), socket_rx, socket_tx)

@@ -241,7 +241,7 @@ impl TraitDef {
     /// `target_ty` is how the server type holds its target object.
     fn server_ctors(target_ty: TokenStream) -> TokenStream {
         quote! {
-            fn new(target: #target_ty, request_buffer: usize) -> (Self, Self::Client) {
+            fn with_request_buffer(target: #target_ty, request_buffer: usize) -> (Self, Self::Client) {
                 let (req_tx, req_rx) = ::remoc::rch::mpsc::with_local_buffer(request_buffer);
                 (
                     Self {
@@ -1463,7 +1463,7 @@ impl TraitDef {
                 type Ref = #req_ref #req_generics;
                 type RefMut = #req_ref_mut #req_generics;
 
-                fn new(request_buffer: usize) -> (Self, Self::Client) {
+                fn with_request_buffer(request_buffer: usize) -> (Self, Self::Client) {
                     let (req_tx, req_rx) = ::remoc::rch::mpsc::with_local_buffer(request_buffer);
                     (
                         Self {
@@ -1940,10 +1940,11 @@ impl TraitDef {
             impl #impl_generics_impl ::remoc::rtc::Client for #client_ident #impl_generics_ty #impl_generics_where {
                 type ReqReceiver = #req_receiver #req_generics;
 
-                fn new(request_buffer: usize) -> (Self, Self::ReqReceiver) {
-                    let (req_rx, client) = <#req_receiver #req_generics as ::remoc::rtc::ReqReceiver<Codec>>::new(
-                        request_buffer,
-                    );
+                fn with_request_buffer(request_buffer: usize) -> (Self, Self::ReqReceiver) {
+                    let (req_rx, client) =
+                        <#req_receiver #req_generics as ::remoc::rtc::ReqReceiver<Codec>>::with_request_buffer(
+                            request_buffer,
+                        );
                     (client, req_rx)
                 }
 

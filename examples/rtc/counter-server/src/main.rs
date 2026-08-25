@@ -111,7 +111,7 @@ async fn main() {
                 //
                 // Current limitations of the Rust compiler require that we explicitly
                 // specify the codec.
-                let (server, client) = CounterServerSharedMut::<_, codec::Default>::new(counter_obj, 1);
+                let (server, client) = CounterServerSharedMut::<_, codec::Default>::new(counter_obj);
 
                 // Establish a Remoc connection with default configuration over the TCP connection and
                 // provide (i.e. send) the counter client to the client.

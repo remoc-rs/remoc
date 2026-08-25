@@ -36,7 +36,7 @@ async fn simple() {
 
     println!("Creating server");
     let obj = ReadValueObj::new(123);
-    let (server, client) = ReadValueServerRef::new(&obj, 1);
+    let (server, client) = ReadValueServerRef::new(&obj);
 
     println!("Sending client");
     a_tx.send(client).await.unwrap();
@@ -63,7 +63,7 @@ async fn closed() {
 
     println!("Creating server");
     let obj = ReadValueObj::new(123);
-    let (server, client) = ReadValueServerRef::new(&obj, 16);
+    let (server, client) = ReadValueServerRef::new(&obj);
 
     println!("Sending client");
     a_tx.send(client).await.unwrap();

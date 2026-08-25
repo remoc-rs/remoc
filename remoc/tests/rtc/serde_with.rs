@@ -48,7 +48,7 @@ async fn serde_with() {
 
     println!("Creating storage server");
     let mut storage_obj = StorageObj::new();
-    let (server, client) = StorageServerRefMut::new(&mut storage_obj, 1);
+    let (server, client) = StorageServerRefMut::new(&mut storage_obj);
 
     println!("Sending storage client");
     a_tx.send(client).await.unwrap();

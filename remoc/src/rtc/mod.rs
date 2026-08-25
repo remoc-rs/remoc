@@ -83,8 +83,8 @@
 //! them.
 //!
 //! A client and the request receiver connected to it can be created from either side:
-//! `TraitReqReceiver::new(request_buffer)` returns the request receiver first and
-//! `TraitClient::new(request_buffer)` the client first. Calls made on the client before
+//! `TraitReqReceiver::new()` returns the request receiver first and
+//! `TraitClient::new()` the client first. Calls made on the client before
 //! the request receiver is attached to a target object are queued.
 //!
 //! See [ReqReceiver] for details.
@@ -295,7 +295,7 @@
 //! async fn server(mut tx: rch::base::Sender<CounterClient>) {
 //!     let mut counter_obj = Arc::new(RwLock::new(CounterObj::new()));
 //!
-//!     let (server, client) = CounterServerSharedMut::new(counter_obj, 1);
+//!     let (server, client) = CounterServerSharedMut::new(counter_obj);
 //!     tx.send(client).await.unwrap();
 //!     server.serve(true).await.unwrap();
 //! }
@@ -326,7 +326,7 @@ use tokio_util::sync::ReusableBoxFuture;
 
 use crate::{
     RemoteSend, chmux, codec,
-    rch::{SendingError, SendingErrorKind, base, mpsc, oneshot},
+    rch::{DEFAULT_BUFFER, SendingError, SendingErrorKind, base, mpsc, oneshot},
 };
 
 /// Denotes a trait as remotely callable and generate a client and servers for it.
@@ -408,7 +408,7 @@ use crate::{
 /// is generated, which additionally takes the [request receiver](ReqReceiver) of that
 /// client. Specify `#[pipelinable(name)]` to name that method differently. The caller can
 /// thus create the client and request receiver pair itself using
-/// `OtherTraitClient::new(request_buffer)`, hand the request receiver over and call
+/// `OtherTraitClient::new()`, hand the request receiver over and call
 /// methods on the client without waiting for the call to complete; these calls are
 /// queued until the object is available.
 ///
@@ -603,18 +603,26 @@ pub trait Client {
     /// Requests received by it can be [forwarded](ReqReceiver::forward) to this client.
     type ReqReceiver;
 
-    /// Creates a client and the [request receiver](Self::ReqReceiver) connected to it.
+    /// Creates a client and the [request receiver](Self::ReqReceiver) connected to it with the default request buffer size.
     ///
-    /// `request_buffer` bounds the number of calls that can be queued for sending.
+    /// The request buffer is [`DEFAULT_BUFFER`] calls. Use
+    /// [`with_request_buffer`](Self::with_request_buffer) to choose a different size.
+    fn new() -> (Self, Self::ReqReceiver)
+    where
+        Self: Sized,
+    {
+        Self::with_request_buffer(DEFAULT_BUFFER)
+    }
+
+    /// Creates a client and the [request receiver](Self::ReqReceiver) connected to it with the specified request buffer size.
     ///
-    /// Calls made on the client are queued until the request receiver is
-    /// [attached to a target object](ReqReceiver) or its requests are
-    /// [forwarded](ReqReceiver::forward) to another client.
+    /// `request_buffer` bounds the number of calls that can be queued for sending locally while they
+    /// are waiting to be serialized, transferred or deserialized.
     ///
     /// # Panics
     ///
     /// Panics if `request_buffer` is zero.
-    fn new(request_buffer: usize) -> (Self, Self::ReqReceiver)
+    fn with_request_buffer(request_buffer: usize) -> (Self, Self::ReqReceiver)
     where
         Self: Sized;
 
@@ -996,14 +1004,23 @@ pub trait Server<Target, Codec>: ServerBase
 where
     Self: Sized,
 {
-    /// Creates a server and the client connected to it.
+    /// Creates a server and the client connected to it with the default request buffer size.
     ///
-    /// `request_buffer` bounds the number of calls that can wait to be processed.
+    /// The request buffer is [`DEFAULT_BUFFER`] calls. Use
+    /// [`with_request_buffer`](Self::with_request_buffer) to choose a different size.
+    fn new(target: Target) -> (Self, Self::Client) {
+        Self::with_request_buffer(target, DEFAULT_BUFFER)
+    }
+
+    /// Creates a server and the client connected to it with the specified request buffer size.
+    ///
+    /// `request_buffer` bounds the number of calls that can wait to be processed locally while they
+    /// are waiting to be serialized, transferred or deserialized.
     ///
     /// # Panics
     ///
     /// Panics if `request_buffer` is zero.
-    fn new(target: Target, request_buffer: usize) -> (Self, Self::Client);
+    fn with_request_buffer(target: Target, request_buffer: usize) -> (Self, Self::Client);
 
     /// Creates a server that processes the requests of an existing request receiver.
     ///
@@ -1031,14 +1048,23 @@ pub trait ServerRef<'target, Target, Codec>: ServerBase
 where
     Self: Sized,
 {
-    /// Creates a server and the client connected to it.
+    /// Creates a server and the client connected to it with the default request buffer size.
     ///
-    /// `request_buffer` bounds the number of calls that can wait to be processed.
+    /// The request buffer is [`DEFAULT_BUFFER`] calls. Use
+    /// [`with_request_buffer`](Self::with_request_buffer) to choose a different size.
+    fn new(target: &'target Target) -> (Self, Self::Client) {
+        Self::with_request_buffer(target, DEFAULT_BUFFER)
+    }
+
+    /// Creates a server and the client connected to it with the specified request buffer size.
+    ///
+    /// `request_buffer` bounds the number of calls that can wait to be processed locally while they
+    /// are waiting to be serialized, transferred or deserialized.
     ///
     /// # Panics
     ///
     /// Panics if `request_buffer` is zero.
-    fn new(target: &'target Target, request_buffer: usize) -> (Self, Self::Client);
+    fn with_request_buffer(target: &'target Target, request_buffer: usize) -> (Self, Self::Client);
 
     /// Creates a server that processes the requests of an existing request receiver.
     ///
@@ -1064,14 +1090,23 @@ pub trait ServerRefMut<'target, Target, Codec>: ServerBase
 where
     Self: Sized,
 {
-    /// Creates a server and the client connected to it.
+    /// Creates a server and the client connected to it with the default request buffer size.
     ///
-    /// `request_buffer` bounds the number of calls that can wait to be processed.
+    /// The request buffer is [`DEFAULT_BUFFER`] calls. Use
+    /// [`with_request_buffer`](Self::with_request_buffer) to choose a different size.
+    fn new(target: &'target mut Target) -> (Self, Self::Client) {
+        Self::with_request_buffer(target, DEFAULT_BUFFER)
+    }
+
+    /// Creates a server and the client connected to it with the specified request buffer size.
+    ///
+    /// `request_buffer` bounds the number of calls that can wait to be processed locally while they
+    /// are waiting to be serialized, transferred or deserialized.
     ///
     /// # Panics
     ///
     /// Panics if `request_buffer` is zero.
-    fn new(target: &'target mut Target, request_buffer: usize) -> (Self, Self::Client);
+    fn with_request_buffer(target: &'target mut Target, request_buffer: usize) -> (Self, Self::Client);
 
     /// Creates a server that processes the requests of an existing request receiver.
     ///
@@ -1098,14 +1133,23 @@ where
     Self: Sized,
     Self::Client: Clone,
 {
-    /// Creates a server and the client connected to it.
+    /// Creates a server and the client connected to it with the default request buffer size.
     ///
-    /// `request_buffer` bounds the number of calls that can wait to be processed.
+    /// The request buffer is [`DEFAULT_BUFFER`] calls. Use
+    /// [`with_request_buffer`](Self::with_request_buffer) to choose a different size.
+    fn new(target: Arc<Target>) -> (Self, Self::Client) {
+        Self::with_request_buffer(target, DEFAULT_BUFFER)
+    }
+
+    /// Creates a server and the client connected to it with the specified request buffer size.
+    ///
+    /// `request_buffer` bounds the number of calls that can wait to be processed locally while they
+    /// are waiting to be serialized, transferred or deserialized.
     ///
     /// # Panics
     ///
     /// Panics if `request_buffer` is zero.
-    fn new(target: Arc<Target>, request_buffer: usize) -> (Self, Self::Client);
+    fn with_request_buffer(target: Arc<Target>, request_buffer: usize) -> (Self, Self::Client);
 
     /// Creates a server that processes the requests of an existing request receiver.
     ///
@@ -1133,14 +1177,25 @@ pub trait ServerSharedMut<Target, Codec>: ServerBase
 where
     Self: Sized,
 {
-    /// Creates a server and the client connected to it.
+    /// Creates a server and the client connected to it with the default request buffer size.
     ///
-    /// `request_buffer` bounds the number of calls that can wait to be processed.
+    /// The request buffer is [`DEFAULT_BUFFER`] calls. Use
+    /// [`with_request_buffer`](Self::with_request_buffer) to choose a different size.
+    fn new(target: Arc<tokio::sync::RwLock<Target>>) -> (Self, Self::Client) {
+        Self::with_request_buffer(target, DEFAULT_BUFFER)
+    }
+
+    /// Creates a server and the client connected to it with the specified request buffer size.
+    ///
+    /// `request_buffer` bounds the number of calls that can wait to be processed locally while they
+    /// are waiting to be serialized, transferred or deserialized.
     ///
     /// # Panics
     ///
     /// Panics if `request_buffer` is zero.
-    fn new(target: Arc<tokio::sync::RwLock<Target>>, request_buffer: usize) -> (Self, Self::Client);
+    fn with_request_buffer(
+        target: Arc<tokio::sync::RwLock<Target>>, request_buffer: usize,
+    ) -> (Self, Self::Client);
 
     /// Creates a server that processes the requests of an existing request receiver.
     ///
@@ -1199,7 +1254,7 @@ where
 ///
 /// // This would be run on the server.
 /// async fn server(mut tx: rch::base::Sender<CounterClient>) {
-///     let (mut req_rx, client) = CounterReqReceiver::new(1);
+///     let (mut req_rx, client) = CounterReqReceiver::new();
 ///     tx.send(client).await.unwrap();
 ///
 ///     let mut value = 0;
@@ -1236,14 +1291,23 @@ where
     /// Type of request by mutable reference (`&mut self`).
     type RefMut: ReqEnum;
 
-    /// Creates a request receiver and the client connected to it.
+    /// Creates a request receiver and the client connected to it with the default request buffer size.
     ///
-    /// `request_buffer` bounds the number of calls that can wait to be received.
+    /// The request buffer is [`DEFAULT_BUFFER`] calls. Use
+    /// [`with_request_buffer`](Self::with_request_buffer) to choose a different size.
+    fn new() -> (Self, Self::Client) {
+        Self::with_request_buffer(DEFAULT_BUFFER)
+    }
+
+    /// Creates a request receiver and the client connected to it with the specified request buffer size.
+    ///
+    /// `request_buffer` bounds the number of calls that can wait to be received locally while they
+    /// are waiting to be serialized, transferred or deserialized.
     ///
     /// # Panics
     ///
     /// Panics if `request_buffer` is zero.
-    fn new(request_buffer: usize) -> (Self, Self::Client);
+    fn with_request_buffer(request_buffer: usize) -> (Self, Self::Client);
 
     /// Receives the next request, i.e. method call, from the client.
     ///

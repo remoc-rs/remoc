@@ -52,7 +52,7 @@ async fn simple() {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<MixedClient<u8, String>>().await;
 
     let mut obj = MixedObj::new("hello".to_string());
-    let (server, client) = MixedServerRefMut::new(&mut obj, 1);
+    let (server, client) = MixedServerRefMut::new(&mut obj);
 
     a_tx.send(client).await.unwrap();
 

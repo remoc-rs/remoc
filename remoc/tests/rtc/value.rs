@@ -74,7 +74,7 @@ async fn simple() {
 
     println!("Creating counter server");
     let counter_obj = CounterObj::new();
-    let (server, client) = CounterServer::new(counter_obj, 1);
+    let (server, client) = CounterServer::new(counter_obj);
 
     println!("Sending counter client");
     a_tx.send(client).await.unwrap();
@@ -109,7 +109,7 @@ async fn simple_plus() {
 
     println!("Creating counter server");
     let counter_obj = CounterObj::new();
-    let (server, client) = CounterServer::new(counter_obj, 1);
+    let (server, client) = CounterServer::new(counter_obj);
 
     println!("Sending counter client");
     a_tx.send(client).await.unwrap();
@@ -144,7 +144,7 @@ async fn simple_spawn() {
 
     println!("Spawning counter server");
     let counter_obj = CounterObj::new();
-    let (server, client) = CounterServer::new(counter_obj, 1);
+    let (server, client) = CounterServer::new(counter_obj);
     let server_task = wokio::spawn(async move {
         let (counter_obj_opt, res) = server.serve().await;
         res.unwrap();

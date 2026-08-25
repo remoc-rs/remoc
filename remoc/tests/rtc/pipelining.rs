@@ -72,7 +72,7 @@ impl Directory for DirectoryObj {
 async fn directory_client() -> DirectoryClient {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<DirectoryClient>().await;
 
-    let (server, client) = DirectoryServerShared::new(Arc::new(DirectoryObj), 1);
+    let (server, client) = DirectoryServerShared::new(Arc::new(DirectoryObj));
     wokio::spawn(server.serve(true));
     a_tx.send(client).await.unwrap();
 
@@ -88,7 +88,7 @@ async fn pipelined_calls_are_queued() {
     let dir = directory_client().await;
 
     println!("Creating the counter client and its request receiver");
-    let (mut counter, counter_rx) = CounterClient::new(4);
+    let (mut counter, counter_rx) = CounterClient::new();
 
     // The work is polled first, so its requests are queued before `open_counter`
     // even sends the request receiver to the other endpoint.
@@ -112,7 +112,7 @@ async fn pipelined_calls_fail_when_access_is_denied() {
     crate::init();
     let dir = directory_client().await;
 
-    let (mut counter, counter_rx) = CounterClient::new(4);
+    let (mut counter, counter_rx) = CounterClient::new();
 
     let (value, opened) = tokio::join!(
         async move { counter.increase(20).await },

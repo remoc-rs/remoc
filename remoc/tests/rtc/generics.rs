@@ -101,7 +101,7 @@ async fn simple() {
 
     println!("Creating generic counter server");
     let counter_obj = GenericCounterObj::new();
-    let (server, client) = GenericCounterServer::new(counter_obj, 1);
+    let (server, client) = GenericCounterServer::new(counter_obj);
 
     println!("Sending generic counter client");
     a_tx.send(client).await.unwrap();

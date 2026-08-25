@@ -39,7 +39,7 @@ async fn call_in_flight_fails_when_connection_is_lost() {
     crate::init();
     let ((mut a_tx, _a_rx), (_b_tx, mut b_rx), conn) = droppable_loop_channel::<SlowClient>().await;
 
-    let (server, client) = SlowServerShared::new(Arc::new(SlowObj), 1);
+    let (server, client) = SlowServerShared::new(Arc::new(SlowObj));
     a_tx.send(client).await.unwrap();
     wokio::spawn(async move { server.serve(true).await });
 
@@ -76,7 +76,7 @@ async fn call_after_connection_loss_fails() {
     crate::init();
     let ((mut a_tx, _a_rx), (_b_tx, mut b_rx), conn) = droppable_loop_channel::<SlowClient>().await;
 
-    let (server, client) = SlowServerShared::new(Arc::new(SlowObj), 1);
+    let (server, client) = SlowServerShared::new(Arc::new(SlowObj));
     a_tx.send(client).await.unwrap();
     wokio::spawn(async move { server.serve(true).await });
 

@@ -231,7 +231,7 @@ async fn connect_server() {
     // specify the codec.
     let counter_obj = Arc::new(RwLock::new(CounterObj { value: 0 }));
     let (server, client) =
-        CounterServerSharedMut::<_, remoc::codec::Default>::new(counter_obj, 1);
+        CounterServerSharedMut::<_, remoc::codec::Default>::new(counter_obj);
 
     // Establish Remoc connection over TCP and provide (i.e. send)
     // the counter client to the client.

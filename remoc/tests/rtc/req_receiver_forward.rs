@@ -41,13 +41,13 @@ impl Counter for CounterObj {
 
 /// Creates a request receiver and client using the default codec.
 fn counter_pair() -> (CounterReqReceiver, CounterClient) {
-    CounterReqReceiver::new(1)
+    CounterReqReceiver::new()
 }
 
 /// Serves a counter object and returns it together with its client.
 fn serve_counter() -> (Arc<RwLock<CounterObj>>, CounterClient) {
     let obj = Arc::new(RwLock::new(CounterObj { value: 0 }));
-    let (server, client) = CounterServerSharedMut::new(obj.clone(), 1);
+    let (server, client) = CounterServerSharedMut::new(obj.clone());
     wokio::spawn(server.serve(true));
     (obj, client)
 }

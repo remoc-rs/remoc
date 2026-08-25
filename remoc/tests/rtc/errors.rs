@@ -33,7 +33,7 @@ async fn max_item_size_exceeded() {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<DataGeneratorClient>().await;
 
     let mut gen_obj = DataGeneratorObj::new();
-    let (server, client) = DataGeneratorServerRefMut::new(&mut gen_obj, 1);
+    let (server, client) = DataGeneratorServerRefMut::new(&mut gen_obj);
 
     a_tx.send(client).await.unwrap();
 
@@ -89,7 +89,7 @@ async fn calling_an_unserved_object() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<GreeterClient>().await;
 
-    let (server, client) = GreeterServerShared::new(Arc::new(GreeterObj), 1);
+    let (server, client) = GreeterServerShared::new(Arc::new(GreeterObj));
     a_tx.send(client).await.unwrap();
 
     let client = b_rx.recv().await.unwrap().unwrap();

@@ -133,7 +133,7 @@ async fn count() {
     let count = Arc::new(AtomicUsize::new(0));
 
     println!("Creating counter server with counting monitor");
-    let (mut server, client) = CounterServer::new(CounterObj { value: 0 }, 1);
+    let (mut server, client) = CounterServer::new(CounterObj { value: 0 });
     server.set_monitor(CountingMonitor { count: count.clone() });
 
     a_tx.send(client).await.unwrap();
@@ -162,7 +162,7 @@ async fn rate_limit() {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<CounterClient>().await;
 
     println!("Creating counter server with rate-limiting monitor");
-    let (mut server, client) = CounterServer::new(CounterObj { value: 0 }, 1);
+    let (mut server, client) = CounterServer::new(CounterObj { value: 0 });
     server.set_monitor(RateLimitMonitor { remaining: 1 });
 
     a_tx.send(client).await.unwrap();
@@ -262,7 +262,7 @@ async fn guard_in_flight() {
     let max = Arc::new(AtomicUsize::new(0));
 
     println!("Creating shared worker server with in-flight guard monitor");
-    let (mut server, client) = WorkerServerShared::new(Arc::new(WorkerObj), 16);
+    let (mut server, client) = WorkerServerShared::new(Arc::new(WorkerObj));
     server.set_monitor(InFlightMonitor { in_flight: in_flight.clone(), max: max.clone() });
 
     a_tx.send(client).await.unwrap();
@@ -334,7 +334,7 @@ async fn incompatible_client_trips() {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<DecoderClient>().await;
 
     println!("Creating decoder server with incompatible-client monitor (limit 3)");
-    let (mut server, client) = DecoderServer::new(DecoderObj, 1);
+    let (mut server, client) = DecoderServer::new(DecoderObj);
     server.set_monitor(remoc::rtc::monitor::IncompatibleClientMonitor::new().limit(Some(3)).log_level(None));
 
     a_tx.send(client).await.unwrap();
@@ -364,7 +364,7 @@ async fn incompatible_client_tolerates() {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<DecoderClient>().await;
 
     println!("Creating decoder server with incompatible-client monitor (limiting disabled)");
-    let (mut server, client) = DecoderServer::new(DecoderObj, 1);
+    let (mut server, client) = DecoderServer::new(DecoderObj);
     server.set_monitor(remoc::rtc::monitor::IncompatibleClientMonitor::new().limit(None).log_level(None));
 
     a_tx.send(client).await.unwrap();
@@ -425,7 +425,7 @@ async fn incompatible_server_throttles() {
     let server_failures = Arc::new(AtomicUsize::new(0));
 
     println!("Creating decoder server that tolerates and counts decode failures");
-    let (mut server, client) = DecoderServer::new(DecoderObj, 1);
+    let (mut server, client) = DecoderServer::new(DecoderObj);
     server.set_monitor(DecodeFailCounter { count: server_failures.clone() });
 
     a_tx.send(client).await.unwrap();
@@ -478,7 +478,7 @@ async fn incompatible_server_tolerates() {
     let server_failures = Arc::new(AtomicUsize::new(0));
 
     println!("Creating decoder server with incompatible-server monitor (limiting disabled)");
-    let (mut server, client) = DecoderServer::new(DecoderObj, 1);
+    let (mut server, client) = DecoderServer::new(DecoderObj);
     server.set_monitor(DecodeFailCounter { count: server_failures.clone() });
 
     a_tx.send(client).await.unwrap();
@@ -516,7 +516,7 @@ async fn rate_limit_monitor_throttles() {
     let window = Duration::from_millis(200);
 
     println!("Creating counter server with the rate-limit monitor (2 requests per window)");
-    let (mut server, client) = CounterServer::new(CounterObj { value: 0 }, 1);
+    let (mut server, client) = CounterServer::new(CounterObj { value: 0 });
     server.set_monitor(
         remoc::rtc::monitor::RateLimitMonitor::new(NonZeroUsize::new(2).unwrap(), window).log_level(None),
     );
@@ -561,7 +561,7 @@ async fn concurrent_limit_monitor_limits() {
     const N: usize = 5;
 
     println!("Creating shared worker server with the concurrent-limit monitor (limit 2)");
-    let (mut server, client) = WorkerServerShared::new(Arc::new(WorkerObj), 16);
+    let (mut server, client) = WorkerServerShared::new(Arc::new(WorkerObj));
     server.set_monitor(
         remoc::rtc::monitor::ConcurrentLimitMonitor::new(NonZeroUsize::new(2).unwrap()).log_level(None),
     );
@@ -625,7 +625,7 @@ async fn chain_server_monitors_both_apply() {
     let count_b = Arc::new(AtomicUsize::new(0));
 
     println!("Creating counter server with two chained counting monitors");
-    let (mut server, client) = CounterServer::new(CounterObj { value: 0 }, 1);
+    let (mut server, client) = CounterServer::new(CounterObj { value: 0 });
     server.set_monitor(ChainedMonitor(
         CountingMonitor { count: count_a.clone() },
         CountingMonitor { count: count_b.clone() },
@@ -660,7 +660,7 @@ async fn chain_server_monitors_short_circuit() {
     let count = Arc::new(AtomicUsize::new(0));
 
     println!("Creating counter server with a dropping monitor chained before a counting monitor");
-    let (mut server, client) = CounterServer::new(CounterObj { value: 0 }, 1);
+    let (mut server, client) = CounterServer::new(CounterObj { value: 0 });
     server.set_monitor(ChainedMonitor(DropMonitor, CountingMonitor { count: count.clone() }));
 
     a_tx.send(client).await.unwrap();
@@ -698,7 +698,7 @@ async fn chain_server_monitors_guards() {
     let max_b = Arc::new(AtomicUsize::new(0));
 
     println!("Creating shared worker server with two chained in-flight guard monitors");
-    let (mut server, client) = WorkerServerShared::new(Arc::new(WorkerObj), 16);
+    let (mut server, client) = WorkerServerShared::new(Arc::new(WorkerObj));
     server.set_monitor(ChainedMonitor(
         InFlightMonitor { in_flight: in_flight_a.clone(), max: max_a.clone() },
         InFlightMonitor { in_flight: in_flight_b.clone(), max: max_b.clone() },
@@ -774,7 +774,7 @@ async fn chain_client_monitors_both_apply() {
     let count_b = Arc::new(AtomicUsize::new(0));
 
     println!("Creating counter server; the received client gets two chained counting monitors");
-    let (server, client) = CounterServer::new(CounterObj { value: 0 }, 1);
+    let (server, client) = CounterServer::new(CounterObj { value: 0 });
 
     a_tx.send(client).await.unwrap();
 
@@ -810,7 +810,7 @@ async fn chain_client_monitors_short_circuit() {
     let count = Arc::new(AtomicUsize::new(0));
 
     println!("Creating counter server; the received client drops requests before a counting monitor");
-    let (server, client) = CounterServer::new(CounterObj { value: 0 }, 1);
+    let (server, client) = CounterServer::new(CounterObj { value: 0 });
 
     a_tx.send(client).await.unwrap();
 
@@ -907,7 +907,7 @@ async fn req_receiver_monitor_counts() {
     let count = Arc::new(AtomicUsize::new(0));
 
     println!("Creating counter request receiver with counting monitor");
-    let (mut req_rx, client) = CounterReqReceiver::new(1);
+    let (mut req_rx, client) = CounterReqReceiver::new();
     req_rx.set_monitor(CountingReqMonitor { count: count.clone() });
 
     a_tx.send(client).await.unwrap();
@@ -943,7 +943,7 @@ async fn req_receiver_monitor_drops() {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<CounterClient>().await;
 
     println!("Creating counter request receiver with dropping monitor");
-    let (mut req_rx, client) = CounterReqReceiver::new(1);
+    let (mut req_rx, client) = CounterReqReceiver::new();
     req_rx.set_monitor(DropReqMonitor);
 
     a_tx.send(client).await.unwrap();
@@ -981,7 +981,7 @@ async fn req_receiver_monitor_chain_short_circuit() {
     let count = Arc::new(AtomicUsize::new(0));
 
     println!("Creating counter request receiver with a dropping monitor chained before a counting one");
-    let (mut req_rx, client) = CounterReqReceiver::new(1);
+    let (mut req_rx, client) = CounterReqReceiver::new();
     req_rx.set_monitor(ChainedMonitor(DropReqMonitor, CountingReqMonitor { count: count.clone() }));
 
     a_tx.send(client).await.unwrap();
@@ -1019,7 +1019,7 @@ async fn req_receiver_monitor_stream_filtered() {
     let count = Arc::new(AtomicUsize::new(0));
 
     println!("Creating counter request receiver stream with a counting then dropping monitor chain");
-    let (mut req_rx, client) = CounterReqReceiver::new(1);
+    let (mut req_rx, client) = CounterReqReceiver::new();
     req_rx.set_monitor(ChainedMonitor(CountingReqMonitor { count: count.clone() }, DropReqMonitor));
 
     a_tx.send(client).await.unwrap();

@@ -104,7 +104,7 @@ async fn simple_req() {
 
     println!("Creating counter server");
     let mut counter_obj = CounterObj::new();
-    let (req_rx, client) = CounterReqReceiver::new(1);
+    let (req_rx, client) = CounterReqReceiver::new();
 
     println!("Sending counter request receiver");
     a_tx.send(client).await.unwrap();

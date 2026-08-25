@@ -57,7 +57,7 @@ async fn simple() {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<CollClient<u32, String>>().await;
 
     let mut obj = CollObj::<u32, String>::new();
-    let (server, client) = CollServerRefMut::new(&mut obj, 1);
+    let (server, client) = CollServerRefMut::new(&mut obj);
 
     a_tx.send(client).await.unwrap();
 

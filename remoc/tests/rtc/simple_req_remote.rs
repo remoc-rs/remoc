@@ -23,7 +23,7 @@ async fn simple_req_remote() {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<CounterReqReceiver>().await;
 
     println!("Creating counter request receiver");
-    let (req_rx, mut client) = CounterReqReceiver::new(1);
+    let (req_rx, mut client) = CounterReqReceiver::new();
 
     println!("Sending counter request receiver to remote endpoint");
     a_tx.send(req_rx).await.unwrap();

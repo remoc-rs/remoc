@@ -34,7 +34,7 @@ async fn simple() {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<QualifiedClient<u64>>().await;
 
     let obj = QualifiedObj;
-    let (server, client) = QualifiedServerRef::new(&obj, 1);
+    let (server, client) = QualifiedServerRef::new(&obj);
 
     a_tx.send(client).await.unwrap();
 

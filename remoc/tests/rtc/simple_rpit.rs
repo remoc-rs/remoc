@@ -76,7 +76,7 @@ async fn simple() {
 
     println!("Creating counter server");
     let mut counter_obj = CounterObj::new();
-    let (server, client) = CounterServerRefMut::new(&mut counter_obj, 1);
+    let (server, client) = CounterServerRefMut::new(&mut counter_obj);
 
     println!("Sending counter client");
     a_tx.send(client).await.unwrap();
@@ -124,7 +124,7 @@ async fn simple_spawn() {
 
     println!("Spawning counter server");
     let counter_obj = std::sync::Arc::new(tokio::sync::RwLock::new(CounterObj::new()));
-    let (server, client) = CounterServerSharedMut::new(counter_obj.clone(), 16);
+    let (server, client) = CounterServerSharedMut::new(counter_obj.clone());
     let server_task = wokio::spawn(async move {
         server.serve(true).await.unwrap();
         println!("Server done");

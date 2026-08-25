@@ -31,7 +31,7 @@
 //!
 //! // This would be run on the server.
 //! async fn server(mut tx: rch::base::Sender<CounterClient>) {
-//!     let (mut server, client) = CounterServerShared::new(Arc::new(CounterObj), 1);
+//!     let (mut server, client) = CounterServerShared::new(Arc::new(CounterObj));
 //!
 //!     // The monitor must be set before serving starts.
 //!     let limit = RateLimitMonitor::new(NonZeroUsize::new(10).unwrap(), Duration::from_secs(1));

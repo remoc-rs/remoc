@@ -139,7 +139,7 @@ async fn transfer(mut tx: base::Sender<Payload>, mut rx: base::Receiver<Payload>
     #[cfg(feature = "rtc")]
     let counter_obj = Arc::new(RwLock::new(CounterObj::default()));
     #[cfg(feature = "rtc")]
-    let (counter_server, counter_client) = CounterServerSharedMut::new(counter_obj.clone(), 4);
+    let (counter_server, counter_client) = CounterServerSharedMut::new(counter_obj.clone());
     #[cfg(feature = "rtc")]
     let counter_task = wokio::spawn(async move { counter_server.serve(true).await.unwrap() });
 

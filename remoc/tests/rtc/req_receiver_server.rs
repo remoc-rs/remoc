@@ -62,12 +62,12 @@ impl Reader for ReaderObj {
 
 /// Creates a counter request receiver and client using the default codec.
 fn counter_pair() -> (CounterReqReceiver, CounterClient) {
-    CounterReqReceiver::new(1)
+    CounterReqReceiver::new()
 }
 
 /// Creates a reader request receiver and client using the default codec.
 fn reader_pair() -> (ReaderReqReceiver, ReaderClient) {
-    ReaderReqReceiver::new(1)
+    ReaderReqReceiver::new()
 }
 
 /// Exercises a counter client, leaving the counter at 65.
@@ -202,7 +202,8 @@ async fn server_from_remote_req_receiver() {
 async fn queued_requests_are_served() {
     crate::init();
 
-    let (req_rx, client) = counter_pair();
+    // A request buffer of one call makes it deterministic when the request is queued.
+    let (req_rx, client): (CounterReqReceiver, CounterClient) = ReqReceiver::with_request_buffer(1);
     assert_eq!(client.capacity(), 1);
 
     let mut caller = client.clone();
@@ -387,7 +388,7 @@ async fn into_server_with_assoc_type() {
     crate::init();
 
     let obj = Arc::new(RwLock::new(StoreObj { key: None, item: 1u32 }));
-    let (req_rx, mut client): (StoreReqReceiver<String, u32>, _) = ReqReceiver::new(1);
+    let (req_rx, mut client): (StoreReqReceiver<String, u32>, _) = ReqReceiver::new();
     let server_task = wokio::spawn(req_rx.into_server_shared_mut(obj.clone()).serve(true));
 
     assert_eq!(client.get().await.unwrap(), 1);

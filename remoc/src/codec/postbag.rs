@@ -194,7 +194,7 @@ fn cfg<const WITH_IDENTS: bool, const DEPTH_LIMIT: usize>() -> std::io::Result<p
 /// when transferring deeply nested, in particular recursive, data structures.
 /// The depth limit is not part of the data format, thus both peers of a connection
 /// may use different limits.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PostbagWith<const WITH_IDENTS: bool, const DEPTH_LIMIT: usize>;
 
 impl<const WITH_IDENTS: bool, const DEPTH_LIMIT: usize> Codec for PostbagWith<WITH_IDENTS, DEPTH_LIMIT> {

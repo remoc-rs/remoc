@@ -8,7 +8,7 @@ use super::{Codec, DeserializationError, SerializationError};
 ///
 /// When using this with data the contains maps with non-string keys you will
 /// need to apply attributes from [map](super::map) to work correctly.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Json;
 
 impl Codec for Json {

@@ -6,7 +6,7 @@ use super::{Codec, DeserializationError, SerializationError};
 ///
 /// See [bincode] for details.
 /// This uses the [`bincode::config::legacy`] configuration.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bincode;
 
 const LEGACY: bincode::config::Configuration<
@@ -41,7 +41,7 @@ impl Codec for Bincode {
 ///
 /// See [bincode] for details.
 /// This uses the [`bincode::config::standard`] configuration and is not compatible with Bincode 1.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bincode2;
 
 const STANDARD: bincode::config::Configuration = bincode::config::standard();

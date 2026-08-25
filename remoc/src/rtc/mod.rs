@@ -441,6 +441,11 @@ pub const DEFAULT_PARALLELISM: usize = 32;
 /// `dyn` dispatch. You must then include `async-trait` as a dependency in your `Cargo.toml` and apply the
 /// `#[async_trait::async_trait]` attribute on all implementations of the trait.
 ///
+/// If the `debug` argument is specified (by invoking the attribute macro as `#[remoc::rtc::remote(debug)]`),
+/// the generated request enums implement [`Debug`](std::fmt::Debug), showing the called method and its
+/// arguments. This requires every method argument and every associated type to implement
+/// [`Debug`](std::fmt::Debug) as well.
+///
 /// The `server(...)` argument allows to limit the generated server variants.
 /// Supported variants are: `Value`, `Ref`, `RefMut`, `Shared`, `SharedMut`.
 /// Multiple variants can be specified as a comma-separated list.
@@ -507,6 +512,7 @@ pub trait ReqEnum {
 /// This groups the methods of a remotable trait by how they take `self`.
 /// Each variant holds a per-kind request enum that in turn has one variant per
 /// method of that kind.
+#[derive(Debug)]
 pub enum Req<Value, Ref, RefMut> {
     /// Request for a method taking self by value (`self`).
     Value(Value),

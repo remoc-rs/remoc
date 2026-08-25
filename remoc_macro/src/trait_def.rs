@@ -68,6 +68,8 @@ pub struct TraitDef {
     clone: bool,
     /// Whether the `async_trait` attribute is present.
     async_trait: bool,
+    /// Whether the `debug` attribute is present.
+    debug: bool,
     /// Server variants to generate.
     server_variants: Option<HashSet<ServerVariant>>,
 }
@@ -153,6 +155,7 @@ impl Parse for TraitDef {
             assoc_types,
             methods,
             clone: false,
+            debug: false,
             async_trait: false,
             server_variants: None,
         })
@@ -185,6 +188,9 @@ impl TraitDef {
             Ok(())
         } else if meta.path.is_ident("async_trait") {
             self.async_trait = true;
+            Ok(())
+        } else if meta.path.is_ident("debug") {
+            self.debug = true;
             Ok(())
         } else if meta.path.is_ident("server") || meta.path.is_ident("Server") {
             let content;
@@ -633,6 +639,12 @@ impl TraitDef {
             }
         }
 
+        let debug_derive = if self.debug {
+            quote! { #[derive(::std::fmt::Debug)] }
+        } else {
+            quote! {}
+        };
+
         let phantom_clause = quote! {
             Self::__Phantom(_) => ::std::unreachable!("__Phantom variant is not a valid request"),
         };
@@ -653,6 +665,7 @@ impl TraitDef {
             >;
 
             #[doc = #req_doc_value]
+            #debug_derive
             #[derive(::remoc::rtc::Serialize, ::remoc::rtc::Deserialize)]
             #[serde(crate = "::remoc::_serde")]
             #[serde(bound(serialize = #impl_generics_where_str))]
@@ -704,6 +717,7 @@ impl TraitDef {
             }
 
             #[doc = #req_doc_ref]
+            #debug_derive
             #[derive(::remoc::rtc::Serialize, ::remoc::rtc::Deserialize)]
             #[serde(crate = "::remoc::_serde")]
             #[serde(bound(serialize = #impl_generics_where_str))]
@@ -755,6 +769,7 @@ impl TraitDef {
             }
 
             #[doc = #req_doc_ref_mut]
+            #debug_derive
             #[derive(::remoc::rtc::Serialize, ::remoc::rtc::Deserialize)]
             #[serde(crate = "::remoc::_serde")]
             #[serde(bound(serialize = #impl_generics_where_str))]

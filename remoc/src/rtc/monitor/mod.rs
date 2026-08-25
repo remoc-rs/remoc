@@ -72,11 +72,13 @@ use crate::rch::{mpsc, oneshot};
 mod concurrent;
 mod incompatible_client;
 mod incompatible_server;
+mod log;
 mod rate_limit;
 
 pub use concurrent::ConcurrentLimitMonitor;
 pub use incompatible_client::{IncompatibleClientLimitExceeded, IncompatibleClientMonitor};
 pub use incompatible_server::IncompatibleServerMonitor;
+pub use log::LogMonitor;
 pub use rate_limit::RateLimitMonitor;
 
 /// Allows setting the [client monitor](ClientMonitor) on a [client](super::Client).

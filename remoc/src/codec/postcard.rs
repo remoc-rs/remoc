@@ -6,7 +6,7 @@ use super::{Codec, DeserializationError, SerializationError};
 ///
 /// See [postcard] for details.
 /// This uses the default function configuration.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Postcard;
 
 impl Codec for Postcard {

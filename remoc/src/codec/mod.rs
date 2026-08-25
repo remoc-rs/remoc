@@ -269,7 +269,7 @@ pub trait Codec: Send + Sync + Serialize + for<'de> Deserialize<'de> + Clone + U
 /// Dummy codec.
 ///
 /// Does not support serialization or deserialization.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Dummy;
 
 impl Codec for Dummy {

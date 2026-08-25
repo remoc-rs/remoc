@@ -6,7 +6,7 @@ use super::{Codec, DeserializationError, SerializationError};
 ///
 /// See [rmp_serde] for details.
 /// This serializes structures as maps.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessagePack;
 
 impl Codec for MessagePack {

@@ -41,7 +41,7 @@ async fn call_in_flight_fails_when_connection_is_lost() {
 
     let (server, client) = SlowServerShared::new(Arc::new(SlowObj));
     a_tx.send(client).await.unwrap();
-    wokio::spawn(async move { server.serve(true).await });
+    wokio::spawn(async move { server.serve().await });
 
     let client = b_rx.recv().await.unwrap().unwrap();
     assert_eq!(client.quick().await.unwrap(), 2, "connection is not working");
@@ -78,7 +78,7 @@ async fn call_after_connection_loss_fails() {
 
     let (server, client) = SlowServerShared::new(Arc::new(SlowObj));
     a_tx.send(client).await.unwrap();
-    wokio::spawn(async move { server.serve(true).await });
+    wokio::spawn(async move { server.serve().await });
 
     let client = b_rx.recv().await.unwrap().unwrap();
     assert_eq!(client.quick().await.unwrap(), 2, "connection is not working");

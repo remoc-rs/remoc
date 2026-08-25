@@ -53,7 +53,7 @@ impl Middle for MiddleObj {
 
     async fn open_leaf(&self) -> Result<LeafClient, CallError> {
         let (server, client) = LeafServerSharedMut::new(self.leaf.clone());
-        wokio::spawn(server.serve(true));
+        wokio::spawn(server.serve());
         Ok(client)
     }
 }
@@ -71,7 +71,7 @@ pub struct RootObj {
 impl Root for RootObj {
     async fn open_middle(&self) -> Result<MiddleClient, CallError> {
         let (server, client) = MiddleServerSharedMut::new(self.middle.clone());
-        wokio::spawn(server.serve(true));
+        wokio::spawn(server.serve());
         Ok(client)
     }
 }
@@ -83,7 +83,7 @@ async fn root_client() -> RootClient {
     let leaf = Arc::new(RwLock::new(LeafObj { value: 0 }));
     let middle = Arc::new(RwLock::new(MiddleObj { leaf }));
     let (server, client) = RootServerShared::new(Arc::new(RootObj { middle }));
-    wokio::spawn(server.serve(true));
+    wokio::spawn(server.serve());
     a_tx.send(client).await.unwrap();
 
     b_rx.recv().await.unwrap().unwrap()

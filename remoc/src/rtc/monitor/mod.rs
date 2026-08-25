@@ -38,7 +38,7 @@
 //!     server.set_monitor(limit);
 //!
 //!     tx.send(client).await.unwrap();
-//!     server.serve(true).await.unwrap();
+//!     server.serve().await.unwrap();
 //! }
 //!
 //! // This would be run on the client.

@@ -238,8 +238,9 @@ impl TraitDef {
 
     /// The `new` and `from_req_receiver` constructors of a server type.
     ///
-    /// `target_ty` is how the server type holds its target object.
-    fn server_ctors(target_ty: TokenStream) -> TokenStream {
+    /// `target_ty` is how the server type holds its target object and `extra_fields`
+    /// initializes the fields a server variant has in addition to the common ones.
+    fn server_ctors(target_ty: TokenStream, extra_fields: TokenStream) -> TokenStream {
         quote! {
             fn with_request_buffer(target: #target_ty, request_buffer: usize) -> (Self, Self::Client) {
                 let (req_tx, req_rx) = ::remoc::rch::mpsc::with_local_buffer(request_buffer);
@@ -248,6 +249,7 @@ impl TraitDef {
                         target,
                         req_rx,
                         monitor: ::std::boxed::Box::new(::remoc::rtc::DefaultMonitor),
+                        #extra_fields
                     },
                     Self::Client::from_req_tx(req_tx),
                 )
@@ -258,6 +260,7 @@ impl TraitDef {
                     target,
                     req_rx: req_rx.req_rx,
                     monitor: ::remoc::rtc::req_receiver_monitor_as_server_monitor(req_rx.monitor),
+                    #extra_fields
                 }
             }
         }
@@ -836,7 +839,7 @@ impl TraitDef {
         let client = self.client_ident();
         let req_receiver = self.req_receiver_ident();
         let server = format_ident!("{}Server", &ident);
-        let ctors = Self::server_ctors(quote! { Target });
+        let ctors = Self::server_ctors(quote! { Target }, quote! {});
 
         let doc = format!("Server for [{}] taking the target object by value.", ident);
 
@@ -958,7 +961,7 @@ impl TraitDef {
         let client = self.client_ident();
         let req_receiver = self.req_receiver_ident();
         let server = format_ident!("{}ServerRef", &ident);
-        let ctors = Self::server_ctors(quote! { &'target Target });
+        let ctors = Self::server_ctors(quote! { &'target Target }, quote! {});
 
         let doc = format!("Server for [{}] taking the target object by reference.", ident);
 
@@ -1064,7 +1067,7 @@ impl TraitDef {
         let client = self.client_ident();
         let req_receiver = self.req_receiver_ident();
         let server = format_ident!("{}ServerRefMut", &ident);
-        let ctors = Self::server_ctors(quote! { &'target mut Target });
+        let ctors = Self::server_ctors(quote! { &'target mut Target }, quote! {});
 
         let doc = format!("Server for [{}] taking the target object by mutable reference.", ident);
 
@@ -1176,7 +1179,10 @@ impl TraitDef {
         let client = self.client_ident();
         let req_receiver = self.req_receiver_ident();
         let server = format_ident!("{}ServerShared", &ident);
-        let ctors = Self::server_ctors(quote! { ::std::sync::Arc<Target> });
+        let ctors = Self::server_ctors(
+            quote! { ::std::sync::Arc<Target> },
+            quote! { parallelism: ::remoc::rtc::DEFAULT_PARALLELISM, },
+        );
 
         let doc = format!("Server for [{}] taking the target object by shared reference.", ident);
 
@@ -1195,6 +1201,7 @@ impl TraitDef {
                     Codec,
                 >,
                 monitor: ::std::boxed::Box<dyn ::remoc::rtc::ServerMonitor<#req_params>>,
+                parallelism: usize,
             }
 
             impl #impl_generics_impl ::remoc::rtc::ServerBase for #server #impl_generics_ty #impl_generics_where
@@ -1218,9 +1225,18 @@ impl TraitDef {
             {
                 #ctors
 
-                async fn serve(self, spawn: bool) -> ::std::result::Result<(), ::remoc::rtc::ServeError> {
-                    let Self { target, mut req_rx, mut monitor } = self;
+                fn parallelism(&self) -> usize {
+                    self.parallelism
+                }
+
+                fn set_parallelism(&mut self, parallelism: usize) {
+                    self.parallelism = parallelism;
+                }
+
+                async fn serve(self) -> ::std::result::Result<(), ::remoc::rtc::ServeError> {
+                    let Self { target, mut req_rx, mut monitor, parallelism } = self;
                     let (err_tx, mut err_rx) = ::remoc::rtc::reply_error_channel();
+                    let semaphore = ::remoc::rtc::dispatch_semaphore(parallelism);
 
                     let ret = loop {
                         ::remoc::rtc::select! {
@@ -1231,11 +1247,13 @@ impl TraitDef {
                                 match req {
                                     Ok(Some(::remoc::rtc::Req::Ref(req))) => {
                                         let err_tx = err_tx.clone();
-                                        if spawn && ::remoc::rtc::ReqEnum::allow_spawn(&req) {
+                                        if parallelism > 0 && ::remoc::rtc::ReqEnum::allow_spawn(&req) {
                                             use ::remoc::rtc::Instrument;
+                                            let permit = ::remoc::rtc::acquire_dispatch_permit(&semaphore).await;
                                             let target = target.clone();
                                             ::remoc::rtc::spawn(async move {
                                                 #dispatch_ref
+                                                ::std::mem::drop(permit);
                                             }.in_current_span());
                                         } else {
                                             #dispatch_ref
@@ -1288,7 +1306,10 @@ impl TraitDef {
         let client = self.client_ident();
         let req_receiver = self.req_receiver_ident();
         let server = format_ident!("{}ServerSharedMut", &ident);
-        let ctors = Self::server_ctors(quote! { ::std::sync::Arc<::remoc::rtc::LocalRwLock<Target>> });
+        let ctors = Self::server_ctors(
+            quote! { ::std::sync::Arc<::remoc::rtc::LocalRwLock<Target>> },
+            quote! { parallelism: ::remoc::rtc::DEFAULT_PARALLELISM, },
+        );
 
         let doc = format!("Server for [{}] taking the target object by shared mutable reference.", ident);
 
@@ -1313,6 +1334,7 @@ impl TraitDef {
                     Codec,
                 >,
                 monitor: ::std::boxed::Box<dyn ::remoc::rtc::ServerMonitor<#req_params>>,
+                parallelism: usize,
             }
 
             impl #impl_generics_impl ::remoc::rtc::ServerBase for #server #impl_generics_ty #impl_generics_where
@@ -1336,9 +1358,18 @@ impl TraitDef {
             {
                 #ctors
 
-                async fn serve(self, spawn: bool) -> ::std::result::Result<(), ::remoc::rtc::ServeError> {
-                    let Self { target, mut req_rx, mut monitor } = self;
+                fn parallelism(&self) -> usize {
+                    self.parallelism
+                }
+
+                fn set_parallelism(&mut self, parallelism: usize) {
+                    self.parallelism = parallelism;
+                }
+
+                async fn serve(self) -> ::std::result::Result<(), ::remoc::rtc::ServeError> {
+                    let Self { target, mut req_rx, mut monitor, parallelism } = self;
                     let (err_tx, mut err_rx) = ::remoc::rtc::reply_error_channel();
+                    let semaphore = ::remoc::rtc::dispatch_semaphore(parallelism);
 
                     let ret = loop {
                         ::remoc::rtc::select! {
@@ -1349,11 +1380,13 @@ impl TraitDef {
                                 match req {
                                     Ok(Some(::remoc::rtc::Req::Ref(req))) => {
                                         let err_tx = err_tx.clone();
-                                        if spawn && ::remoc::rtc::ReqEnum::allow_spawn(&req) {
+                                        if parallelism > 0 && ::remoc::rtc::ReqEnum::allow_spawn(&req) {
                                             use ::remoc::rtc::Instrument;
+                                            let permit = ::remoc::rtc::acquire_dispatch_permit(&semaphore).await;
                                             let target = target.clone().read_owned().await;
                                             ::remoc::rtc::spawn(async move {
                                                 #dispatch_ref
+                                                ::std::mem::drop(permit);
                                             }.in_current_span());
                                         } else {
                                             let target = target.read().await;

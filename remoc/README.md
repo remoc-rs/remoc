@@ -468,7 +468,7 @@ async fn connect_server() {
         .provide(client).await.unwrap();
 
     // Execute the calls made by the remote endpoint on the counter object.
-    server.serve(true).await.unwrap();
+    server.serve().await.unwrap();
 }
 
 // This would be run on the client.

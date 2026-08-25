@@ -66,13 +66,21 @@ impl Worker for WorkerObj {
     }
 }
 
-/// Runs three `work` calls at once against a server started with `spawn` enabled
-/// and returns how many of them the server ran concurrently.
-async fn max_concurrent_with(allow_spawn: bool) -> usize {
+/// Runs four `work` calls at once and returns how many of them the server ran
+/// concurrently.
+///
+/// `parallelism` is applied to the server when given, otherwise it keeps its default.
+async fn max_concurrent_with(allow_spawn: bool, parallelism: Option<usize>) -> usize {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<WorkerClient>().await;
 
-    let (server, client) = WorkerServerShared::new(Arc::new(WorkerObj::default()));
+    let (mut server, client) = WorkerServerShared::new(Arc::new(WorkerObj::default()));
+    if let Some(parallelism) = parallelism {
+        server.set_parallelism(parallelism);
+        assert_eq!(server.parallelism(), parallelism);
+    } else {
+        assert_eq!(server.parallelism(), rtc::DEFAULT_PARALLELISM);
+    }
     a_tx.send(client).await.unwrap();
 
     let client_task = async move {
@@ -82,7 +90,12 @@ async fn max_concurrent_with(allow_spawn: bool) -> usize {
 
         // Start all calls before awaiting any of them, so that they reach the
         // server while the preceding ones are still running.
-        let calls = [client.work_call().await, client.work_call().await, client.work_call().await];
+        let calls = [
+            client.work_call().await,
+            client.work_call().await,
+            client.work_call().await,
+            client.work_call().await,
+        ];
         for call in calls {
             call.await.unwrap();
         }
@@ -90,7 +103,7 @@ async fn max_concurrent_with(allow_spawn: bool) -> usize {
         client.max_concurrent().await.unwrap()
     };
 
-    let (max_concurrent, res) = tokio::join!(client_task, server.serve(true));
+    let (max_concurrent, res) = tokio::join!(client_task, server.serve());
     res.unwrap();
     max_concurrent
 }
@@ -98,13 +111,13 @@ async fn max_concurrent_with(allow_spawn: bool) -> usize {
 #[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
 #[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn allow_spawn_is_default() {
-    assert_eq!(max_concurrent_with(true).await, 3);
+    assert_eq!(max_concurrent_with(true, None).await, 4);
 }
 
 #[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
 #[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
 async fn allow_spawn_disabled_serves_sequentially() {
-    assert_eq!(max_concurrent_with(false).await, 1);
+    assert_eq!(max_concurrent_with(false, None).await, 1);
 }
 
 #[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
@@ -126,7 +139,7 @@ async fn stop_on_error_stops_the_server() {
         assert!(matches!(client.fail().await, Err(WorkError::Failed)));
     };
 
-    let ((), res) = tokio::join!(client_task, server.serve(true));
+    let ((), res) = tokio::join!(client_task, server.serve());
     assert!(
         matches!(res, Err(ServeError::CallFailed { method: "Worker::fail" })),
         "server did not stop on error: {res:?}"
@@ -153,6 +166,27 @@ async fn stop_on_error_is_off_by_default() {
         assert_eq!(client.max_concurrent().await.unwrap(), 1);
     };
 
-    let ((), res) = tokio::join!(client_task, server.serve(true));
+    let ((), res) = tokio::join!(client_task, server.serve());
     res.unwrap();
+}
+
+/// The server dispatches at most `parallelism` calls at the same time.
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
+async fn parallelism_limits_concurrent_calls() {
+    assert_eq!(max_concurrent_with(true, Some(2)).await, 2);
+}
+
+/// A parallelism of one runs a single call at a time, but on its own task.
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
+async fn parallelism_of_one_serves_sequentially() {
+    assert_eq!(max_concurrent_with(true, Some(1)).await, 1);
+}
+
+/// A parallelism of zero dispatches calls inline.
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
+async fn parallelism_of_zero_dispatches_inline() {
+    assert_eq!(max_concurrent_with(true, Some(0)).await, 1);
 }

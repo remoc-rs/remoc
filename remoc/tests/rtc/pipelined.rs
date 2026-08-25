@@ -88,7 +88,7 @@ impl Directory for DirectoryObj {
 
         let obj = Arc::new(RwLock::new(CounterObj { value: 0 }));
         let (server, client) = CounterServerSharedMut::new(obj);
-        wokio::spawn(server.serve(true));
+        wokio::spawn(server.serve());
 
         Ok(client)
     }
@@ -99,7 +99,7 @@ async fn directory_client() -> DirectoryClient {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<DirectoryClient>().await;
 
     let (server, client) = DirectoryServerShared::new(Arc::new(DirectoryObj));
-    wokio::spawn(server.serve(true));
+    wokio::spawn(server.serve());
     a_tx.send(client).await.unwrap();
 
     b_rx.recv().await.unwrap().unwrap()
@@ -200,7 +200,7 @@ async fn pipelined_call_consuming_the_object() {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<SessionsClient>().await;
 
     let (server, client) = SessionsServerShared::new(Arc::new(SessionsObj));
-    wokio::spawn(server.serve(true));
+    wokio::spawn(server.serve());
     a_tx.send(client).await.unwrap();
     let sessions = b_rx.recv().await.unwrap().unwrap();
 
@@ -241,7 +241,7 @@ async fn manual_req_receiver_completes_pipelined_call() {
                 let result = if name == "allowed" {
                     let obj = Arc::new(RwLock::new(CounterObj { value: 0 }));
                     let (server, client) = CounterServerSharedMut::new(obj);
-                    wokio::spawn(server.serve(true));
+                    wokio::spawn(server.serve());
                     Ok(client)
                 } else {
                     Err(OpenError::Denied)

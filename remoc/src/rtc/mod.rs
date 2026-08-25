@@ -37,7 +37,7 @@
 //! | You hold | Server type | Calls are executed |
 //! |---|---|---|
 //! | `Target` | `TraitServer` ([Server]) | one at a time; serving ends when a method taking `self` is called |
-//! | `Arc<Target>` | `TraitServerShared` ([ServerShared]) | in parallel, with `serve(true)` |
+//! | `Arc<Target>` | `TraitServerShared` ([ServerShared]) | in parallel, with `serve()` |
 //! | `Arc<`[`RwLock`](tokio::sync::RwLock)`<Target>>` | `TraitServerSharedMut` ([ServerSharedMut]) | `&self` in parallel, `&mut self` serialized by the write lock |
 //! | `&Target` | `TraitServerRef` ([ServerRef]) | one at a time |
 //! | `&mut Target` | `TraitServerRefMut` ([ServerRefMut]) | one at a time |
@@ -297,7 +297,7 @@
 //!
 //!     let (server, client) = CounterServerSharedMut::new(counter_obj);
 //!     tx.send(client).await.unwrap();
-//!     server.serve(true).await.unwrap();
+//!     server.serve().await.unwrap();
 //! }
 //! # tokio_test::block_on(remoc::doctest::client_server(server, client));
 //! ```
@@ -328,6 +328,11 @@ use crate::{
     RemoteSend, chmux, codec,
     rch::{DEFAULT_BUFFER, SendingError, SendingErrorKind, base, mpsc, oneshot},
 };
+
+/// Default maximum number of calls a server processes concurrently.
+///
+/// The current default parallelism is 32.
+pub const DEFAULT_PARALLELISM: usize = 32;
 
 /// Denotes a trait as remotely callable and generate a client and servers for it.
 ///
@@ -1161,12 +1166,25 @@ where
     /// receiver is converted into a [server monitor](ServerMonitor) and kept.
     fn from_req_receiver(target: Arc<Target>, req_rx: Self::ReqReceiver) -> Self;
 
+    /// The maximum number of calls that are dispatched concurrently.
+    ///
+    /// This is [`DEFAULT_PARALLELISM`] by default. Each call that is dispatched
+    /// concurrently runs on its own task.
+    ///
+    /// Zero means that calls are dispatched inline, i.e. one call at a time.
+    fn parallelism(&self) -> usize;
+
+    /// Sets the maximum number of calls that are dispatched concurrently.
+    ///
+    /// This must be set before [serving](Self::serve).
+    fn set_parallelism(&mut self, parallelism: usize);
+
     /// Serves the target object.
     ///
-    /// If `spawn` is true, remote calls are executed in parallel by spawning a task per call.
+    /// Up to [`parallelism`](Self::parallelism) calls are processed concurrently.
     ///
     /// Serving ends when the client is dropped.
-    fn serve(self, spawn: bool) -> impl Future<Output = Result<(), ServeError>>;
+    fn serve(self) -> impl Future<Output = Result<(), ServeError>>;
 }
 
 /// A server that shares ownership of a mutable target.
@@ -1207,14 +1225,29 @@ where
     /// receiver is converted into a [server monitor](ServerMonitor) and kept.
     fn from_req_receiver(target: Arc<tokio::sync::RwLock<Target>>, req_rx: Self::ReqReceiver) -> Self;
 
+    /// The maximum number of calls that are dispatched concurrently.
+    ///
+    /// This is [`DEFAULT_PARALLELISM`] by default. Each call that is dispatched
+    /// concurrently runs on its own task.
+    ///
+    /// Zero means that calls are dispatched inline, i.e. one call at a time.
+    ///
+    /// Only calls to methods taking `&self` are dispatched concurrently.
+    fn parallelism(&self) -> usize;
+
+    /// Sets the maximum number of calls that are dispatched concurrently.
+    ///
+    /// This must be set before [serving](Self::serve).
+    fn set_parallelism(&mut self, parallelism: usize);
+
     /// Serves the target object.
     ///
-    /// If `spawn` is true, remote calls taking a `&self` reference are executed
-    /// in parallel by spawning a task per call.
-    /// Remote calls taking a `&mut self` reference are serialized by obtaining a write lock.
+    /// Up to [`parallelism`](Self::parallelism) calls taking a `&self` reference are
+    /// processed concurrently. Calls taking a `&mut self` reference are serialized by
+    /// obtaining a write lock.
     ///
     /// Serving ends when the client is dropped.
-    fn serve(self, spawn: bool) -> impl Future<Output = Result<(), ServeError>>;
+    fn serve(self) -> impl Future<Output = Result<(), ServeError>>;
 }
 
 /// Receives remote method calls as values instead of dispatching them to a target.
@@ -1920,6 +1953,20 @@ pub use futures::stream::Stream;
 pub use futures::stream::StreamExt;
 #[doc(hidden)]
 pub use tracing::Instrument;
+
+/// Semaphore limiting the number of concurrently dispatched calls.
+#[doc(hidden)]
+pub fn dispatch_semaphore(parallelism: usize) -> std::sync::Arc<tokio::sync::Semaphore> {
+    std::sync::Arc::new(tokio::sync::Semaphore::new(parallelism))
+}
+
+/// Acquires a permit to dispatch a call on its own task.
+#[doc(hidden)]
+pub async fn acquire_dispatch_permit(
+    semaphore: &std::sync::Arc<tokio::sync::Semaphore>,
+) -> tokio::sync::OwnedSemaphorePermit {
+    std::sync::Arc::clone(semaphore).acquire_owned().await.expect("dispatch semaphore is never closed")
+}
 
 /// Create channel for queueing reply sending errors.
 #[doc(hidden)]

@@ -62,7 +62,7 @@ impl Directory for DirectoryObj {
         }
 
         let obj = Arc::new(RwLock::new(CounterObj { value: 0 }));
-        wokio::spawn(counter.into_server_shared_mut(obj).serve(true));
+        wokio::spawn(counter.into_server_shared_mut(obj).serve());
 
         Ok(())
     }
@@ -73,7 +73,7 @@ async fn directory_client() -> DirectoryClient {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<DirectoryClient>().await;
 
     let (server, client) = DirectoryServerShared::new(Arc::new(DirectoryObj));
-    wokio::spawn(server.serve(true));
+    wokio::spawn(server.serve());
     a_tx.send(client).await.unwrap();
 
     b_rx.recv().await.unwrap().unwrap()

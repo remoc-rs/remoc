@@ -119,7 +119,7 @@ async fn main() {
 
                 // Serve incoming requests from the client on this task.
                 // `true` indicates that requests are handled in parallel.
-                server.serve(true).await.unwrap();
+                server.serve().await.unwrap();
             }
             .instrument(info_span!("incoming", %addr)),
         );

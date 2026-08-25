@@ -122,7 +122,7 @@ async fn server_shared_mut() {
     let obj = Arc::new(RwLock::new(CounterObj::new()));
     let (req_rx, mut client) = counter_pair();
     let server = CounterServerSharedMut::from_req_receiver(obj.clone(), req_rx);
-    let server_task = wokio::spawn(server.serve(true));
+    let server_task = wokio::spawn(server.serve());
 
     use_counter(&mut client).await;
     drop(client);
@@ -157,7 +157,7 @@ async fn server_shared() {
     let obj = Arc::new(ReaderObj { value: 42 });
     let (req_rx, client) = reader_pair();
     let server = req_rx.into_server_shared(obj);
-    let server_task = wokio::spawn(server.serve(true));
+    let server_task = wokio::spawn(server.serve());
 
     assert_eq!(client.get().await.unwrap(), 42);
     drop(client);
@@ -185,7 +185,7 @@ async fn server_from_remote_req_receiver() {
         println!("Serving it");
         let obj = Arc::new(RwLock::new(CounterObj::new()));
         let server = CounterServerSharedMut::from_req_receiver(obj.clone(), req_rx);
-        server.serve(true).await.unwrap();
+        server.serve().await.unwrap();
 
         obj.read().await.value
     });
@@ -217,7 +217,7 @@ async fn queued_requests_are_served() {
     println!("Converting request receiver with queued request into server");
     let obj = Arc::new(RwLock::new(CounterObj::new()));
     let server = CounterServerSharedMut::from_req_receiver(obj.clone(), req_rx);
-    let server_task = wokio::spawn(server.serve(true));
+    let server_task = wokio::spawn(server.serve());
 
     call_task.await.unwrap();
     drop(client);
@@ -282,7 +282,7 @@ async fn monitor_is_kept() {
 
     let obj = Arc::new(RwLock::new(CounterObj::new()));
     let server = CounterServerSharedMut::from_req_receiver(obj.clone(), req_rx);
-    let server_task = wokio::spawn(server.serve(true));
+    let server_task = wokio::spawn(server.serve());
 
     use_counter(&mut client).await;
     drop(client);
@@ -305,7 +305,7 @@ async fn dropping_monitor_is_kept() {
 
     let obj = Arc::new(RwLock::new(CounterObj::new()));
     let server = CounterServerSharedMut::from_req_receiver(obj.clone(), req_rx);
-    let server_task = wokio::spawn(server.serve(true));
+    let server_task = wokio::spawn(server.serve());
 
     assert!(matches!(client.value().await, Err(CallError::Dropped)));
     drop(client);
@@ -337,7 +337,7 @@ async fn into_server_shared_mut() {
 
     let obj = Arc::new(RwLock::new(CounterObj::new()));
     let (req_rx, mut client) = counter_pair();
-    let server_task = wokio::spawn(req_rx.into_server_shared_mut(obj.clone()).serve(true));
+    let server_task = wokio::spawn(req_rx.into_server_shared_mut(obj.clone()).serve());
 
     use_counter(&mut client).await;
     drop(client);
@@ -389,7 +389,7 @@ async fn into_server_with_assoc_type() {
 
     let obj = Arc::new(RwLock::new(StoreObj { key: None, item: 1u32 }));
     let (req_rx, mut client): (StoreReqReceiver<String, u32>, _) = ReqReceiver::new();
-    let server_task = wokio::spawn(req_rx.into_server_shared_mut(obj.clone()).serve(true));
+    let server_task = wokio::spawn(req_rx.into_server_shared_mut(obj.clone()).serve());
 
     assert_eq!(client.get().await.unwrap(), 1);
     client.put("key".to_string(), 42).await.unwrap();

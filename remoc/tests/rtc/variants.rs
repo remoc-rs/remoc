@@ -121,7 +121,7 @@ async fn simple_spawn() {
     let counter_obj = std::sync::Arc::new(tokio::sync::RwLock::new(CounterObj::new()));
     let (server, client) = CounterServerSharedMut::new(counter_obj.clone());
     let server_task = wokio::spawn(async move {
-        server.serve(true).await.unwrap();
+        server.serve().await.unwrap();
         println!("Server done");
 
         let value = counter_obj.read().await.value;

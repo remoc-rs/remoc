@@ -278,7 +278,7 @@ async fn guard_in_flight() {
     };
 
     // Serve with spawning so that requests are handled concurrently.
-    let (_, res) = tokio::join!(client_task, server.serve(true));
+    let (_, res) = tokio::join!(client_task, server.serve());
     res.unwrap();
 
     // Every guard has been dropped once its request finished.
@@ -583,7 +583,7 @@ async fn concurrent_limit_monitor_limits() {
     };
 
     // Serve with spawning so that requests can be handled concurrently.
-    let (elapsed, res) = tokio::join!(client_task, server.serve(true));
+    let (elapsed, res) = tokio::join!(client_task, server.serve());
     res.unwrap();
 
     // The concurrency cap forces the five overlapping calls into three batches,
@@ -715,7 +715,7 @@ async fn chain_server_monitors_guards() {
         }
     };
 
-    let (_, res) = tokio::join!(client_task, server.serve(true));
+    let (_, res) = tokio::join!(client_task, server.serve());
     res.unwrap();
 
     // Both guards were attached to every request and dropped once it finished,

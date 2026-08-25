@@ -48,7 +48,7 @@ fn counter_pair() -> (CounterReqReceiver, CounterClient) {
 fn serve_counter() -> (Arc<RwLock<CounterObj>>, CounterClient) {
     let obj = Arc::new(RwLock::new(CounterObj { value: 0 }));
     let (server, client) = CounterServerSharedMut::new(obj.clone());
-    wokio::spawn(server.serve(true));
+    wokio::spawn(server.serve());
     (obj, client)
 }
 

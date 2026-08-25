@@ -241,7 +241,7 @@ async fn connect_server() {
         .unwrap();
 
     // Serve incoming method calls until the client disconnects.
-    server.serve(true).await.unwrap();
+    server.serve().await.unwrap();
 }
 ```
 "##

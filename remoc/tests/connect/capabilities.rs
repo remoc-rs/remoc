@@ -141,7 +141,7 @@ async fn transfer(mut tx: base::Sender<Payload>, mut rx: base::Receiver<Payload>
     #[cfg(feature = "rtc")]
     let (counter_server, counter_client) = CounterServerSharedMut::new(counter_obj.clone());
     #[cfg(feature = "rtc")]
-    let counter_task = wokio::spawn(async move { counter_server.serve(true).await.unwrap() });
+    let counter_task = wokio::spawn(async move { counter_server.serve().await.unwrap() });
 
     let (items_tx, mut items_rx) = mpsc::with_local_buffer(4);
     let (size_tx, size_rx) = oneshot::channel();

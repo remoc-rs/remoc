@@ -137,7 +137,7 @@ where
                 sub_opt = sub_rx.recv() => {
                     match sub_opt {
                         Some(sub_tx) => {
-                            let (tx, rx) = channel(1);
+                            let (tx, rx) = channel();
                             let mut tx = tx.set_buffer();
                             tx.set_max_item_size(MAX_ITEM_SIZE);
                             let rx = rx.set_buffer().set_max_item_size();

@@ -793,7 +793,7 @@ where
 
     /// Transmits the initial value incrementally.
     fn new_incremental(hs: Vec<T>, on_err: Arc<dyn Fn(SendError) + Send + Sync>) -> Self {
-        let (tx, rx) = rch::mpsc::channel(128);
+        let (tx, rx) = rch::mpsc::channel();
         let len = hs.len();
 
         wokio::spawn(

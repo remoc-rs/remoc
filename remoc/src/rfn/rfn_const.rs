@@ -109,13 +109,13 @@ impl Drop for RFnProvider {
 /// # tokio_test::block_on(remoc::doctest::client_server(server, client));
 /// ```
 pub struct RFn<A, R, Codec = codec::Default> {
-    request_tx: mpsc::Sender<RFnRequest<A, R, Codec>, Codec, 1>,
+    request_tx: mpsc::Sender<RFnRequest<A, R, Codec>, Codec>,
 }
 
 crate::versioned::compact::impl_struct! {
     RFn<A, R, Codec>,
     fields {
-        request_tx: mpsc::Sender<RFnRequest<A, R, Codec>, Codec, 1> => "_0",
+        request_tx: mpsc::Sender<RFnRequest<A, R, Codec>, Codec> => "_0",
     }
     where A: RemoteSend, R: RemoteSend, Codec: codec::Codec
 }
@@ -157,9 +157,7 @@ where
         F: Fn(A) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = R> + Send,
     {
-        let (request_tx, request_rx) = mpsc::channel(1);
-        let request_tx = request_tx.set_buffer();
-        let mut request_rx = request_rx.set_buffer::<1>();
+        let (request_tx, mut request_rx) = mpsc::channel();
         let (keep_tx, keep_rx) = tokio::sync::oneshot::channel();
         let (max_concurrency_tx, mut max_concurrency_rx) =
             tokio::sync::watch::channel(RFnProvider::DEFAULT_MAX_CONCURRENCY);

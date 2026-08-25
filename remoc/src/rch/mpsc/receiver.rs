@@ -574,7 +574,7 @@ where
     ///
     /// // This would be run on the server.
     /// async fn server(mut tx: rch::base::Sender<rch::mpsc::Receiver<u32>>) {
-    ///     let (work_tx, work_rx) = rch::mpsc::channel(1);
+    ///     let (work_tx, work_rx) = rch::mpsc::channel();
     ///     let distributor = work_rx.distribute(false);
     ///
     ///     // Each subscribed receiver can be sent to another endpoint.

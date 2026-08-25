@@ -149,7 +149,7 @@ where
 
     /// Subscribes to the observable list with incremental sending of the current contents.
     pub fn subscribe(&self) -> ListSubscription<T, Codec> {
-        let (tx, rx) = rch::mpsc::channel(1);
+        let (tx, rx) = rch::mpsc::channel();
         let _ = self.tx.send(DistReq::Subscribe(tx));
         ListSubscription::new(self.len.load(Ordering::Relaxed), rx)
     }

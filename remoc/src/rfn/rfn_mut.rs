@@ -122,7 +122,7 @@ where
         F: FnMut(A) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = R> + Send,
     {
-        let (request_tx, request_rx) = mpsc::channel(1);
+        let (request_tx, request_rx) = mpsc::with_local_buffer(1);
         let request_tx = request_tx.set_buffer();
         let mut request_rx = request_rx.set_buffer::<1>();
         let (keep_tx, keep_rx) = tokio::sync::oneshot::channel();

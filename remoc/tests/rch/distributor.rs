@@ -31,7 +31,7 @@ async fn drain(rx: &mut mpsc::Receiver<u32>) -> Vec<u32> {
 async fn items_are_distributed_over_subscribers() {
     crate::init();
 
-    let (tx, rx) = mpsc::channel(1);
+    let (tx, rx) = mpsc::with_local_buffer(1);
     let distributor = rx.distribute(false);
     let (mut first, _first_handle) =
         timeout(LIMIT, distributor.subscribe()).await.expect("subscribing hung").unwrap();
@@ -57,7 +57,7 @@ async fn items_are_distributed_over_subscribers() {
 async fn removed_subscriber_is_closed() {
     crate::init();
 
-    let (tx, rx) = mpsc::channel(1);
+    let (tx, rx) = mpsc::with_local_buffer(1);
     let distributor = rx.distribute(true);
     let (mut removed, removed_handle) =
         timeout(LIMIT, distributor.subscribe()).await.expect("subscribing hung").unwrap();
@@ -94,7 +94,7 @@ async fn removed_subscriber_is_closed() {
 async fn waiting_distributor_accepts_a_later_subscriber() {
     crate::init();
 
-    let (tx, rx) = mpsc::channel(1);
+    let (tx, rx) = mpsc::with_local_buffer(1);
     let distributor = rx.distribute(true);
 
     let (mut first, first_handle) =
@@ -127,7 +127,7 @@ async fn waiting_distributor_accepts_a_later_subscriber() {
 async fn distributor_ends_without_subscribers() {
     crate::init();
 
-    let (tx, rx) = mpsc::channel(1);
+    let (tx, rx) = mpsc::with_local_buffer(1);
     let distributor = rx.distribute(false);
 
     let (mut only, only_handle) =
@@ -148,7 +148,7 @@ async fn distributor_ends_without_subscribers() {
 async fn dropping_distributor_closes_subscribers() {
     crate::init();
 
-    let (_tx, rx) = mpsc::channel(1);
+    let (_tx, rx) = mpsc::with_local_buffer(1);
     let distributor = rx.distribute(true);
     let (mut first, _first_handle) =
         timeout(LIMIT, distributor.subscribe()).await.expect("subscribing hung").unwrap();

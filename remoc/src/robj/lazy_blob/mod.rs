@@ -204,7 +204,7 @@ where
     /// its provider.
     pub fn provided(data: Bytes) -> (Self, Provider) {
         let (keep_tx, keep_rx) = tokio::sync::oneshot::channel();
-        let (req_tx, req_rx) = mpsc::channel(1);
+        let (req_tx, req_rx) = mpsc::with_local_buffer(1);
         let req_tx = req_tx.set_buffer();
         let mut req_rx = req_rx.set_buffer::<1>();
         let len = data.len() as _;

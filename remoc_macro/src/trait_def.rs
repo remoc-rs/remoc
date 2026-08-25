@@ -242,7 +242,7 @@ impl TraitDef {
     fn server_ctors(target_ty: TokenStream) -> TokenStream {
         quote! {
             fn new(target: #target_ty, request_buffer: usize) -> (Self, Self::Client) {
-                let (req_tx, req_rx) = ::remoc::rch::mpsc::channel(request_buffer);
+                let (req_tx, req_rx) = ::remoc::rch::mpsc::with_local_buffer(request_buffer);
                 (
                     Self {
                         target,
@@ -1464,7 +1464,7 @@ impl TraitDef {
                 type RefMut = #req_ref_mut #req_generics;
 
                 fn new(request_buffer: usize) -> (Self, Self::Client) {
-                    let (req_tx, req_rx) = ::remoc::rch::mpsc::channel(request_buffer);
+                    let (req_tx, req_rx) = ::remoc::rch::mpsc::with_local_buffer(request_buffer);
                     (
                         Self {
                             req_rx,

@@ -22,7 +22,7 @@
 //! ```
 //! # use remoc::{codec, rch};
 //! # tokio_test::block_on(async {
-//! let (tx, rx) = rch::mpsc::channel::<u32, codec::PostbagSlim>(1);
+//! let (tx, rx) = rch::mpsc::channel::<u32, codec::PostbagSlim>();
 //! # let _ = (tx, rx);
 //! # });
 //! ```

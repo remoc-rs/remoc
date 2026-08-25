@@ -390,7 +390,7 @@ where
                 let storage = PortSerializer::storage()?;
                 let id = storage.insert_entry(entry.clone());
 
-                let (dropped_tx, dropped_rx) = mpsc::channel(1);
+                let (dropped_tx, dropped_rx) = mpsc::with_local_buffer(1);
                 let dropped_tx = dropped_tx.set_buffer::<1>();
                 let mut dropped_rx = dropped_rx.set_buffer::<1>();
 

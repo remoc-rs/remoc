@@ -438,8 +438,8 @@ where
 ///
 /// This can be changed via a const generic type parameter of a sender or receiver.
 ///
-/// The current default buffer size is 2.
-pub const DEFAULT_BUFFER: usize = 2;
+/// The current default buffer size is 16.
+pub const DEFAULT_BUFFER: usize = 16;
 
 /// Default maximum allowed item size for sending and receiving items over remote channels.
 ///
@@ -550,7 +550,7 @@ impl<T> SendingError<T> {
 ///
 /// // This would be run on the client.
 /// async fn client(mut tx: rch::base::Sender<rch::mpsc::Receiver<u32>>) {
-///     let (data_tx, data_rx) = rch::mpsc::channel(1);
+///     let (data_tx, data_rx) = rch::mpsc::channel();
 ///     tx.send(data_rx).await.unwrap();
 ///
 ///     // Collect the handles instead of awaiting them, so that queueing

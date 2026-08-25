@@ -72,7 +72,7 @@ async fn over_nested_channel() {
 
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<LibClient>().await;
 
-    let (req_tx, mut req_rx) = remoc::rch::mpsc::channel(1);
+    let (req_tx, mut req_rx) = remoc::rch::mpsc::with_local_buffer(1);
     let (storage_ref, handle) = storage_ref();
     a_tx.send(LibClient { storage_ref, req_tx }).await.unwrap();
 

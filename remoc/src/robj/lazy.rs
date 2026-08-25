@@ -229,7 +229,7 @@ where
     where
         F: Future<Output = T> + Send + 'static,
     {
-        let (request_tx, request_rx) = mpsc::channel::<oneshot::Sender<T, Codec>, _>(1);
+        let (request_tx, request_rx) = mpsc::with_local_buffer::<oneshot::Sender<T, Codec>, _>(1);
         let request_tx = request_tx.set_buffer::<1>();
         let mut request_rx = request_rx.set_buffer::<1>();
         let (keep_tx, keep_rx) = tokio::sync::oneshot::channel();

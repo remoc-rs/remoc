@@ -35,10 +35,10 @@ where
 {
     /// Creates a new [RwLock] owner with the specified shared value.
     pub fn new(mut value: T) -> Self {
-        let (read_req_tx, read_req_rx) = mpsc::channel(1);
+        let (read_req_tx, read_req_rx) = mpsc::with_local_buffer(1);
         let read_req_tx = read_req_tx.set_buffer();
         let read_req_rx = read_req_rx.set_buffer();
-        let (write_req_tx, write_req_rx) = mpsc::channel(1);
+        let (write_req_tx, write_req_rx) = mpsc::with_local_buffer(1);
         let write_req_tx = write_req_tx.set_buffer();
         let write_req_rx = write_req_rx.set_buffer();
         let (term_tx, term_rx) = tokio::sync::oneshot::channel();
@@ -66,7 +66,7 @@ where
         value: &mut T, mut read_req_rx: mpsc::Receiver<ReadRequest<T, Codec>, Codec, 1>,
         mut write_req_rx: mpsc::Receiver<WriteRequest<T, Codec>, Codec, 1>,
     ) {
-        let (dropped_tx, dropped_rx) = mpsc::channel(1);
+        let (dropped_tx, dropped_rx) = mpsc::with_local_buffer(1);
         let mut dropped_tx = dropped_tx.set_buffer();
         let mut dropped_rx = dropped_rx.set_buffer::<1>();
         let (mut invalid_tx, mut invalid_rx) = watch::channel(false);
@@ -96,7 +96,7 @@ where
                     }
 
                     // Create new dropped notification channel.
-                    let (new_dropped_tx, new_dropped_rx) = mpsc::channel(1);
+                    let (new_dropped_tx, new_dropped_rx) = mpsc::with_local_buffer(1);
                     let new_dropped_tx = new_dropped_tx.set_buffer();
                     let new_dropped_rx = new_dropped_rx.set_buffer();
                     dropped_tx = new_dropped_tx;

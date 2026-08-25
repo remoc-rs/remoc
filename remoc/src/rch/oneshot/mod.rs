@@ -66,7 +66,7 @@ where
     T: Serialize + DeserializeOwned + Send + 'static,
     Codec: codec::Codec,
 {
-    let (tx, rx) = mpsc::channel(1);
+    let (tx, rx) = mpsc::with_local_buffer(1);
     let tx = tx.set_buffer();
     let rx = rx.set_buffer();
     (Sender(tx), Receiver(rx))

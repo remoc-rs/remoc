@@ -231,7 +231,7 @@ where
     ) -> Receiver<T, Codec, RECEIVE_BUFFER> {
         let mut inner = self.inner.lock().unwrap();
 
-        let (tx, rx) = mpsc::channel(send_buffer);
+        let (tx, rx) = mpsc::with_local_buffer(send_buffer);
         let tx = tx.set_buffer();
         let rx = rx.set_buffer();
         inner.subs.push(tx);
@@ -248,7 +248,7 @@ where
     ) -> Receiver<T, Codec, RECEIVE_BUFFER, MAX_ITEM_SIZE> {
         let mut inner = self.inner.lock().unwrap();
 
-        let (tx, rx) = mpsc::channel(send_buffer);
+        let (tx, rx) = mpsc::with_local_buffer(send_buffer);
         let mut tx = tx.set_buffer();
         tx.set_max_item_size(MAX_ITEM_SIZE);
         let rx = rx.set_buffer().set_max_item_size();
@@ -261,7 +261,7 @@ where
     /// The mpsc sender can be sent over a remote channel.
     /// All feeders are disconnected once all receivers are disconnected.
     pub fn feeder<const SEND_BUFFER: usize>(&self) -> mpsc::Sender<T, Codec, SEND_BUFFER> {
-        let (tx, rx) = mpsc::channel(1);
+        let (tx, rx) = mpsc::channel();
         let tx = tx.set_buffer();
         let mut rx = rx.set_buffer::<1>();
         let this = self.clone();

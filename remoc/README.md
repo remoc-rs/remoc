@@ -376,7 +376,7 @@ async fn client(mut tx: rch::base::Sender<CountReq>) {
     // By sending seq_tx over an existing remote channel, a new remote
     // channel is automatically created and connected to the server.
     // This all happens inside the existing TCP connection.
-    let (seq_tx, mut seq_rx) = rch::mpsc::channel(1);
+    let (seq_tx, mut seq_rx) = rch::mpsc::channel();
     tx.send(CountReq { up_to: 4, seq_tx }).await.unwrap();
 
     // Receive counted numbers over new channel.

@@ -833,7 +833,7 @@ where
 
     /// Transmits the initial value incrementally.
     fn new_incremental(hm: HashMap<K, V>, on_err: Arc<dyn Fn(SendError) + Send + Sync>) -> Self {
-        let (tx, rx) = rch::mpsc::channel(128);
+        let (tx, rx) = rch::mpsc::channel();
         let len = hm.len();
 
         wokio::spawn(

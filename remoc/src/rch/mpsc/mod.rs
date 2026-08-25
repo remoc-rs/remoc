@@ -27,7 +27,7 @@
 //!
 //! // This would be run on the client.
 //! async fn client(mut tx: rch::base::Sender<CountReq>) {
-//!     let (seq_tx, mut seq_rx) = rch::mpsc::channel(1);
+//!     let (seq_tx, mut seq_rx) = rch::mpsc::channel();
 //!     tx.send(CountReq { up_to: 4, seq_tx }).await.unwrap();
 //!
 //!     assert_eq!(seq_rx.recv().await.unwrap(), Some(0));
@@ -60,7 +60,7 @@ use std::{
     task::{Context, Poll, ready},
 };
 
-use super::{ClosedReason, RemoteSendError, Sending, base};
+use super::{ClosedReason, DEFAULT_BUFFER, RemoteSendError, Sending, base};
 use crate::{
     RemoteSend, chmux,
     codec::{self, AnySend, ErasedDeserializer, ErasedSerializer},
@@ -81,14 +81,38 @@ pub use sender::{Permit, SendError, Sender, SenderSink, TrySendError};
 /// Creates a bounded channel for communicating between asynchronous tasks with back pressure.
 ///
 /// The sender and receiver may be sent to remote endpoints via channels or used
-/// locally on the creating endpoint. `local_buffer` bounds how many values can
-/// be accepted locally while they are waiting to be serialized, transferred, or
-/// deserialized.
+/// locally on the creating endpoint.
+///
+/// The local buffer is [`DEFAULT_BUFFER`] items, which is also the buffer a sender or
+/// receiver is given when it is received from a remote endpoint. Use
+/// [`with_local_buffer`] to choose a different size.
+pub fn channel<T, Codec>() -> (Sender<T, Codec>, Receiver<T, Codec>)
+where
+    T: RemoteSend,
+{
+    with_local_buffer(DEFAULT_BUFFER)
+}
+
+/// Creates a bounded channel with the specified local buffer size.
+///
+/// `local_buffer` bounds how many values can be accepted locally while they are
+/// waiting to be serialized, transferred, or deserialized.
+///
+/// This is *not* the point at which back pressure begins once a half of the channel
+/// has been sent to a remote endpoint. The serialized data is then held in the buffers
+/// of the [multiplexer](crate::chmux), sized by
+/// [`port_receive_buffer`](crate::chmux::Cfg::port_receive_buffer) and
+/// [`shared_receive_buffer`](crate::chmux::Cfg::shared_receive_buffer) in bytes, which
+/// usually hold considerably more items than this. Thus `local_buffer` bounds only the
+/// queue ahead of serialization and is a lower bound on the number of items that can be
+/// in flight.
+///
+/// Use [`channel`] unless the queue ahead of serialization must have a specific size.
 ///
 /// # Panics
 ///
 /// Panics if `local_buffer` is zero.
-pub fn channel<T, Codec>(local_buffer: usize) -> (Sender<T, Codec>, Receiver<T, Codec>)
+pub fn with_local_buffer<T, Codec>(local_buffer: usize) -> (Sender<T, Codec>, Receiver<T, Codec>)
 where
     T: RemoteSend,
 {
@@ -117,7 +141,7 @@ where
     T: RemoteSend,
     Codec: codec::Codec,
 {
-    let (tx, rx) = channel(1);
+    let (tx, rx) = channel();
 
     let hnd = wokio::spawn(async move {
         loop {

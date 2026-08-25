@@ -23,7 +23,7 @@ async fn simple() {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<mpsc::Receiver<i16>>().await;
 
     println!("Sending remote mpsc channel receiver");
-    let (tx, rx) = mpsc::channel(16);
+    let (tx, rx) = mpsc::with_local_buffer(16);
     a_tx.send(rx).await.unwrap();
     println!("Receiving remote mpsc channel receiver");
     let mut rx = b_rx.recv().await.unwrap().unwrap();
@@ -63,7 +63,7 @@ async fn simple_stream() {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<mpsc::Receiver<i16>>().await;
 
     println!("Sending remote mpsc channel receiver");
-    let (tx, rx) = mpsc::channel(16);
+    let (tx, rx) = mpsc::with_local_buffer(16);
     a_tx.send(rx).await.unwrap();
     println!("Receiving remote mpsc channel receiver");
     let mut rx = b_rx.recv().await.unwrap().unwrap();
@@ -102,7 +102,7 @@ async fn simple_sink() {
     crate::init();
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<mpsc::Receiver<i16>>().await;
 
-    let (tx, rx) = mpsc::channel(16);
+    let (tx, rx) = mpsc::with_local_buffer(16);
     let mut tx = mpsc::SenderSink::from(tx);
 
     println!("Sending remote mpsc channel receiver");
@@ -139,7 +139,7 @@ async fn recv_many() {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<mpsc::Receiver<i16, codec::Default, CAP>>().await;
 
     println!("Sending remote mpsc channel receiver");
-    let (tx, rx) = mpsc::channel(16);
+    let (tx, rx) = mpsc::with_local_buffer(16);
     let rx = rx.set_buffer();
     a_tx.send(rx).await.unwrap();
     println!("Receiving remote mpsc channel receiver");
@@ -192,7 +192,7 @@ async fn recv_len() {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<mpsc::Receiver<i16, codec::Default, CAP>>().await;
 
     println!("Sending remote mpsc channel receiver");
-    let (tx, rx) = mpsc::channel(16);
+    let (tx, rx) = mpsc::with_local_buffer(16);
     let rx = rx.set_buffer();
     a_tx.send(rx).await.unwrap();
     println!("Receiving remote mpsc channel receiver");
@@ -233,7 +233,7 @@ async fn simple_close() {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<mpsc::Receiver<i16>>().await;
 
     println!("Sending remote mpsc channel receiver");
-    let (tx, rx) = mpsc::channel(16);
+    let (tx, rx) = mpsc::with_local_buffer(16);
     a_tx.send(rx).await.unwrap();
     println!("Receiving remote mpsc channel receiver");
     let mut rx = b_rx.recv().await.unwrap().unwrap();
@@ -277,7 +277,7 @@ async fn simple_drop() {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<mpsc::Receiver<i16>>().await;
 
     println!("Sending remote mpsc channel receiver");
-    let (tx, rx) = mpsc::channel(16);
+    let (tx, rx) = mpsc::with_local_buffer(16);
     a_tx.send(rx).await.unwrap();
     println!("Receiving remote mpsc channel receiver");
     let mut rx = b_rx.recv().await.unwrap().unwrap();
@@ -318,7 +318,7 @@ async fn simple_conn_failure() {
     let ((mut a_tx, _), (_, mut b_rx), conn) = droppable_loop_channel::<mpsc::Receiver<i16>>().await;
 
     println!("Sending remote mpsc channel receiver");
-    let (tx, rx) = mpsc::channel(16);
+    let (tx, rx) = mpsc::with_local_buffer(16);
     a_tx.send(rx).await.unwrap();
     println!("Receiving remote mpsc channel receiver");
     let mut rx = b_rx.recv().await.unwrap().unwrap();
@@ -362,7 +362,7 @@ async fn two_sender_conn_failure() {
     let mut conn1 = Some(conn1);
 
     println!("Sending two remote mpsc channel senders");
-    let (tx, mut rx) = mpsc::channel(16);
+    let (tx, mut rx) = mpsc::with_local_buffer(16);
     a_tx.send(tx.clone()).await.unwrap();
     c_tx.send(tx.clone()).await.unwrap();
 
@@ -448,7 +448,7 @@ async fn multiple() {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<mpsc::Receiver<mpsc::Sender<i16>>>().await;
 
     println!("Sending remote mpsc channel receiver");
-    let (tx, rx) = mpsc::channel(16);
+    let (tx, rx) = mpsc::with_local_buffer(16);
     a_tx.send(rx).await.unwrap();
     println!("Receiving remote mpsc channel receiver");
     let mut rx = b_rx.recv().await.unwrap().unwrap();
@@ -458,7 +458,7 @@ async fn multiple() {
     let mut tasks = Vec::new();
     for i in 1..1024 {
         println!("Sending sender");
-        let (n_tx, mut n_rx) = mpsc::channel(1);
+        let (n_tx, mut n_rx) = mpsc::with_local_buffer(1);
         tx.send(n_tx).await.unwrap();
         println!("Receiving sender");
         let n_tx = rx.recv().await.unwrap().unwrap();
@@ -491,7 +491,7 @@ async fn forward() {
     let ((mut a2_tx, _), (_, mut b2_rx)) = loop_channel::<mpsc::Receiver<i16>>().await;
     let ((mut a3_tx, _), (_, mut b3_rx)) = loop_channel::<mpsc::Receiver<i16>>().await;
 
-    let (tx, rx) = mpsc::channel(16);
+    let (tx, rx) = mpsc::with_local_buffer(16);
 
     println!("Sender 0");
     a0_tx.send(tx).await.unwrap();
@@ -552,7 +552,7 @@ async fn max_item_size_exceeded() {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<mpsc::Receiver<Vec<u8>>>().await;
 
     println!("Sending remote mpsc channel receiver");
-    let (tx, rx) = mpsc::channel(16);
+    let (tx, rx) = mpsc::with_local_buffer(16);
     a_tx.send(rx).await.unwrap();
     println!("Receiving remote mpsc channel receiver");
     let mut rx = b_rx.recv().await.unwrap().unwrap();
@@ -613,7 +613,7 @@ async fn try_reserve_send() {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<mpsc::Receiver<i16>>().await;
 
     println!("Sending remote mpsc channel receiver");
-    let (tx, rx) = mpsc::channel(16);
+    let (tx, rx) = mpsc::with_local_buffer(16);
     a_tx.send(rx).await.unwrap();
     println!("Receiving remote mpsc channel receiver");
     let mut rx = b_rx.recv().await.unwrap().unwrap();
@@ -647,7 +647,7 @@ async fn try_reserve_full() {
 
     println!("Sending remote mpsc channel receiver");
     let buffer_size = 4;
-    let (tx, rx) = mpsc::channel(buffer_size);
+    let (tx, rx) = mpsc::with_local_buffer(buffer_size);
     a_tx.send(rx).await.unwrap();
     println!("Receiving remote mpsc channel receiver");
     let mut rx = b_rx.recv().await.unwrap().unwrap();
@@ -693,7 +693,7 @@ async fn try_reserve_closed() {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<mpsc::Receiver<i16>>().await;
 
     println!("Sending remote mpsc channel receiver");
-    let (tx, rx) = mpsc::channel(16);
+    let (tx, rx) = mpsc::with_local_buffer(16);
     a_tx.send(rx).await.unwrap();
     println!("Receiving remote mpsc channel receiver");
     let mut rx = b_rx.recv().await.unwrap().unwrap();
@@ -730,7 +730,7 @@ async fn reserve_send() {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<mpsc::Receiver<i16>>().await;
 
     println!("Sending remote mpsc channel receiver");
-    let (tx, rx) = mpsc::channel(16);
+    let (tx, rx) = mpsc::with_local_buffer(16);
     a_tx.send(rx).await.unwrap();
     println!("Receiving remote mpsc channel receiver");
     let mut rx = b_rx.recv().await.unwrap().unwrap();
@@ -763,7 +763,7 @@ async fn reserve_closed() {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<mpsc::Receiver<i16>>().await;
 
     println!("Sending remote mpsc channel receiver");
-    let (tx, rx) = mpsc::channel(16);
+    let (tx, rx) = mpsc::with_local_buffer(16);
     a_tx.send(rx).await.unwrap();
     println!("Receiving remote mpsc channel receiver");
     let mut rx = b_rx.recv().await.unwrap().unwrap();
@@ -861,7 +861,7 @@ async fn parallel_32() {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<mpsc::Receiver<i16>>().await;
 
     println!("Sending remote mpsc channel receiver");
-    let (tx, rx) = mpsc::channel(16).with_parallel(32);
+    let (tx, rx) = mpsc::with_local_buffer(16).with_parallel(32);
     a_tx.send(rx).await.unwrap();
     println!("Receiving remote mpsc channel receiver");
     let mut rx = b_rx.recv().await.unwrap().unwrap();

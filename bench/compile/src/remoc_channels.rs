@@ -51,7 +51,7 @@ where
 async fn send_mpsc_sender<T: RemoteSend>() {
     let ((mut a_tx, _a_rx), (_b_tx, mut b_rx)) = loop_channel::<mpsc::Sender<T>>().await;
 
-    let (tx, _rx) = mpsc::channel::<T, remoc::codec::Default>(16);
+    let (tx, _rx) = mpsc::channel::<T, remoc::codec::Default>();
     a_tx.send(tx).await.unwrap();
     let _remote_tx = b_rx.recv().await.unwrap().unwrap();
 }
@@ -60,7 +60,7 @@ async fn send_mpsc_sender<T: RemoteSend>() {
 async fn send_mpsc_receiver<T: RemoteSend>() {
     let ((mut a_tx, _a_rx), (_b_tx, mut b_rx)) = loop_channel::<mpsc::Receiver<T>>().await;
 
-    let (_tx, rx) = mpsc::channel::<T, remoc::codec::Default>(16);
+    let (_tx, rx) = mpsc::channel::<T, remoc::codec::Default>();
     a_tx.send(rx).await.unwrap();
     let _remote_rx = b_rx.recv().await.unwrap().unwrap();
 }

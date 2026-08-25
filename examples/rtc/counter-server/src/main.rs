@@ -52,7 +52,7 @@ impl Counter for CounterObj {
         &self, step: u32, delay: Duration,
     ) -> Result<rch::mpsc::Receiver<u32>, rtc::CallError> {
         // Create mpsc channel for counting.
-        let (tx, rx) = rch::mpsc::channel(1);
+        let (tx, rx) = rch::mpsc::channel();
 
         // Spawn a task to perform the counting.
         let value = self.value;

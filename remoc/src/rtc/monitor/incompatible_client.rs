@@ -128,8 +128,8 @@ impl IncompatibleClientMonitor {
     }
 
     /// Handles a non-final request decode failure.
-    fn on_non_final_recv_error(&mut self, error: &mpsc::RecvError) -> DispatchDecision {
-        log_at!(self.log_level, %error, "failed to receive request");
+    fn on_non_final_recv_error(&mut self, err: &mpsc::RecvError) -> DispatchDecision {
+        log_at!(self.log_level, %err, "failed to receive request");
 
         let Some(limit) = self.limit else {
             return DispatchDecision::Drop;
@@ -143,8 +143,8 @@ impl IncompatibleClientMonitor {
     }
 
     /// Handles a non-final request decode failure for a [request receiver](crate::rtc::ReqReceiver).
-    fn on_non_final_req_recv_error(&mut self, error: &mpsc::RecvError) -> RecvDecision {
-        log_at!(self.log_level, %error, "failed to receive request");
+    fn on_non_final_req_recv_error(&mut self, err: &mpsc::RecvError) -> RecvDecision {
+        log_at!(self.log_level, %err, "failed to receive request");
 
         let Some(limit) = self.limit else {
             return RecvDecision::Drop;

@@ -211,12 +211,12 @@ struct IncompatibleServerGuard {
 }
 
 impl CallGuard for IncompatibleServerGuard {
-    fn reply_failed(&mut self, error: &oneshot::RecvError) {
+    fn reply_failed(&mut self, err: &oneshot::RecvError) {
         self.reply_failed = true;
 
         let (trait_name, method_name) = (self.trait_name, self.method_name);
         let target = format!("{trait_name}::{method_name}");
-        log_at!(self.log_level, %target, %error, "failed to call");
+        log_at!(self.log_level, %target, %err, "failed to call");
     }
 }
 

@@ -32,6 +32,10 @@ mod simple_rpit;
 mod value;
 mod variants;
 
+// Measures round trips on a paused clock, which requires a native Tokio runtime.
+#[cfg(not(target_family = "wasm"))]
+mod pipelined_round_trips;
+
 // Must result in compile error:
 // mod lifetime;
 // mod reserved;

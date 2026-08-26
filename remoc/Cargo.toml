@@ -93,7 +93,7 @@ tokio = { version = "1.43", features = ["io-util", "rt"] }
 wasm-bindgen-test = "0.3.45"
 
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
-tokio = { version = "1.43", features = ["net", "rt-multi-thread"] }
+tokio = { version = "1.43", features = ["net", "rt-multi-thread", "test-util"] }
 tokio-test = "0.4"
 
 

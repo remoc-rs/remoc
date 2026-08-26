@@ -76,13 +76,18 @@ impl Root for RootObj {
     }
 }
 
+/// A root object holding a middle object, which in turn holds a leaf object.
+pub fn root_obj() -> RootObj {
+    let leaf = Arc::new(RwLock::new(LeafObj { value: 0 }));
+    let middle = Arc::new(RwLock::new(MiddleObj { leaf }));
+    RootObj { middle }
+}
+
 /// Connects to a served root object on the other endpoint.
 async fn root_client() -> RootClient {
     let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<RootClient>().await;
 
-    let leaf = Arc::new(RwLock::new(LeafObj { value: 0 }));
-    let middle = Arc::new(RwLock::new(MiddleObj { leaf }));
-    let (server, client) = RootServerShared::new(Arc::new(RootObj { middle }));
+    let (server, client) = RootServerShared::new(Arc::new(root_obj()));
     wokio::spawn(server.serve());
     a_tx.send(client).await.unwrap();
 

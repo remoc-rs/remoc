@@ -342,8 +342,13 @@ impl Sample {
     /// payload bytes match what actually goes over the wire. Codecs differ in how much
     /// they encode, so this is per codec.
     pub fn encoded_len<C: codec::Codec>() -> usize {
+        // The codec refuses to run outside a connection, because the data format version
+        // is normally negotiated with the peer. Sizing a sample involves no peer, so the
+        // local version is used, which is what two current endpoints agree on anyway.
+        let allowed = codec::ALLOW_OUTSIDE_REMOC.replace(true);
         let mut buf = Vec::new();
         <C as codec::Codec>::serialize(&mut buf, &Self::new()).expect("sample is serializable");
+        codec::ALLOW_OUTSIDE_REMOC.set(allowed);
         buf.len()
     }
 
@@ -506,7 +511,7 @@ async fn mpsc(link: Link, msg_size: usize, limit: Duration) -> Result<Outcome> {
         endpoints::<(), Transferred, codec::Default>(cfg, server),
     )?;
 
-    let (tx, data_rx) = rch::mpsc::channel::<Bytes, _>(MPSC_BUFFER);
+    let (tx, data_rx) = rch::mpsc::with_local_buffer::<Bytes, _>(MPSC_BUFFER);
     base_tx.send(data_rx).await?;
     let mut rx = base_rx.recv().await?.ok_or("connection closed")?;
 
@@ -594,7 +599,7 @@ async fn mpsc_struct<C: codec::Codec, const BUFFER: usize>(
         endpoints::<(), Transferred<C, BUFFER>, C>(cfg, server),
     )?;
 
-    let channel = rch::mpsc::channel::<Vec<Sample>, C>(MPSC_BUFFER).with_buffer::<BUFFER>();
+    let channel = rch::mpsc::with_local_buffer::<Vec<Sample>, C>(MPSC_BUFFER).with_buffer::<BUFFER>();
     let (tx, data_rx) = match parallel {
         Some(parallel) => channel.with_parallel(parallel),
         None => channel,

@@ -77,6 +77,12 @@ pub use crate::calls;
 /// error type of the enclosing function. Use
 /// [`CallFutureExt::map_err`](super::CallFutureExt::map_err) when a call has an error
 /// type that does not.
+/// The error types are not brought together automatically, since that would make the
+/// error type of a trait that hands out an object part of every trait it can hand out.
+///
+/// A failed pipelined session is reported on the session itself and not on the calls
+/// made through the object it establishes, see
+/// [errors of a session](super::pipelining#errors-of-a-session).
 ///
 /// # Outside a function returning [`Result`]
 ///
@@ -162,6 +168,11 @@ pub enum CallError {
     /// The request was never accepted, because serving of the object had already
     /// finished: [`serve`](super::ServerShared::serve) returned, or the server was dropped
     /// without ever being served.
+    ///
+    /// A [pipelined](super::pipelining) call that fails to establish its session also
+    /// leaves its request receiver unserved and thus causes this error.
+    /// The reason is then the result of the session, see
+    /// [errors of a session](super::pipelining#errors-of-a-session).
     NotServed,
     /// Processing the request failed.
     ///
@@ -262,6 +273,10 @@ impl From<oneshot::RecvError> for CallError {
 /// Dropping this without awaiting it cancels the call, unless the method is marked
 /// with `#[no_cancel]`. Note that the object may already have been called when the
 /// cancellation reaches the server.
+/// Use [`spawn`](Self::spawn) to let a call run unattended instead.
+///
+/// The [pipelining](super::pipelining) module describes how to combine started calls
+/// and how to handle their differing error types.
 #[must_use = "the RTC call is cancelled when Call is dropped"]
 pub struct Call<R> {
     method: &'static str,

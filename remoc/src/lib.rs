@@ -469,7 +469,7 @@ pub use remote_send::RemoteSend;
 
 #[cfg(feature = "rch")]
 mod connect;
-#[cfg(all(doc, feature = "rch"))]
+#[cfg(feature = "rch")]
 pub use connect::transports;
 #[cfg(feature = "rch")]
 pub use connect::{

@@ -397,8 +397,6 @@
 //!
 
 pub mod monitor;
-
-#[cfg(doc)]
 pub mod pipelining;
 
 mod call;
@@ -532,6 +530,9 @@ pub const DEFAULT_PARALLELISM: usize = 32;
 /// Adding the attribute to an existing method keeps its requests wire compatible.
 /// However, calling the twin method on an endpoint that does not know it fails with
 /// a receive error there.
+///
+/// See the [pipelining] module for how to combine the resulting calls and in which order
+/// the server executes them.
 ///
 /// All [serde field attributes](https://serde.rs/field-attrs.html) `#[serde(...)]`
 /// are allowed on the arguments of the functions.

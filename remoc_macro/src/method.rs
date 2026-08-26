@@ -459,7 +459,9 @@ impl TraitMethod {
 
         let doc = format!(
             "Calls [`{ident}`](Self::{ident}) and lets the returned client execute the requests of the provided request receiver in the background.\n\n\
-             Await the returned [call](::remoc::rtc::Call) to obtain its result.\n\n\
+             Await the returned [call](::remoc::rtc::Call) to obtain its result, which tells you whether the session was established. \
+             The calls you make through the client report their own errors. \
+             See the [pipelining module](::remoc::rtc::pipelining) for how to combine them.\n\n\
              The provided implementation should not be overridden."
         );
 

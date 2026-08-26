@@ -60,7 +60,6 @@ use crate::{
 
 pub mod ext;
 mod io_transport;
-#[cfg(doc)]
 pub mod transports;
 
 /// An error returned while establishing a Remoc connection.

@@ -205,6 +205,27 @@
 //! Alternatively, use [`Call::spawn`](super::Call::spawn) to let it run unattended.
 //!
 //!
+//! ### Errors of a session
+//!
+//! A pipelined call establishes a session, which hands the request receiver over so that
+//! the object is attached to it on the remote endpoint.
+//! The calls you make through the client are independent of that and report their own
+//! error type.
+//!
+//! Thus a session that fails does not report its reason through those calls.
+//! Instead the object is never attached to the handed over request receiver and the calls
+//! queued on the client fail with [`CallError::NotServed`](super::CallError::NotServed),
+//! which tells you that the object is not being served, but not why.
+//! The reason is the result of the session and can only be obtained from there, since the
+//! method establishing the session and the methods of the object it hands out belong to
+//! two different traits and their error types are unrelated.
+//!
+//! Therefore await the session before the calls you made through the client, so that a
+//! failure to establish it is reported instead of the resulting
+//! [`CallError`](super::CallError).
+//! [`calls!`](super::calls) does this for you when the session is specified before those
+//! calls.
+//!
 //! ### Differing error types
 //!
 //! [`calls!`](super::calls) propagates every result with `?`, so each call's error type

@@ -14,6 +14,9 @@ It is split into three crates:
     over TCP.
   * `counter-client` implements a simple counter client that exercises the server.
 
+For the same idea built on plain channels instead of a trait, see
+[the channels example](../channels).
+
 ## Running
 
 Start the server using the following command:

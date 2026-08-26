@@ -24,6 +24,7 @@ jobs:
 
       - name: Run cargo fmt for examples
         run: |
+          cargo fmt --all --manifest-path examples/channels/Cargo.toml -- --check
           cargo fmt --all --manifest-path examples/rtc/Cargo.toml -- --check
           cargo fmt --all --manifest-path examples/transports/Cargo.toml -- --check
           cargo fmt --all --manifest-path examples/transports-web/Cargo.toml -- --check
@@ -79,6 +80,8 @@ jobs:
 
       - name: Check examples
         run: |
+          cargo check --manifest-path examples/channels/counting-client/Cargo.toml
+          cargo check --manifest-path examples/channels/counting-server/Cargo.toml
           cargo check --manifest-path examples/rtc/counter-client/Cargo.toml
           cargo check --manifest-path examples/rtc/counter-server/Cargo.toml
           cargo check --manifest-path examples/transports/Cargo.toml

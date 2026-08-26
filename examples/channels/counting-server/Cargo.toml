@@ -1,0 +1,9 @@
+[package]
+name = "counting-server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+counting = { path = "../counting" }
+remoc = { path = "../../../remoc" }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time"] }

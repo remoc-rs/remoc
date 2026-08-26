@@ -1,5 +1,5 @@
 use crate::{MyInitialReq, MyInitialRsp};
-use aggligator_transport_tcp::simple::{tcp_connect, tcp_server};
+use aggligator_transport_tcp::simple::{tcp_connect, tcp_listen};
 use remoc::prelude::*;
 use std::net::{Ipv6Addr, SocketAddr};
 
@@ -29,21 +29,25 @@ pub async fn connect(
 pub async fn serve(port: u16) -> Result<(), Box<dyn std::error::Error>> {
     let addr = SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), port);
 
-    tcp_server(addr, |stream| async move {
-        let (stream_rx, stream_tx) = stream.into_split();
+    let listener = tcp_listen(addr).await?;
 
-        let Ok((conn, tx, rx)) =
-            remoc::Connect::framed(remoc::Cfg::default(), stream_tx, stream_rx).await
-        else {
-            return;
-        };
-        tokio::spawn(conn);
+    loop {
+        // One connection, including all its aggregated links.
+        let stream = listener.accept().await?;
 
-        serve_client(tx, rx).await;
-    })
-    .await?;
+        tokio::spawn(async move {
+            let (stream_rx, stream_tx) = stream.into_split();
 
-    Ok(())
+            let Ok((conn, tx, rx)) =
+                remoc::Connect::framed(remoc::Cfg::default(), stream_tx, stream_rx).await
+            else {
+                return;
+            };
+            tokio::spawn(conn);
+
+            serve_client(tx, rx).await;
+        });
+    }
 }
 
 async fn serve_client(

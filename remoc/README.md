@@ -152,9 +152,11 @@ A Remoc application normally follows these steps:
 The [channel example](#channels) below demonstrates the base-channel approach
 in one process; the [rtc module documentation][rtc docs] does the same for the
 remote trait calling approach. For separate client and server crates, see the
-[RTC example].
+[RTC example]. The [web RTC example] runs a Rust client in the browser over a
+WebSocket.
 
 [RTC example]: https://github.com/remoc-rs/remoc/tree/master/examples/rtc
+[web RTC example]: https://github.com/remoc-rs/remoc/tree/master/examples/rtc-web
 
 
 ## Connecting

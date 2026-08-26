@@ -16,6 +16,8 @@ It is split into three crates:
 
 For the same idea built on plain channels instead of a trait, see
 [the channels example](../channels).
+For a Rust WebAssembly client connected through a browser WebSocket, see
+[the web RTC example](../rtc-web).
 
 ## Running
 

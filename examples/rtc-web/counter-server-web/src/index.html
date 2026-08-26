@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Remoc shared counter</title>
+  <style>
+    body {
+      max-width: 24rem;
+      margin: 4rem auto;
+      padding: 0 1rem;
+      font-family: system-ui, sans-serif;
+      text-align: center;
+    }
+
+    output {
+      display: block;
+      margin: 2rem;
+      font: 4rem/1 ui-monospace, monospace;
+    }
+
+    button {
+      margin: 0 0.25rem;
+      padding: 0.6rem 1rem;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      opacity: 0.45;
+    }
+
+    #status {
+      min-height: 1.5em;
+    }
+
+    #status.error {
+      color: #b00020;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Shared Remoc counter</h1>
+    <output id="value" aria-live="polite">--</output>
+    <div>
+      <button id="decrement" type="button" disabled>Decrease</button>
+      <button id="increment" type="button" disabled>Increase</button>
+    </div>
+    <p id="status">Connecting...</p>
+  </main>
+
+  <script type="module">
+    import init, { WebCounter } from "./counter_web.js";
+
+    const value = document.querySelector("#value");
+    const status = document.querySelector("#status");
+    const decrement = document.querySelector("#decrement");
+    const increment = document.querySelector("#increment");
+    const buttons = [decrement, increment];
+    let counter;
+    let connected = false;
+
+    function setButtonsEnabled(enabled) {
+      for (const button of buttons) {
+        button.disabled = !enabled;
+      }
+    }
+
+    function showError(error) {
+      connected = false;
+      setButtonsEnabled(false);
+      status.textContent = String(error);
+      status.classList.add("error");
+    }
+
+    async function change(operation) {
+      setButtonsEnabled(false);
+      status.textContent = "Updating...";
+      status.classList.remove("error");
+
+      try {
+        await operation();
+        status.textContent = "Connected";
+      } catch (error) {
+        status.textContent = String(error);
+        status.classList.add("error");
+      } finally {
+        setButtonsEnabled(connected);
+      }
+    }
+
+    decrement.addEventListener("click", () => change(() => counter.decrement()));
+    increment.addEventListener("click", () => change(() => counter.increment()));
+
+    try {
+      // Load the WebAssembly module before using the Rust WebCounter type.
+      await init();
+      const websocketProtocol = location.protocol === "https:" ? "wss:" : "ws:";
+
+      // Rust calls these functions when a watched value arrives or the channel closes.
+      counter = await WebCounter.connect(
+        `${websocketProtocol}//${location.host}/remoc`,
+        newValue => {
+          value.value = newValue;
+        },
+        error => {
+          showError(`Disconnected: ${error}`);
+        },
+      );
+      connected = true;
+      status.textContent = "Connected";
+      setButtonsEnabled(true);
+    } catch (error) {
+      showError(`Connection failed: ${error}`);
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+[workspace]
+resolver = "2"
+members = ["counter", "counter-client-web", "counter-server-web"]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"

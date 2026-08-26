@@ -1,0 +1,9 @@
+[package]
+name = "counter-web"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+remoc = { path = "../../../remoc" }
+serde = { version = "1", features = ["derive"] }

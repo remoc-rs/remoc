@@ -1,0 +1,20 @@
+[package]
+name = "counter-client-web"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+counter-web = { path = "../counter" }
+remoc = { path = "../../../remoc", features = ["js"] }
+
+bytes = "1"
+futures = "0.3"
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["console"] }
+websocket-web = "0.1"

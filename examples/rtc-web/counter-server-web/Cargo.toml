@@ -1,0 +1,17 @@
+[package]
+name = "counter-server-web"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+counter-web = { path = "../counter" }
+remoc = { path = "../../../remoc" }
+
+anyhow = "1"
+axum = { version = "0.8", features = ["ws"] }
+bytes = "1"
+futures = "0.3"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"

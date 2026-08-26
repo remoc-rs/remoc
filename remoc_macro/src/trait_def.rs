@@ -1539,14 +1539,16 @@ impl TraitDef {
                     self.req_rx.close()
                 }
 
-                async fn forward(mut self, client: Self::Client) -> ::std::result::Result<
-                    ::std::option::Option<Self::Client>, ::remoc::rtc::ServeError
+                async fn forward(&mut self, client: Self::Client) -> ::std::result::Result<
+                    ::remoc::rtc::Forwarded<Self::Client>, ::remoc::rtc::ServeError
                 > {
                     loop {
                         let permit = match client.req_tx.reserve().await {
                             ::std::result::Result::Ok(permit) => permit,
                             ::std::result::Result::Err(err) if err.is_closed() => {
-                                break ::std::result::Result::Ok(::std::option::Option::Some(client))
+                                break ::std::result::Result::Ok(
+                                    ::remoc::rtc::Forwarded::TargetLost(client)
+                                )
                             }
                             ::std::result::Result::Err(err) => break ::std::result::Result::Err(err.into()),
                         };
@@ -1560,10 +1562,10 @@ impl TraitDef {
                         let req = match req {
                             ::std::result::Result::Ok(::std::option::Option::Some(req)) => req,
                             ::std::result::Result::Ok(::std::option::Option::None) => {
-                                break ::std::result::Result::Ok(::std::option::Option::Some(client))
+                                break ::std::result::Result::Ok(::remoc::rtc::Forwarded::Done(client))
                             }
                             ::std::result::Result::Err(err) if err.is_disconnected() => {
-                                break ::std::result::Result::Ok(::std::option::Option::Some(client))
+                                break ::std::result::Result::Ok(::remoc::rtc::Forwarded::Done(client))
                             }
                             ::std::result::Result::Err(err) => break ::std::result::Result::Err(err.into()),
                         };
@@ -1580,7 +1582,7 @@ impl TraitDef {
                         permit.send(req);
 
                         if consumed {
-                            break ::std::result::Result::Ok(::std::option::Option::None);
+                            break ::std::result::Result::Ok(::remoc::rtc::Forwarded::Consumed);
                         }
                     }
                 }

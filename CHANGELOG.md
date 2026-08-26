@@ -69,8 +69,8 @@ Remoc 0.20 remains wire-compatible with previous versions.
   request receiver every server variant can be created from
 - **BREAKING**: rtc: `ServeError` has a new `Forward` variant, reported when forwarding
   a request to another client fails
-- **BREAKING**: rtc: `ReqReceiver::forward` returns the client it forwarded to, or
-  `None` when the object was consumed by a method taking `self` by value
+- **BREAKING**: rtc: `ReqReceiver::forward` takes the request receiver by mutable
+  reference and returns a `Forwarded`, which tells why forwarding ended
 - **BREAKING**: rch::mpsc: `channel` no longer takes a local buffer size and uses
   `DEFAULT_BUFFER`; use `with_local_buffer` where a specific size is required.
 - **BREAKING**: rtc: the constructors of clients, request receivers and all server

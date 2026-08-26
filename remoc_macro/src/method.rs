@@ -469,7 +469,8 @@ impl TraitMethod {
             ::remoc::rtc::Call::ready(#full_name, async {
                 let __client = self.#ident(#call_args).await?;
                 ::remoc::rtc::spawn(::remoc::rtc::Instrument::in_current_span(async move {
-                    let _ = ::remoc::rtc::ReqReceiver::forward(__req_rx, __client).await;
+                    let mut __req_rx = __req_rx;
+                    let _ = ::remoc::rtc::ReqReceiver::forward(&mut __req_rx, __client).await;
                 }));
                 ::std::result::Result::Ok(())
             }.await)

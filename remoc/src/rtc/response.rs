@@ -426,7 +426,8 @@ where
                 let pipelined = match result.split() {
                     Ok(client) => {
                         crate::rtc::spawn(tracing::Instrument::in_current_span(async move {
-                            let _ = super::ReqReceiver::forward(req_rx, client).await;
+                            let mut req_rx = req_rx;
+                            let _ = super::ReqReceiver::forward(&mut req_rx, client).await;
                         }));
                         R::without_value()
                     }

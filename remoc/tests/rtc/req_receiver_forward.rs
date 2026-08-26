@@ -72,7 +72,7 @@ async fn forward_to_local_client() {
     let (obj, target_client) = serve_counter();
 
     let (req_rx, mut client) = counter_pair();
-    let forwarding = wokio::spawn(req_rx.forward(target_client));
+    let forwarding = wokio::spawn(async move { let mut req_rx = req_rx; req_rx.forward(target_client).await });
 
     use_counter(&mut client).await;
     drop(client);
@@ -98,7 +98,7 @@ async fn forward_to_remote_client() {
 
     println!("Forwarding a request receiver to it");
     let (req_rx, mut client) = counter_pair();
-    let forwarding = wokio::spawn(req_rx.forward(remote_client));
+    let forwarding = wokio::spawn(async move { let mut req_rx = req_rx; req_rx.forward(remote_client).await });
 
     use_counter(&mut client).await;
     drop(client);
@@ -118,7 +118,7 @@ async fn forward_ends_when_target_is_gone() {
     drop(target_rx);
 
     let (req_rx, client) = counter_pair();
-    let forwarding = wokio::spawn(req_rx.forward(target_client));
+    let forwarding = wokio::spawn(async move { let mut req_rx = req_rx; req_rx.forward(target_client).await });
 
     forwarding.await.unwrap().unwrap();
     assert!(client.value().await.is_err());
@@ -161,7 +161,7 @@ async fn forward_uses_req_receiver_monitor() {
 
     let (mut req_rx, mut client) = counter_pair();
     req_rx.set_monitor(CountingReqMonitor { count: count.clone() });
-    let forwarding = wokio::spawn(req_rx.forward(target_client));
+    let forwarding = wokio::spawn(async move { let mut req_rx = req_rx; req_rx.forward(target_client).await });
 
     use_counter(&mut client).await;
     drop(client);
@@ -198,7 +198,7 @@ async fn forward_uses_client_monitor() {
     target_client.set_monitor(DropClientMonitor);
 
     let (req_rx, mut client) = counter_pair();
-    let forwarding = wokio::spawn(req_rx.forward(target_client));
+    let forwarding = wokio::spawn(async move { let mut req_rx = req_rx; req_rx.forward(target_client).await });
 
     assert!(matches!(client.value().await, Err(CallError::Dropped)));
     assert!(matches!(client.increase(20).await, Err(CallError::Dropped)));

@@ -1121,11 +1121,20 @@ where
     /// The client executes the requests, i.e. they are handled by whatever the
     /// client is connected to, which may be a server on a remote endpoint.
     ///
-    /// Forwarding ends when all clients of this request receiver have been dropped
-    /// and all queued requests have been forwarded, or when `client` is disconnected.
-    /// `client` is then returned, unless a request for a method taking `self` by value
-    /// was forwarded, in which case [`None`] is returned because the object is no
-    /// longer served.
+    /// Forwarding ends when `client` is disconnected, or when all clients of this
+    /// request receiver have been dropped and all queued requests have been forwarded.
+    /// The returned [`Forwarded`] tells which of the two happened and hands `client`
+    /// back. It is [`Forwarded::Consumed`] instead when a request for a method taking
+    /// `self` by value was forwarded, since the object is then no longer served.
+    ///
+    /// This request receiver is only borrowed, so forwarding can afterwards be
+    /// continued with another client. Requests made while no client is attached are
+    /// queued and are forwarded once one is.
+    ///
+    /// `client` becoming unreachable because the connection carrying it failed is
+    /// reported as [`ServeError::Forward`], not as [`Forwarded::TargetLost`], which is
+    /// reported when it is disconnected gracefully. Forwarding may be continued with
+    /// another client in both cases.
     ///
     /// The returned future must be polled for requests to be forwarded; spawn it
     /// as a task if forwarding should proceed in the background.
@@ -1141,8 +1150,8 @@ where
     ///
     /// The maximum response size of `client` does not apply.
     fn forward(
-        self, client: Self::Client,
-    ) -> impl Future<Output = Result<Option<Self::Client>, ServeError>> + Send;
+        &mut self, client: Self::Client,
+    ) -> impl Future<Output = Result<Forwarded<Self::Client>, ServeError>> + Send;
 
     /// Converts the request receiver into a [stream](Stream) of requests.
     fn into_stream(self) -> ReqReceiverStream<Self, Codec>
@@ -1228,6 +1237,40 @@ where
 }
 
 impl<R, Codec> Unpin for ReqReceiverStream<R, Codec> where R: ReqReceiver<Codec> + Send + 'static {}
+
+/// Why [forwarding](ReqReceiver::forward) requests to a client ended.
+#[derive(Debug, Clone)]
+pub enum Forwarded<C> {
+    /// The client the requests were forwarded to has been disconnected.
+    ///
+    /// The requests of the request receiver are unaffected by this and forwarding can
+    /// be continued with another client.
+    TargetLost(C),
+    /// All clients of the request receiver have been dropped and all requests they made
+    /// have been forwarded.
+    ///
+    /// There is nothing left to forward and the returned client can be discarded.
+    Done(C),
+    /// A request for a method taking the object by value has been forwarded, so the
+    /// object is no longer served by the client the requests went to.
+    Consumed,
+}
+
+impl<C> Forwarded<C> {
+    /// The client the requests were forwarded to, unless the object it served has been
+    /// consumed.
+    pub fn into_client(self) -> Option<C> {
+        match self {
+            Self::TargetLost(client) | Self::Done(client) => Some(client),
+            Self::Consumed => None,
+        }
+    }
+
+    /// Whether forwarding ended because the client it forwarded to was disconnected.
+    pub fn is_target_lost(&self) -> bool {
+        matches!(self, Self::TargetLost(_))
+    }
+}
 
 /// An error that terminates an RTC server.
 ///

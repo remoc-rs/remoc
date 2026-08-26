@@ -459,7 +459,8 @@ impl TraitMethod {
 
         let doc = format!(
             "Calls [`{ident}`](Self::{ident}) and lets the returned client execute the requests of the provided request receiver in the background.\n\n\
-             Await the returned [call](::remoc::rtc::Call) to obtain its result."
+             Await the returned [call](::remoc::rtc::Call) to obtain its result.\n\n\
+             The provided implementation should not be overridden."
         );
 
         let body = quote! {

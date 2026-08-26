@@ -506,6 +506,8 @@ pub const DEFAULT_PARALLELISM: usize = 32;
 /// For example, when `#[remoc::rtc::remote(server(SharedMut))]` is applied to `trait Trait` only the
 /// `TraitServerSharedMut` server will be generated.
 /// If unspecified, all server variants are generated.
+/// Specify an empty list, i.e. `#[remoc::rtc::remote(server())]`, to generate no server at all;
+/// this is useful when the requests are only handled through the request receiver.
 /// The request receiver `TraitReqReceiver` is always generated.
 ///
 /// If the `#[no_cancel]` attribute is applied on a trait method, it will run to completion,
@@ -525,7 +527,7 @@ pub const DEFAULT_PARALLELISM: usize = 32;
 /// complete. Serving of the request receiver continues in the background, so the caller
 /// keeps the client it created for as long as it likes. The default implementation calls
 /// the original method and [forwards](ReqReceiver::forward) the requests to the client
-/// it returns.
+/// it returns. It should not be overridden.
 ///
 /// Adding the attribute to an existing method keeps its requests wire compatible.
 /// However, calling the twin method on an endpoint that does not know it fails with
@@ -1092,8 +1094,8 @@ where
     /// Handle the request by first matching on the [`Req::Value`], [`Req::Ref`]
     /// and [`Req::RefMut`] variants, which group the methods by how they take
     /// `self`, and then on the variants of the contained per-kind request enum,
-    /// one per method. Response with the result on the oneshot sender provided in
-    /// the `__responder` field of each method variant.
+    /// one per method. Response with the result on the [responder](Responder) provided
+    /// in the `__responder` field of each method variant.
     ///
     /// Returns `Ok(None)` after all clients have been dropped and all queued
     /// requests have been received.

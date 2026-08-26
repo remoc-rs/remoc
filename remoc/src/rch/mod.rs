@@ -152,7 +152,7 @@
 //! This is used to specify the local buffer size (in items) via a const generic type parameter
 //! when the sender or receiver half of a channel *is received*.
 //!
-//! The default buffer size is [DEFAULT_BUFFER], which is currently 2 items.
+//! The default buffer size is [DEFAULT_BUFFER], which is currently 16 items.
 //! It can be increased to improve performance, but this will also increase
 //! the maximum amount of memory used per channel.
 //! Setting the buffer size too high must be avoided, since this can lead to

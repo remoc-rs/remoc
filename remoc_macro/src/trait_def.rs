@@ -200,7 +200,10 @@ impl TraitDef {
             while !content.is_empty() {
                 let variant: Ident = content.parse()?;
                 let variant = variant.to_string().parse::<ServerVariant>().map_err(|_| {
-                    content.error("supported server variants: Value, Ref, RefMut, Shared, SharedMut")
+                    content.error(
+                        "supported server variants: Value, Ref, RefMut, Shared, SharedMut; \
+                         specify an empty list to generate no server",
+                    )
                 })?;
                 variants.insert(variant);
 

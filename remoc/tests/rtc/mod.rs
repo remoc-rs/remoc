@@ -14,6 +14,7 @@ mod generics;
 mod generics_non_clone;
 mod monitor;
 mod monitor_log;
+mod no_server;
 mod pipelined;
 mod pipelined_chain;
 mod pipelining;

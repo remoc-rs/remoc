@@ -2028,7 +2028,7 @@ impl TraitDef {
                 }
 
                 fn max_response_size(&self) -> usize {
-                    ::std::convert::TryFrom::try_from(self.max_response_size).unwrap_or(::std::usize::MAX)
+                    ::std::convert::TryFrom::try_from(self.max_response_size).unwrap_or(usize::MAX)
                 }
 
                 fn set_max_response_size(&mut self, max_response_size: usize) {

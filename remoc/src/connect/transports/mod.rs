@@ -16,6 +16,37 @@
 //! If the underlying network is unreliable, see [aggligator], which keeps a Remoc
 //! connection alive across link failures.
 //!
+//! # Placeholder types
+//!
+//! Each example exchanges these two placeholder types over the initial
+//! [base channel](crate::rch::base). Replace them with your own:
+//!
+//! ```
+//! # use remoc::prelude::*;
+//! /// The initial request; replace this with your own type.
+//! #[derive(Debug, serde::Serialize, serde::Deserialize)]
+//! pub struct MyInitialReq {}
+//!
+//! /// The initial response; replace this with your own type.
+//! #[derive(Debug, serde::Serialize, serde::Deserialize)]
+//! pub struct MyInitialRsp {}
+//! ```
+//!
+//! The two directions of a base channel carry independent types, so the client
+//! sends `MyInitialReq` and receives `MyInitialRsp`, while the server does the
+//! reverse.
+//! Everything else -- further [channels](crate::rch), [RTC](crate::rtc) clients
+//! and [remote objects](crate::robj) -- is sent over the connection afterwards,
+//! so the initial types are often just a handshake.
+//!
+//! # A single initial value
+//!
+//! To transfer a single value while connecting instead, leave the transport
+//! adaptation of an example unchanged and replace its final
+//! `Connect::io(...).await?` with [`.provide(value).await?`](crate::ConnectExt::provide)
+//! or [`.consume().await?`](crate::ConnectExt::consume).
+//! This is the usual way to hand an [RTC](crate::rtc) client to the other endpoint.
+//!
 //! [AsyncRead]: tokio::io::AsyncRead
 //! [AsyncWrite]: tokio::io::AsyncWrite
 //! [Sink]: futures::Sink

@@ -12,6 +12,8 @@ Remoc is written in [100% safe Rust], builds upon [Tokio], and uses [Serde]
 with the compact, forward- and backward-compatible [Postbag] binary codec.
 Remoc does not depend on any particular transport type.
 
+An illustrated overview and benchmarks are available at [remoc.rs](https://remoc.rs).
+
 [single underlying transport]: https://docs.rs/remoc/latest/remoc/struct.Connect.html#physical-transport
 [multiple channels]: https://docs.rs/remoc/latest/remoc/rch/index.html
 [MPSC]: https://docs.rs/remoc/latest/remoc/rch/mpsc/index.html
@@ -26,6 +28,7 @@ Remoc does not depend on any particular transport type.
 [Serde]: https://serde.rs
 [Postbag]: https://crates.io/crates/postbag
 
+[![website](https://img.shields.io/badge/website-remoc.rs-blue)](https://remoc.rs)
 [![crates.io page](https://img.shields.io/crates/v/remoc)](https://crates.io/crates/remoc)
 [![docs.rs page](https://docs.rs/remoc/badge.svg)](https://docs.rs/remoc)
 [![Apache 2 license](https://img.shields.io/crates/l/remoc)](https://raw.githubusercontent.com/remoc-rs/remoc/master/LICENSE)
@@ -52,11 +55,34 @@ All channels are multiplexed over the same remote connection, with data being
 transmitted in chunks to avoid one channel blocking another if a large message
 is transmitted.
 
+```rust
+// Most Remoc types, like channel halves, can be part of
+// serializable data structures.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct CountReq {
+    up_to: u32,
+    seq_tx: rch::mpsc::Sender<u32>,
+}
+
+// Sending the sender half opens a new channel to the remote endpoint,
+// inside the connection that is already established.
+let (seq_tx, mut seq_rx) = rch::mpsc::channel();
+tx.send(CountReq { up_to: 4, seq_tx }).await.unwrap();
+
+// The remote endpoint counts up to 4 over the channel we provided.
+while let Some(i) = seq_rx.recv().await.unwrap() {
+    println!("{i}");
+}
+```
+
+See the [channel example](#channels) below for the complete, runnable version,
+including establishing the connection and the code of the remote endpoint.
+
 Building upon its remote channels, Remoc allows calling of remote functions and
 closures.
 Furthermore, a trait can be made remotely callable with automatically generated
 client and server implementations, resembling a classical remote procedure
-calling (RPC) model.
+calling (RPC) model; see the [RPC example](#remote-procedure-calls) below.
 
 [TCP network connection]: https://docs.rs/remoc/latest/remoc/transports/tcp/index.html
 [WebSocket]: https://docs.rs/remoc/latest/remoc/transports/websocket/index.html
@@ -69,11 +95,20 @@ calling (RPC) model.
 Remoc is a good fit once two or more Rust programs need to interact and you
 would rather express that interaction as channels, function calls and trait
 objects than design and maintain a custom wire protocol.
-Typical uses include splitting an application into cooperating processes,
-talking to a sandboxed child process, connecting a UI to a backend it does
-not share memory with, or driving a service from Rust code compiled to
-WebAssembly. The processes can either run on the same machine or talk
-to each other via the network.
+The processes can either run on the same machine or talk to each other via
+the network.
+
+Use Remoc to:
+
+  * build distributed applications that exchange [live channels](#channels)
+    and objects, not just messages;
+  * expose a set of related operations as an ordinary Rust trait and
+    [call it][remote trait calling (RTC)] from the other endpoint,    
+  * talk to a sandboxed or otherwise isolated [child process],
+  * connect a UI to a backend it does not share memory with, including from
+    Rust code compiled to WebAssembly,
+  * give a remote endpoint a live, read-only [mirror of a collection]
+    that keeps changing.
 
 Remoc is *not*:
 
@@ -87,10 +122,6 @@ Remoc is *not*:
     connection itself, see [Security](#security) below,
   * a cross-language protocol — both endpoints of a connection run Rust code
     using Remoc.
-
-Remoc pays off once you want function calling, bidirectional streams, 
-callbacks, or to pass live channels and objects between endpoints as 
-naturally as you would locally.
 
 
 ## Getting started
@@ -118,9 +149,10 @@ A Remoc application normally follows these steps:
 5. Send additional channel halves, RTC clients, or remote objects wherever
    they are needed.
 
-The complete [example](#example) in this README demonstrates the base-channel
-approach in one process. For separate client and server crates using remote
-trait calling, see the [RTC example].
+The [channel example](#channels) below demonstrates the base-channel approach
+in one process; the [rtc module documentation][rtc docs] does the same for the
+remote trait calling approach. For separate client and server crates, see the
+[RTC example].
 
 [RTC example]: https://github.com/remoc-rs/remoc/tree/master/examples/rtc
 
@@ -145,22 +177,17 @@ to a child process and aggregated, failure-resilient links.
 
 ## Choosing channels, functions, objects or traits
 
-Everything in Remoc builds on [remote channels]; which higher-level building
-block to reach for depends on how your interaction is shaped:
+Everything in Remoc builds on [remote channels][remote channel]; which
+higher-level building block to reach for depends on how your interaction is
+shaped:
 
-  * a [remote channel] directly, to stream a sequence of values in one or
-    both directions, for example events, log lines or a stream of computed
-    values,
-  * a [remote function], to expose a single async function or closure
-    without declaring a trait,
-  * [remote trait calling (RTC)], when a remote endpoint should expose
-    several related methods, optionally backed by shared mutable state; it
-    generates a client and server for you from an ordinary trait,
-  * a [remote object], when it is a value's identity, or its lazily-fetched
-    contents, that must cross the connection rather than a stream of
-    updates,
-  * an [observable collection], when a remote endpoint needs a live,
-    read-only mirror of a map, set, list or vector that changes over time.
+| You want to | Use |
+|---|---|
+| stream a sequence of values in one or both directions, for example events, log lines or computed values | a [remote channel] |
+| expose a single async function or closure, without declaring a trait | a [remote function] |
+| expose several related methods, optionally backed by shared mutable state | [remote trait calling (RTC)] |
+| move a value's identity, or its lazily-fetched contents, across the connection rather than a stream of updates | a [remote object] |
+| give a remote endpoint a live, read-only mirror of a map, set, list or vector that changes over time | an [observable collection] |
 
 These combine freely: an RTC method can take or return a channel, and a
 channel's item can contain a remote object.
@@ -170,6 +197,8 @@ channel's item can contain a remote object.
 [remote trait calling (RTC)]: https://docs.rs/remoc/latest/remoc/rtc/index.html
 [remote object]: https://docs.rs/remoc/latest/remoc/robj/index.html
 [observable collection]: https://docs.rs/remoc/latest/remoc/robs/index.html
+[mirror of a collection]: https://docs.rs/remoc/latest/remoc/robs/index.html
+[child process]: https://docs.rs/remoc/latest/remoc/transports/process/index.html
 
 
 ## Forward and backward compatibility
@@ -254,42 +283,12 @@ This will enable JavaScript promises support and spawn tasks onto the browser's
 native event queue.
 
 
-## Security
-
-Remoc neither encrypts nor authenticates the connection; it is designed to
-run on top of a transport that already provides the properties you need.
-If a connection crosses a trust boundary, wrap the transport in TLS or
-another secure channel — see the [TLS transport example] — before passing
-it to `Connect::io` or `Connect::framed`.
-
-When exchanging data with an untrusted or unauthenticated endpoint, also
-review the [size considerations] in the remote channel module and the
-`max_ports` and `connect_queue` settings of [`Cfg`], which bound how many
-channels a peer can make you open.
-
-[TLS transport example]: https://docs.rs/remoc/latest/remoc/transports/tls/index.html
-[size considerations]: https://docs.rs/remoc/latest/remoc/rch/index.html#size-considerations
-[`Cfg`]: https://docs.rs/remoc/latest/remoc/chmux/struct.Cfg.html
-
-
-## Tracing
-
-Remoc uses the [tracing] crate for logging.
-Setting the log level to `TRACE` logs multiplexer lifetime events and
-messages as they are processed.
-
-[tracing]: https://docs.rs/tracing
-
-
-## Supported Rust versions
-
-Remoc is built against the latest stable release.
-The minimum supported Rust version (MSRV) is 1.95.
-
 ## Example
 
-The following examples show the two most common styles: exchanging values over
-channels, and calling methods on a remote object.
+The following example shows a complete Remoc application: two endpoints
+connected over TCP that exchange values over channels.
+It is followed by a look at [remote procedure calls](#remote-procedure-calls),
+the other common style of using Remoc.
 
 ### Channels
 
@@ -404,19 +403,12 @@ async fn server(mut rx: rch::base::Receiver<CountReq>) {
 ### Remote procedure calls
 
 Channels are the foundation, but a remote endpoint that should expose several
-related methods is usually better served by remote trait calling.
+related methods is usually better served by [remote trait calling (RTC)].
 Tagging a trait generates a client that implements it and servers that execute
-the calls on your object.
-
-In the following example the server listens on TCP port 9871 and sends the counter
-client to the client, which then calls the trait methods on it.
-Each call is transferred over the connection and executed on the counter object
-held by the server.
+the calls on your object, resembling a classical RPC model — while remaining
+free to pass channels and remote objects through the calls:
 
 ```rust
-use std::{net::Ipv4Addr, sync::Arc};
-use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::RwLock;
 use remoc::prelude::*;
 use remoc::rtc::CallError;
 
@@ -424,79 +416,61 @@ use remoc::rtc::CallError;
 #[rtc::remote]
 pub trait Counter {
     async fn value(&self) -> Result<u32, CallError>;
+
     async fn increase(&mut self, by: u32) -> Result<(), CallError>;
+
+    // Methods can take and return channels and other remote objects.
+    async fn watch(&mut self) -> Result<rch::watch::Receiver<u32>, CallError>;
 }
 
-// Server implementation object.
-pub struct CounterObj {
-    value: u32,
-}
+// CounterClient implements Counter, so calling it looks like a local call,
+// but is executed on the counter object located on the server.
+async fn use_counter(mut counter: CounterClient) -> Result<(), CallError> {
+    counter.increase(5).await?;
+    assert_eq!(counter.value().await?, 5);
 
-impl Counter for CounterObj {
-    async fn value(&self) -> Result<u32, CallError> {
-        Ok(self.value)
-    }
+    // The watch receiver returned by the call stays connected to the
+    // counter object and reports every change made to it.
+    let mut watch_rx = counter.watch().await?;
+    assert_eq!(*watch_rx.borrow().unwrap(), 5);
 
-    async fn increase(&mut self, by: u32) -> Result<(), CallError> {
-        self.value += by;
-        Ok(())
-    }
-}
-
-#[tokio::main]
-async fn main() {
-    // For demonstration we run both client and server in
-    // the same process.
-    tokio::join!(connect_client(), connect_server());
-}
-
-// This would be run on the server.
-async fn connect_server() {
-    // Accept TCP connection.
-    let listener =
-        TcpListener::bind((Ipv4Addr::LOCALHOST, 9871)).await.unwrap();
-    let (socket, _) = listener.accept().await.unwrap();
-    let (socket_rx, socket_tx) = socket.into_split();
-
-    // Create the server and its client for the counter object.
-    let counter_obj = Arc::new(RwLock::new(CounterObj { value: 0 }));
-    let (server, client) =
-        CounterServerSharedMut::<_, remoc::codec::Default>::new(counter_obj);
-
-    // Establish the Remoc connection and send the client to the remote endpoint.
-    remoc::Connect::io(remoc::Cfg::default(), socket_rx, socket_tx)
-        .provide(client).await.unwrap();
-
-    // Execute the calls made by the remote endpoint on the counter object.
-    server.serve().await.unwrap();
-}
-
-// This would be run on the client.
-async fn connect_client() {
-    // Wait for server to be ready.
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-
-    // Establish TCP connection.
-    let socket =
-        TcpStream::connect((Ipv4Addr::LOCALHOST, 9871)).await.unwrap();
-    let (socket_rx, socket_tx) = socket.into_split();
-
-    // Establish the Remoc connection and receive the counter client.
-    let mut counter: CounterClient =
-        remoc::Connect::io(remoc::Cfg::default(), socket_rx, socket_tx)
-            .consume().await.unwrap();
-
-    // CounterClient implements Counter, so calling it looks like a local call,
-    // but is executed on the counter object located on the server.
-    counter.increase(5).await.unwrap();
-    assert_eq!(counter.value().await.unwrap(), 5);
+    Ok(())
 }
 ```
 
-`ConnectExt::provide` and `ConnectExt::consume` establish the connection and
-transfer the client in one step.
-When a connection already exists, the client can be sent over any channel
-instead, just like the channel halves above.
+The client is remote sendable, so it can be sent over any channel, just like
+the channel halves above, or transferred while establishing the connection
+using `ConnectExt::provide` and `ConnectExt::consume`.
+See the [rtc module documentation][rtc docs] for the server side, connecting
+and a complete example, and the [RTC example] for client and server split into
+separate crates.
+
+[rtc docs]: https://docs.rs/remoc/latest/remoc/rtc/index.html#example
+
+
+## Security
+
+Remoc neither encrypts nor authenticates the connection; it is designed to
+run on top of a transport that already provides the properties you need.
+If a connection crosses a trust boundary, wrap the transport in TLS or
+another secure channel — see the [TLS transport example] — before passing
+it to `Connect::io` or `Connect::framed`.
+
+When exchanging data with an untrusted or unauthenticated endpoint, also
+review the [size considerations] in the remote channel module and the
+`max_ports` and `connect_queue` settings of [`Cfg`], which bound how many
+channels a peer can make you open.
+
+[TLS transport example]: https://docs.rs/remoc/latest/remoc/transports/tls/index.html
+[size considerations]: https://docs.rs/remoc/latest/remoc/rch/index.html#size-considerations
+[`Cfg`]: https://docs.rs/remoc/latest/remoc/chmux/struct.Cfg.html
+
+
+## Supported Rust versions
+
+Remoc is built against the latest stable release.
+The minimum supported Rust version (MSRV) is 1.95.
+
 
 ## Development
 
@@ -508,7 +482,8 @@ install [`wasm-bindgen-test-runner`](https://github.com/wasm-bindgen/wasm-bindge
 Then use the following command to execute the test suite:
 
 ```
-WASM_BINDGEN_USE_BROWSER=1 WASM_BINDGEN_TEST_TIMEOUT=90 cargo +nightly test --target wasm32-unknown-unknown --all-features --release --tests
+WASM_BINDGEN_USE_BROWSER=1 WASM_BINDGEN_TEST_TIMEOUT=90 \
+    cargo +nightly test --target wasm32-unknown-unknown --all-features --release --tests
 ```
 
 A proper web-compatible runtime environment is required. Thus Node.js will not work. Deno should

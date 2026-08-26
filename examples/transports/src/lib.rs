@@ -2,6 +2,17 @@
 //!
 //! The snippets live inside `remoc/src/` so that `include_str!` keeps working in
 //! the published crate; they are pulled in here by path.
+//!
+//! The placeholder types the snippets exchange over the initial base channel are
+//! defined here, standing in for the types a real application would use.
+
+/// The initial request; replace this with your own type.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct MyInitialReq {}
+
+/// The initial response; replace this with your own type.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct MyInitialRsp {}
 
 #[path = "../../../remoc/src/connect/transports/aggligator.rs"]
 pub mod aggligator;

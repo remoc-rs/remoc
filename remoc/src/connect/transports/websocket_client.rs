@@ -1,3 +1,4 @@
+use crate::{MyInitialReq, MyInitialRsp};
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt, future};
 use remoc::prelude::*;
@@ -9,12 +10,16 @@ use tokio_tungstenite::{
 /// Connects to a Remoc endpoint exposed over WebSocket.
 pub async fn connect(
     url: &str,
-) -> Result<(rch::base::Sender<String>, rch::base::Receiver<String>), Box<dyn std::error::Error>> {
+) -> Result<
+    (rch::base::Sender<MyInitialReq>, rch::base::Receiver<MyInitialRsp>),
+    Box<dyn std::error::Error>,
+> {
     let (websocket, _response) = connect_async(url).await?;
     let (websocket_tx, websocket_rx) = websocket.split();
 
     // Each chmux packet is carried as one binary WebSocket message.
-    let transport_tx = websocket_tx.with(|packet: Bytes| future::ready(Ok::<_, Error>(Message::Binary(packet))));
+    let transport_tx = websocket_tx
+        .with(|packet: Bytes| future::ready(Ok::<_, Error>(Message::Binary(packet))));
 
     // Ping, pong, text and close messages are not part of the Remoc transport.
     let transport_rx = websocket_rx.filter_map(|message| {
@@ -25,7 +30,8 @@ pub async fn connect(
         })
     });
 
-    let (conn, tx, rx) = remoc::Connect::framed(remoc::Cfg::default(), transport_tx, transport_rx).await?;
+    let (conn, tx, rx) =
+        remoc::Connect::framed(remoc::Cfg::default(), transport_tx, transport_rx).await?;
     tokio::spawn(conn);
 
     Ok((tx, rx))

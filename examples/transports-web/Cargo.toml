@@ -18,5 +18,6 @@ remoc = { path = "../../remoc", features = ["js"] }
 
 bytes = "1"
 futures = "0.3"
+serde = { version = "1", features = ["derive"] }
 wasm-bindgen-futures = "0.4"
 websocket-web = "0.1"

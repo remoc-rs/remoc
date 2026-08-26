@@ -1,3 +1,4 @@
+use crate::{MyInitialReq, MyInitialRsp};
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt, future};
 use remoc::prelude::*;
@@ -8,13 +9,17 @@ use websocket_web::{Msg, WebSocket};
 /// Connects to a Remoc endpoint exposed over WebSocket from within a web browser.
 pub async fn connect(
     url: &str,
-) -> Result<(rch::base::Sender<String>, rch::base::Receiver<String>), Box<dyn std::error::Error>> {
+) -> Result<
+    (rch::base::Sender<MyInitialReq>, rch::base::Receiver<MyInitialRsp>),
+    Box<dyn std::error::Error>,
+> {
     let websocket = WebSocket::connect(url).await?;
     let (websocket_tx, websocket_rx) = websocket.into_split();
 
     // Each chmux packet is carried as one binary WebSocket message.
-    let transport_tx =
-        websocket_tx.with(|packet: Bytes| future::ready(Ok::<_, io::Error>(Msg::Binary(packet.into()))));
+    let transport_tx = websocket_tx.with(|packet: Bytes| {
+        future::ready(Ok::<_, io::Error>(Msg::Binary(packet.into())))
+    });
 
     // Text messages are not part of the Remoc transport.
     let transport_rx = websocket_rx.filter_map(|message| {
@@ -27,7 +32,8 @@ pub async fn connect(
 
     // The browser WebSocket is a JavaScript object and thus neither `Send` nor `Sync`,
     // so the connection future must be spawned onto the current thread.
-    let (conn, tx, rx) = remoc::Connect::framed(remoc::Cfg::default(), transport_tx, transport_rx).await?;
+    let (conn, tx, rx) =
+        remoc::Connect::framed(remoc::Cfg::default(), transport_tx, transport_rx).await?;
     spawn_local(async move {
         let _ = conn.await;
     });

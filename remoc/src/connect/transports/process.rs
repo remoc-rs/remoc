@@ -1,3 +1,4 @@
+use crate::{MyInitialReq, MyInitialRsp};
 use remoc::prelude::*;
 use std::process::Stdio;
 use tokio::process::Command;
@@ -6,8 +7,12 @@ use tokio::process::Command;
 /// standard input and output.
 pub async fn connect(
     program: &str,
-) -> Result<(rch::base::Sender<String>, rch::base::Receiver<String>), Box<dyn std::error::Error>> {
-    let mut child = Command::new(program).stdin(Stdio::piped()).stdout(Stdio::piped()).spawn()?;
+) -> Result<
+    (rch::base::Sender<MyInitialReq>, rch::base::Receiver<MyInitialRsp>),
+    Box<dyn std::error::Error>,
+> {
+    let mut child =
+        Command::new(program).stdin(Stdio::piped()).stdout(Stdio::piped()).spawn()?;
 
     let stdin = child.stdin.take().unwrap();
     let stdout = child.stdout.take().unwrap();
@@ -20,16 +25,21 @@ pub async fn connect(
 
 /// The counterpart running inside the child process.
 pub async fn serve() -> Result<(), Box<dyn std::error::Error>> {
-    let (conn, mut tx, mut rx) = remoc::Connect::io::<_, _, String, String, remoc::codec::Default>(
-        remoc::Cfg::default(),
-        tokio::io::stdin(),
-        tokio::io::stdout(),
-    )
-    .await?;
+    // Nothing here constrains the channel types, so they are named explicitly:
+    // this end sends responses and receives requests.
+    let (conn, mut tx, mut rx) =
+        remoc::Connect::io::<_, _, MyInitialRsp, MyInitialReq, remoc::codec::Default>(
+            remoc::Cfg::default(),
+            tokio::io::stdin(),
+            tokio::io::stdout(),
+        )
+        .await?;
     tokio::spawn(conn);
 
-    while let Some(msg) = rx.recv().await? {
-        tx.send(msg.to_uppercase()).await?;
+    while let Some(_req) = rx.recv().await? {
+        // Handle the initial request here; from this point on your application
+        // exchanges further channels and remote objects over the connection.
+        tx.send(MyInitialRsp {}).await?;
     }
 
     Ok(())

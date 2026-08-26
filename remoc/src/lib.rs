@@ -20,6 +20,8 @@
 //! with the compact, forward- and backward-compatible [Postbag] binary codec.
 //! Remoc does not depend on any particular [transport type].
 //!
+//! An illustrated overview and benchmarks are available at [remoc.rs](https://remoc.rs).
+//!
 //! [single underlying transport]: Connect
 //! [multiple channels]: rch
 //! [MPSC]: rch::mpsc
@@ -57,11 +59,42 @@
 //! transmitted in chunks to avoid one channel blocking another if a large message
 //! is transmitted.
 //!
+#![cfg_attr(
+    feature = "rch",
+    doc = r##"
+```
+# use remoc::prelude::*;
+// Most Remoc types, like channel halves, can be part of
+// serializable data structures.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct CountReq {
+    up_to: u32,
+    seq_tx: rch::mpsc::Sender<u32>,
+}
+
+# async fn client(mut tx: rch::base::Sender<CountReq>) {
+// Sending the sender half opens a new channel to the remote endpoint,
+// inside the connection that is already established.
+let (seq_tx, mut seq_rx) = rch::mpsc::channel();
+tx.send(CountReq { up_to: 4, seq_tx }).await.unwrap();
+
+// The remote endpoint counts up to 4 over the channel we provided.
+while let Some(i) = seq_rx.recv().await.unwrap() {
+    println!("{i}");
+}
+# }
+```
+"##
+)]
+//!
+//! See the [channel example](#channels) below for the complete, runnable version,
+//! including establishing the connection and the code of the remote endpoint.
+//!
 //! Building upon its remote channels, Remoc allows calling of [remote functions] and
 //! closures.
 //! Furthermore, a trait can be made [remotely callable] with automatically generated
 //! client and server implementations, resembling a classical remote procedure
-//! calling (RPC) model.
+//! calling (RPC) model; see the [RPC example](#remote-procedure-calls) below.
 //!
 //! [TCP network connection]: transports::tcp
 //! [WebSocket]: transports::websocket
@@ -75,11 +108,20 @@
 //! Remoc is a good fit once two or more Rust programs need to interact and
 //! you would rather express that interaction as channels, function calls and
 //! trait objects than design and maintain a custom wire protocol.
-//! Typical uses include splitting an application into cooperating processes,
-//! talking to a sandboxed child process, connecting a UI to a backend it does
-//! not share memory with, or driving a service from Rust code compiled to
-//! WebAssembly. The processes can either run on the same machine or talk
-//! to each other via the network.
+//! The processes can either run on the same machine or talk to each other
+//! via the network.
+//!
+//! Use Remoc to:
+//!
+//!   * build distributed applications that exchange [live channels](rch)
+//!     and [objects](robj), not just messages;
+//!   * expose a set of related operations as an ordinary Rust trait and
+//!     [call it](rtc) from the other endpoint;
+//!   * talk to a sandboxed or otherwise isolated [child process](transports::process);
+//!   * connect a UI to a backend it does not share memory with, including
+//!     from Rust code compiled to WebAssembly;
+//!   * give a remote endpoint a live, read-only
+//!     [mirror of a collection](robs) that keeps changing.
 //!
 //! Remoc is *not*:
 //!
@@ -93,10 +135,6 @@
 //!     the connection itself, see the security section below;
 //!   * a cross-language protocol -- both endpoints of a connection run Rust
 //!     code using Remoc.
-//!
-//! Remoc pays off once you want function calling, bidirectional streams,
-//! callbacks, or to pass live channels and objects between endpoints as
-//! naturally as you would locally.
 //!
 //! # Getting started
 //!
@@ -112,8 +150,8 @@
 //!    they are needed.
 //!
 //! The [channel example](#channels) below demonstrates the base-channel approach
-//! in one process and the [RPC example](#remote-procedure-calls) the remote trait
-//! calling approach. For separate client and server crates, see the
+//! in one process; the [rtc module](rtc#example) does the same for the remote
+//! trait calling approach. For separate client and server crates, see the
 //! [RTC example](https://github.com/remoc-rs/remoc/tree/master/examples/rtc).
 //!
 //! ## Connecting
@@ -157,21 +195,13 @@
 //! higher-level building block to reach for depends on how your interaction
 //! is shaped:
 //!
-//!   * a [remote channel](rch) directly, to stream a sequence of values in
-//!     one or both directions, for example events, log lines or a stream of
-//!     computed values;
-//!   * a [remote function](rfn), to expose a single async function or
-//!     closure without declaring a trait;
-//!   * [remote trait calling](rtc), when a remote endpoint should expose
-//!     several related methods, optionally backed by shared mutable state;
-//!     it generates a client and server for you from an ordinary trait;
-//!   * a [remote object](robj), when it is a value's identity, or its
-//!     lazily-fetched contents, that must cross the connection rather than a
-//!     stream of updates -- see its
-//!     [type-choosing table](crate::robj#choosing-an-object-type);
-//!   * an [observable collection](robs), when a remote endpoint needs a
-//!     live, read-only mirror of a map, set, list or vector that changes
-//!     over time.
+//! | You want to | Use |
+//! |---|---|
+//! | stream a sequence of values in one or both directions, for example events, log lines or computed values | a [remote channel](rch) |
+//! | expose a single async function or closure, without declaring a trait | a [remote function](rfn) |
+//! | expose several related methods, optionally backed by shared mutable state | [remote trait calling](rtc) |
+//! | move a value's identity, or its lazily-fetched contents, across the connection rather than a stream of updates | a [remote object](robj) |
+//! | give a remote endpoint a live, read-only mirror of a map, set, list or vector that changes over time | an [observable collection](robs) |
 //!
 //! These combine freely: an RTC method can take or return a channel, and a
 //! channel's item can contain a remote object.
@@ -233,15 +263,17 @@
 //! [`Cfg::connect_queue`](crate::Cfg::connect_queue) settings, which
 //! bound how many channels a peer can make you open.
 //!
-//! # Tracing
+//! # Logging and tracing
 //!
 //! Remoc uses the [Tracing crate](tracing) for logging of events.
 //! Setting the log level to `TRACE` logs multiplexer lifetime events and messages as they are being processed.
 //!
 //! # Example
 //!
-//! The following examples show the two most common styles: exchanging values over
-//! channels, and calling methods on a remote object.
+//! The following example shows a complete Remoc application: two endpoints
+//! connected over TCP that exchange values over channels.
+//! It is followed by a look at [remote procedure calls](#remote-procedure-calls),
+//! the other common style of using Remoc.
 //!
 //! ## Channels
 //!
@@ -364,20 +396,13 @@ async fn server(mut rx: rch::base::Receiver<CountReq>) {
 //! Channels are the foundation, but a remote endpoint that should expose several
 //! related methods is usually better served by [remote trait calling](rtc).
 //! Tagging a trait generates a client that implements it and servers that execute
-//! the calls on your object.
-//!
-//! In the following example the server listens on TCP port 9871 and sends the counter
-//! client to the client, which then calls the trait methods on it.
-//! Each call is transferred over the connection and executed on the counter object
-//! held by the server.
+//! the calls on your object, resembling a classical RPC model while remaining
+//! free to pass channels and remote objects through the calls:
 //!
 #![cfg_attr(
     feature = "rtc",
     doc = r##"
 ```
-use std::{net::Ipv4Addr, sync::Arc};
-use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::RwLock;
 use remoc::prelude::*;
 use remoc::rtc::CallError;
 
@@ -385,91 +410,42 @@ use remoc::rtc::CallError;
 #[rtc::remote]
 pub trait Counter {
     async fn value(&self) -> Result<u32, CallError>;
+
     async fn increase(&mut self, by: u32) -> Result<(), CallError>;
+
+    // Methods can take and return channels and other remote objects.
+    async fn watch(&mut self) -> Result<rch::watch::Receiver<u32>, CallError>;
 }
 
-// Server implementation object.
-pub struct CounterObj {
-    value: u32,
-}
+// CounterClient implements Counter, so calling it looks like a local call,
+// but is executed on the counter object located on the server.
+async fn use_counter(mut counter: CounterClient) -> Result<(), CallError> {
+    counter.increase(5).await?;
+    assert_eq!(counter.value().await?, 5);
 
-impl Counter for CounterObj {
-    async fn value(&self) -> Result<u32, CallError> {
-        Ok(self.value)
-    }
+    // The watch receiver returned by the call stays connected to the
+    // counter object and reports every change made to it.
+    let mut watch_rx = counter.watch().await?;
+    assert_eq!(*watch_rx.borrow().unwrap(), 5);
 
-    async fn increase(&mut self, by: u32) -> Result<(), CallError> {
-        self.value += by;
-        Ok(())
-    }
-}
-
-#[tokio::main]
-async fn main() {
-    // For demonstration we run both client and server in
-    // the same process.
-    tokio::join!(connect_client(), connect_server());
-}
-
-// This would be run on the server.
-async fn connect_server() {
-    // Accept TCP connection.
-    let listener =
-        TcpListener::bind((Ipv4Addr::LOCALHOST, 9871)).await.unwrap();
-    let (socket, _) = listener.accept().await.unwrap();
-    let (socket_rx, socket_tx) = socket.into_split();
-
-    // Create the server and its client for the counter object.
-    let counter_obj = Arc::new(RwLock::new(CounterObj { value: 0 }));
-    let (server, client) =
-        CounterServerSharedMut::<_, remoc::codec::Default>::new(counter_obj);
-
-    // Establish the Remoc connection and send the client to the remote endpoint.
-    remoc::Connect::io(remoc::Cfg::default(), socket_rx, socket_tx)
-        .provide(client).await.unwrap();
-
-    // Execute the calls made by the remote endpoint on the counter object.
-    server.serve().await.unwrap();
-}
-
-// This would be run on the client.
-async fn connect_client() {
-    // Wait for server to be ready.
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-
-    // Establish TCP connection.
-    let socket =
-        TcpStream::connect((Ipv4Addr::LOCALHOST, 9871)).await.unwrap();
-    let (socket_rx, socket_tx) = socket.into_split();
-
-    // Establish the Remoc connection and receive the counter client.
-    let mut counter: CounterClient =
-        remoc::Connect::io(remoc::Cfg::default(), socket_rx, socket_tx)
-            .consume().await.unwrap();
-
-    // CounterClient implements Counter, so calling it looks like a local call,
-    // but is executed on the counter object located on the server.
-    counter.increase(5).await.unwrap();
-    assert_eq!(counter.value().await.unwrap(), 5);
+    Ok(())
 }
 ```
 "##
 )]
 //!
-//! [ConnectExt::provide] and [ConnectExt::consume] establish the connection and
-//! transfer the client in one step.
-//! When a connection already exists, the client can be sent over any
-//! [channel](rch) instead, just like the channel halves above.
+//! The client is [remote sendable](RemoteSend), so it can be sent over any
+//! [channel](rch), just like the channel halves above, or transferred while
+//! establishing the connection using [ConnectExt::provide] and [ConnectExt::consume].
 //!
-//! # Next steps
+//! See the [rtc module](rtc) for the server side, connecting and a
+//! [complete example](rtc#example).
 //!
-//! * Browse the [transports] module for adaptable TCP, TLS, WebSocket and
-//!   child-process examples, including a resilient, reconnecting transport
-//!   for unreliable networks.
-//! * Read the [rtc] module documentation, and the fully worked
-//!   [RTC example](https://github.com/remoc-rs/remoc/tree/master/examples/rtc)
-//!   with client and server split into separate crates, if a remote endpoint
-//!   should expose more than a handful of functions.
+//! ## Transports
+//!
+//! Browse the [transports module](transports) for adaptable TCP, TLS, WebSocket and
+//! child-process examples, including a resilient, reconnecting transport
+//! for unreliable networks.
 //!
 
 pub mod prelude;

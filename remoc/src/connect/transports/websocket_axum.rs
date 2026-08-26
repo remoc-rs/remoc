@@ -1,3 +1,4 @@
+use crate::{MyInitialReq, MyInitialRsp};
 use axum::{
     Router,
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
@@ -10,15 +11,19 @@ use remoc::prelude::*;
 
 /// Serves a Remoc endpoint at `/remoc` over WebSocket.
 pub fn router() -> Router {
-    Router::new().route("/remoc", any(async |ws: WebSocketUpgrade| -> Response { ws.on_upgrade(serve) }))
+    Router::new().route(
+        "/remoc",
+        any(async |ws: WebSocketUpgrade| -> Response { ws.on_upgrade(serve) }),
+    )
 }
 
 async fn serve(websocket: WebSocket) {
     let (websocket_tx, websocket_rx) = websocket.split();
 
     // Each chmux packet is carried as one binary WebSocket message.
-    let transport_tx =
-        websocket_tx.with(|packet: Bytes| future::ready(Ok::<_, axum::Error>(Message::Binary(packet))));
+    let transport_tx = websocket_tx.with(|packet: Bytes| {
+        future::ready(Ok::<_, axum::Error>(Message::Binary(packet)))
+    });
 
     // Ping, pong, text and close messages are not part of the Remoc transport.
     let transport_rx = websocket_rx.filter_map(|message| {
@@ -29,7 +34,8 @@ async fn serve(websocket: WebSocket) {
         })
     });
 
-    let Ok((conn, tx, rx)) = remoc::Connect::framed(remoc::Cfg::default(), transport_tx, transport_rx).await
+    let Ok((conn, tx, rx)) =
+        remoc::Connect::framed(remoc::Cfg::default(), transport_tx, transport_rx).await
     else {
         return;
     };
@@ -38,9 +44,13 @@ async fn serve(websocket: WebSocket) {
     serve_client(tx, rx).await;
 }
 
-async fn serve_client(mut tx: rch::base::Sender<String>, mut rx: rch::base::Receiver<String>) {
-    while let Ok(Some(msg)) = rx.recv().await {
-        if tx.send(msg.to_uppercase()).await.is_err() {
+async fn serve_client(
+    mut tx: rch::base::Sender<MyInitialRsp>, mut rx: rch::base::Receiver<MyInitialReq>,
+) {
+    while let Ok(Some(_req)) = rx.recv().await {
+        // Handle the initial request here; from this point on your application
+        // exchanges further channels and remote objects over the connection.
+        if tx.send(MyInitialRsp {}).await.is_err() {
             break;
         }
     }

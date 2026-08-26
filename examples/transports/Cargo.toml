@@ -14,6 +14,7 @@ remoc = { path = "../../remoc" }
 
 bytes = "1"
 futures = "0.3"
+serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["io-std", "io-util", "net", "process", "rt"] }
 
 aggligator-transport-tcp = { version = "0.5", default-features = false }

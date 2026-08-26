@@ -16,6 +16,37 @@
 //! The transmitted channel-half can also be part of a larger object, such as a struct, tuple or enum.
 //! Most channel types can even be forwarded over multiple connections.
 //!
+//! ```
+//! # use remoc::prelude::*;
+//! // Any number of channel halves can travel inside one value,
+//! // and it does not matter which half of a channel is sent.
+//! #[derive(serde::Serialize, serde::Deserialize)]
+//! struct Session {
+//!     // The remote endpoint sends us events over this sender...
+//!     events_tx: rch::mpsc::Sender<String>,
+//!     // ...and receives our commands over this receiver.
+//!     commands_rx: rch::mpsc::Receiver<String>,
+//! }
+//!
+//! # async fn client(mut tx: rch::base::Sender<Session>) {
+//! let (events_tx, mut events_rx) = rch::mpsc::channel();
+//! let (commands_tx, commands_rx) = rch::mpsc::channel();
+//!
+//! // This single send establishes both new channels, multiplexed
+//! // inside the connection that already carries tx.
+//! tx.send(Session { events_tx, commands_rx }).await.unwrap();
+//!
+//! // The halves we kept behind are used right away.
+//! commands_tx.send("start".to_string()).await.unwrap();
+//! while let Some(event) = events_rx.recv().await.unwrap() {
+//!     println!("{event}");
+//! }
+//! # }
+//! ```
+//!
+//! See the [MPSC](mpsc) and [oneshot] modules for complete, runnable versions
+//! including the code of the remote endpoint.
+//!
 //! The primary purpose of a [base channel](base) is to provide an initial channel after
 //! establishing a connection over a physical transport.
 //! In most cases there is no need to create it directly and you will probably only use it

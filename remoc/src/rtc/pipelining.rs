@@ -25,15 +25,12 @@
 //! pub trait Directory {
 //!     #[pipelinable]
 //!     async fn open_counter(&self, name: String) -> Result<CounterClient, OpenError>;
+//!
+//!     // generated pipelined twin:
+//!     async fn open_counter_pipelined(
+//!         &self, name: String, __req_rx: CounterReqReceiver,
+//!     ) -> rtc::Call<Result<(), OpenError>>;
 //! }
-//! ```
-//!
-//! This generates the following twin, on the trait and on its client:
-//!
-//! ```ignore
-//! async fn open_counter_pipelined(
-//!     &self, name: String, __req_rx: CounterReqReceiver,
-//! ) -> rtc::Call<Result<(), OpenError>>;
 //! ```
 //!
 //! The request receiver takes the place of the returned client, and the value of the
@@ -57,7 +54,7 @@
 //! pub trait Counter {
 //!     async fn increase(&mut self, by: u32) -> Result<(), CallError>;
 //!
-//!     // generated:
+//!     // generated call twin:
 //!     async fn increase_call(&mut self, by: u32) -> rtc::Call<Result<(), CallError>>;
 //! }
 //! ```

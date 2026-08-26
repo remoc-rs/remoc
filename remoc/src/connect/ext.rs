@@ -16,7 +16,7 @@ use crate::{
 /// An error returned while establishing a connection that provides a value.
 #[derive(Debug, Clone)]
 pub enum ProvideError<TransportSinkError, TransportStreamError> {
-    /// Channel multiplexer error.
+    /// Remoc connection error.
     ChMux(ChMuxError<TransportSinkError, TransportStreamError>),
     /// Connection error.
     Connect(ConnectError<TransportSinkError, TransportStreamError>),
@@ -56,7 +56,7 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::ChMux(err) => write!(f, "chmux error: {err}"),
+            Self::ChMux(err) => write!(f, "Remoc connection failed: {err}"),
             Self::Connect(err) => write!(f, "connect error: {err}"),
             Self::Send(err) => write!(f, "send error: {err}"),
         }
@@ -73,7 +73,7 @@ where
 /// An error returned while establishing a connection that consumes a value.
 #[derive(Debug, Clone)]
 pub enum ConsumeError<TransportSinkError, TransportStreamError> {
-    /// Channel multiplexer error.
+    /// Remoc connection error.
     ChMux(ChMuxError<TransportSinkError, TransportStreamError>),
     /// Connection error.
     Connect(ConnectError<TransportSinkError, TransportStreamError>),
@@ -115,7 +115,7 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::ChMux(err) => write!(f, "chmux error: {err}"),
+            Self::ChMux(err) => write!(f, "Remoc connection failed: {err}"),
             Self::Connect(err) => write!(f, "connect error: {err}"),
             Self::Recv(err) => write!(f, "receive error: {err}"),
             Self::NoValueReceived => write!(f, "no value was received for consumption"),

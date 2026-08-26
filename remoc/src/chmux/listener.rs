@@ -27,7 +27,7 @@ pub enum ListenerError {
     LocalPortsExhausted,
     /// The requested remote port is already assigned to another channel.
     RemotePortAlreadyAllocated(u32),
-    /// The underlying multiplexer failed or terminated.
+    /// The underlying Remoc connection terminated.
     ChMux,
 }
 
@@ -46,7 +46,7 @@ impl fmt::Display for ListenerError {
         match self {
             Self::LocalPortsExhausted => write!(f, "all local ports are in use"),
             Self::RemotePortAlreadyAllocated(port) => write!(f, "remote port {port} is already allocated"),
-            Self::ChMux => write!(f, "multiplexer error"),
+            Self::ChMux => write!(f, "Remoc connection terminated"),
         }
     }
 }

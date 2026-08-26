@@ -28,7 +28,7 @@ use wokio::runtime;
 /// reject the connection.
 #[derive(Debug, Clone)]
 pub enum RecvError {
-    /// The underlying multiplexer terminated before the message was received.
+    /// The underlying Remoc connection terminated before the message was received.
     ChMux,
     /// The message exceeds the configured data-size limit.
     ExceedsMaxDataSize(usize),
@@ -53,7 +53,7 @@ crate::versioned::compact::impl_enum! {
 }
 
 impl RecvError {
-    /// Returns true, if error is due to multiplexer being terminated.
+    /// Returns true if the Remoc connection terminated.
     pub fn is_terminated(&self) -> bool {
         matches!(self, Self::ChMux)
     }
@@ -67,7 +67,7 @@ impl RecvError {
 impl fmt::Display for RecvError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::ChMux => write!(f, "multiplexer terminated"),
+            Self::ChMux => write!(f, "Remoc connection terminated"),
             Self::ExceedsMaxDataSize(max_size) => {
                 write!(f, "data exceeds maximum allowed size of {max_size} bytes")
             }
@@ -96,7 +96,7 @@ impl From<RecvError> for std::io::Error {
 /// An error returned while receiving from a multiplexed channel.
 #[derive(Debug, Clone)]
 pub enum RecvAnyError {
-    /// The underlying multiplexer terminated.
+    /// The underlying Remoc connection terminated.
     ChMux,
     /// The remote listener rejected this port's pre-connection.
     Rejected {
@@ -115,7 +115,7 @@ crate::versioned::compact::impl_enum! {
 }
 
 impl RecvAnyError {
-    /// Returns true, if error is due to multiplexer being terminated.
+    /// Returns true if the Remoc connection terminated.
     pub fn is_terminated(&self) -> bool {
         matches!(self, Self::ChMux)
     }
@@ -124,7 +124,7 @@ impl RecvAnyError {
 impl fmt::Display for RecvAnyError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::ChMux => write!(f, "multiplexer terminated"),
+            Self::ChMux => write!(f, "Remoc connection terminated"),
             Self::Rejected { .. } => write!(f, "pre-connected port was rejected"),
         }
     }
@@ -135,7 +135,7 @@ impl Error for RecvAnyError {}
 /// An error returned while receiving the remaining chunks of a message.
 #[derive(Debug, Clone)]
 pub enum RecvChunkError {
-    /// The underlying multiplexer terminated before the message completed.
+    /// The underlying Remoc connection terminated before the message completed.
     ChMux,
     /// The remote endpoint cancelled this message before it completed.
     Cancelled,
@@ -151,7 +151,7 @@ crate::versioned::compact::impl_enum! {
 }
 
 impl RecvChunkError {
-    /// Returns true, if error is due to multiplexer being terminated.
+    /// Returns true if the Remoc connection terminated.
     pub fn is_terminated(&self) -> bool {
         matches!(self, Self::ChMux)
     }
@@ -160,7 +160,7 @@ impl RecvChunkError {
 impl fmt::Display for RecvChunkError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::ChMux => write!(f, "multiplexer terminated"),
+            Self::ChMux => write!(f, "Remoc connection terminated"),
             Self::Cancelled => write!(f, "transmission cancelled"),
         }
     }

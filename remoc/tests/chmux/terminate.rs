@@ -80,18 +80,23 @@ async fn terminate_fails_open_ports() {
         .await
         .expect("sending on a terminated multiplexer never reported the termination");
     println!("send at terminating endpoint: {a_send:?}");
+    assert!(matches!(a_send, chmux::SendError::ChMux));
 
     let b_send = timeout(Duration::from_secs(5), send_until_error(&mut b_tx))
         .await
         .expect("sending at the remote endpoint never reported the termination");
     println!("send at remote endpoint: {b_send:?}");
+    assert!(matches!(b_send, chmux::SendError::ChMux));
 
     // Receiving must not wait for data that cannot arrive any more.
     let a_recv = timeout(Duration::from_secs(5), a_rx.recv())
         .await
         .expect("receiving on a terminated multiplexer did not return");
     println!("receive at terminating endpoint: {a_recv:?}");
-    assert!(a_recv.is_err(), "receiving reported a clean end although the multiplexer was terminated");
+    let Err(a_recv) = a_recv else {
+        panic!("receiving reported a clean end although the multiplexer was terminated");
+    };
+    assert!(matches!(a_recv, chmux::RecvError::ChMux));
 
     // Data that arrived before the termination is still delivered, but afterwards the
     // termination must be reported instead of a clean end of the channel.
@@ -99,6 +104,7 @@ async fn terminate_fails_open_ports() {
         .await
         .expect("receiving at the remote endpoint never reported the termination");
     println!("receive at remote endpoint: {b_recv:?}");
+    assert!(matches!(b_recv, chmux::RecvError::ChMux));
 }
 
 /// Receives until receiving reports an error and returns it.
@@ -135,7 +141,8 @@ async fn terminate_prevents_new_ports() {
         .await
         .expect("connecting on a terminated multiplexer did not return");
     println!("connect after terminate: {res:?}");
-    assert!(res.is_err(), "connecting succeeded on a terminated multiplexer");
+    let Err(err) = res else { panic!("connecting succeeded on a terminated multiplexer") };
+    assert!(matches!(err, chmux::ConnectError::ChMux));
 }
 
 /// A listener waiting for connections stops waiting when the multiplexer is terminated.
@@ -153,4 +160,6 @@ async fn terminate_ends_pending_accept() {
         .expect("accepting did not return after the connection was terminated")
         .unwrap();
     println!("accept after terminate: {res:?}");
+    let Err(err) = res else { panic!("accepting succeeded after the connection was terminated") };
+    assert!(matches!(err, chmux::ListenerError::ChMux));
 }

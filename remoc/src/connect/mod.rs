@@ -66,7 +66,7 @@ pub mod transports;
 /// An error returned while establishing a Remoc connection.
 #[derive(Debug, Clone)]
 pub enum ConnectError<TransportSinkError, TransportStreamError> {
-    /// Starting the multiplexer over the transport failed.
+    /// Starting the Remoc connection over the transport failed.
     ///
     /// The nested error identifies whether the transport's sending or receiving
     /// side failed; see [`ChMuxError`].
@@ -83,7 +83,7 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::ChMux(err) => write!(f, "chmux error: {err}"),
+            Self::ChMux(err) => write!(f, "Remoc connection failed: {err}"),
             Self::Connect(err) => write!(f, "channel connect failed: {err}"),
         }
     }

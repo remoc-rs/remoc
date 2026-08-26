@@ -35,7 +35,7 @@ pub enum ConnectError {
     TooManyPendingConnectReqs,
     /// The remote listener rejected the requested channel.
     Rejected,
-    /// The underlying multiplexer failed or terminated.
+    /// The underlying Remoc connection terminated.
     ChMux,
 }
 
@@ -58,7 +58,7 @@ impl fmt::Display for ConnectError {
             Self::RemotePortsExhausted => write!(f, "all remote ports are in use"),
             Self::TooManyPendingConnectReqs => write!(f, "too many connection requests are pending"),
             Self::Rejected => write!(f, "connection has been rejected by server"),
-            Self::ChMux => write!(f, "multiplexer error"),
+            Self::ChMux => write!(f, "Remoc connection terminated"),
         }
     }
 }

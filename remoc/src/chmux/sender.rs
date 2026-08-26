@@ -38,7 +38,7 @@ use wokio::{self, runtime};
 /// reject the connection.
 #[derive(Debug, Clone)]
 pub enum SendError {
-    /// The underlying multiplexer terminated before the message was sent.
+    /// The underlying Remoc connection terminated before the message was sent.
     ChMux,
     /// The remote endpoint closed the receiving half of this channel.
     Closed {
@@ -85,7 +85,7 @@ impl SendError {
 impl fmt::Display for SendError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::ChMux => write!(f, "multiplexer terminated"),
+            Self::ChMux => write!(f, "Remoc connection terminated"),
             Self::Closed { gracefully } => write!(
                 f,
                 "remote endpoint closed channel{}",

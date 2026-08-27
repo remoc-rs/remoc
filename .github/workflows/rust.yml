@@ -26,8 +26,14 @@ jobs:
         run: |
           cargo fmt --all --manifest-path examples/channels/Cargo.toml -- --check
           cargo fmt --all --manifest-path examples/rtc/Cargo.toml -- --check
+          cargo fmt --all --manifest-path examples/rtc-web/Cargo.toml -- --check
           cargo fmt --all --manifest-path examples/transports/Cargo.toml -- --check
           cargo fmt --all --manifest-path examples/transports-web/Cargo.toml -- --check
+
+      - name: Run cargo fmt for benchmarks
+        run: |
+          cargo fmt --all --manifest-path bench/compile/Cargo.toml -- --check
+          cargo fmt --all --manifest-path bench/perf/Cargo.toml -- --check
 
   msrv:
     name: Check with MSRV
@@ -66,8 +72,8 @@ jobs:
           RUSTDOCFLAGS: -D rustdoc::broken_intra_doc_links
         run: cargo doc --no-deps
 
-  check-examples:
-    name: Check examples
+  build-examples:
+    name: Build examples
     needs: [msrv]
     runs-on: ubuntu-latest
 
@@ -77,17 +83,21 @@ jobs:
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            examples/channels
+            examples/rtc
+            examples/transports
 
-      - name: Check examples
+      - name: Build examples
         run: |
-          cargo check --manifest-path examples/channels/counting-client/Cargo.toml
-          cargo check --manifest-path examples/channels/counting-server/Cargo.toml
-          cargo check --manifest-path examples/rtc/counter-client/Cargo.toml
-          cargo check --manifest-path examples/rtc/counter-server/Cargo.toml
-          cargo check --manifest-path examples/transports/Cargo.toml
+          cargo build --manifest-path examples/channels/Cargo.toml --workspace
+          cargo build --manifest-path examples/rtc/Cargo.toml --workspace
+          cargo build --manifest-path examples/transports/Cargo.toml
 
-  check-examples-web:
-    name: Check web examples
+  build-examples-web:
+    name: Build web examples
     needs: [msrv]
     runs-on: ubuntu-latest
 
@@ -102,10 +112,65 @@ jobs:
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            examples/transports-web
 
-      - name: Check web examples
+      - name: Build web examples
         run: |
-          cargo +nightly check --manifest-path examples/transports-web/Cargo.toml --target wasm32-unknown-unknown
+          cargo +nightly build --manifest-path examples/transports-web/Cargo.toml --target wasm32-unknown-unknown
+
+  build-example-rtc-web:
+    name: Build web RTC example
+    needs: [msrv]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v7
+
+      - name: Install WebAssembly target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        uses: baptiste0928/cargo-install@v3
+        with:
+          crate: wasm-pack
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            examples/rtc-web
+
+      # This builds the browser client with wasm-pack and then the server,
+      # which embeds the generated JavaScript and WebAssembly files.
+      - name: Build web RTC example
+        run: ./examples/rtc-web/build.sh
+
+  build-benchmarks:
+    name: Build benchmarks
+    needs: [msrv]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v7
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            bench/compile
+            bench/perf
+
+      - name: Build benchmarks
+        run: |
+          cargo build --manifest-path bench/compile/Cargo.toml
+          cargo build --manifest-path bench/perf/Cargo.toml
 
   clippy:
     name: Clippy

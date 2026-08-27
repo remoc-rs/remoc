@@ -25,9 +25,9 @@ dependencies = [
 
 [[package]]
 name = "aggligator-transport-tcp"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fdd76bb59b8f1ed86a010c4f5642b5e726ee9de7adf634e35d24abd8717666d8"
+checksum = "8ccf3efa567a9c94ad32fd876b50c8064089820f830c3aeeb1efa1f5e51a8549"
 dependencies = [
  "aggligator",
  "async-trait",

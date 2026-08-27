@@ -4,54 +4,140 @@ All notable changes to Remoc will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## 0.20.0 - 2026-08-26
-This release adds pipelining for remote trait calls (RTC). Previously, a method returning
-another remote object introduced an extra round trip: the caller had to wait for the new
-client before it could make another call. With pipelining, the caller can use the new
-client immediately, without waiting for the original call to finish. This allows entire
-chains of dependent remote objects to be reached in a single round trip. 
+## 0.20.0 - 2026-08-27
+This is a large release that significantly improves throughput and latency of the
+underlying channel multiplexer, adds pipelining for remote trait calls (RTC),
+monitoring and rate limiting facilities and makes many channels usable locally.
 
-In addition, this release improves throughput and introduces a system for evolving 
-the serialized representation of your own types while remaining compatible with older 
-versions.
+Previously, an RTC method returning another remote object introduced an extra
+round trip: the caller had to wait for the new client before it could make another
+call. With pipelining, the caller can use the new client immediately, without
+waiting for the original call to finish. This allows entire chains of dependent
+remote objects to be reached in a single round trip.
+
+In addition, this release considerably reduces the compile time and code size of
+crates using Remoc and introduces a system for evolving the serialized
+representation of your own types while remaining compatible with older versions.
 
 The default codec is now always Postbag and can no longer be changed using crate
 features. If you were selecting a codec via a `default-codec-*` feature, see the
 notes under *Deprecated* and *Removed* below.
 
-Remoc 0.20 remains wire-compatible with previous versions.
+Remoc 0.20 remains wire-compatible with Remoc 0.18, i.e. endpoints running either
+version can still talk to each other.
+
+Errors reported by a remote endpoint are now forward compatible: an endpoint that
+receives an error variant it does not know reports it as an unknown remote error
+instead of failing to decode the message. Thus future versions of Remoc can
+introduce new error variants without breaking endpoints running Remoc 0.20 or
+later. Remoc 0.18 has no such fallback, so error values cannot be exchanged with it.
+
+Remoc 0.19 has been yanked; its changes are part of this release.
 
 ### Added
 - rtc: pipelining via the `#[pipelinable]` attribute on a trait method returning the
   client of another remotable trait. Allows pipelining calls to multiple remote 
   objects while only using one roundtrip.
+- rtc: [monitors](https://docs.rs/remoc/0.20/remoc/rtc/monitor/index.html) that
+  observe and control every request of a client (`MonitorableClient::set_monitor`),
+  server (`MonitorableServer::set_monitor`) and request receiver
+  (`MonitorableReqReceiver::set_monitor`). A monitor can pass, delay, guard, drop or
+  reject each request. The following ready-to-use monitors are provided:
+    - `RateLimitMonitor` — limits the request rate using a sliding window,
+    - `ConcurrentLimitMonitor` — limits the number of concurrently processed requests,
+    - `IncompatibleClientMonitor` — logs and limits requests from clients that are
+      partly incompatible with the server,
+    - `IncompatibleServerMonitor` — logs and throttles calls to methods that are not
+      supported by the server,
+    - `LogMonitor` — logs every request and its outcome.
+  
+  Monitors can be combined using `ChainedMonitor`.
+- rtc: remote traits may now declare associated types
+- rtc: request enums expose `trait_name()` and `method_name()` for logging and
+  monitoring purposes
+- rtc: the `debug` argument of the `remote` attribute makes the generated request enums
+  implement `Debug`
 - performance: data of a newly opened channel is now sent immediately, without
   waiting for the remote endpoint to confirm the port; this removes one round-trip
   of latency when a channel is used for the first time
 - performance: reduced size of messages
 - new [versioned module](https://docs.rs/remoc/0.20/remoc/versioned/index.html) for
   evolving the serialized representation of a type
+- the errors reported by a remote endpoint have gained a `Remote` variant, which
+  holds the error the remote endpoint reported, or `None` when it reported a variant
+  that the local version of Remoc does not know yet
+- rch: new [I/O channel](https://docs.rs/remoc/0.20/remoc/rch/io/index.html) that
+  implements `AsyncRead` and `AsyncWrite` for streaming binary data of known or
+  unknown size, with integrity verification once the transfer completes
+- rch: rate limiting for watch channels; both the sender (`watch::Sender::set_rate_limit`)
+  and the receiver (`watch::Receiver::set_rate_limit`) can request a minimum delay
+  between value updates; intermediate values are coalesced and the latest value is
+  always eventually delivered
+- rch: `watch::TransferStrategy` and `WatchExt::with_transfer_strategy` to trade off
+  throughput, latency and buffer usage of a watch channel
+- rch: `watch::Receiver::wait_for`, `has_changed`, `mark_changed` and `mark_unchanged`
+- rch: `watch::Sender::send_if_modified` and `send_if_different`
+- rch: `mpsc::Sender::try_reserve`
 - rch::mpsc: optional additional parallel transfer channels, which serialize and
   deserialize items concurrently and thus increase throughput over high-bandwidth
   links
+- rch: `mpsc::forward` and `oneshot::forward` to forward a local Tokio channel to a
+  remote endpoint, plus `Receiver::forwarded` constructors for mpsc, oneshot and watch
+- rch: `broadcast::WeakSender` and `broadcast::Sender::downgrade`, `strong_count`
+  and `weak_count`
+- rch: `bin` channels can now be used fully locally; when both ends stay in the same
+  process a lightweight loopback is used and no serialization takes place
+- rch: `base::Sender::into_inner` and `base::Receiver::into_inner` to obtain the
+  underlying chmux channel
+- rch: type-erased base channel via `base::ErasedSender` and `base::ErasedReceiver`,
+  which send and receive `Box<dyn Any + Send>` values using an item type and codec
+  that are fixed at construction time
 - rch::base: `storage` and `with_storage` to access the data storage of the
   connection that performs the current serialization or deserialization, plus
   `StorageRef` and `storage_ref` to obtain the storage of the connection over which
   a value is transferred
+- codec: `ErasedSerializer` and `ErasedDeserializer` for type-erased serialization
+  and deserialization, together with the `AnySend` type alias
+- rfn: the number of concurrent invocations of a remote function is now limited;
+  configurable via `RFnProvider::set_max_concurrency` (default: 32)
+- robj: lazy blobs can now be used fully locally, without any copying of the data
+- connect: `Connect::loopback` for establishing a connection to yourself, which is
+  useful for testing and for uniformly handling local and remote objects
+- chmux: `Sender::flush` for explicitly flushing the transport, together with the
+  `Cfg::flush_interval` option
+- chmux: `Sender::all_received` to await that the remote endpoint has received all
+  data sent so far
 - chmux: `AnyStorage` can now store values indexed by their type using `insert`,
   `get`, `with` and `remove`, and exposes the configuration of the connection
   via `AnyStorage::cfg`
 - chmux: `Receiver::discard_chunks` to discard remaining chunks of an in-progress
   chunked reception 
-- rtc: `LogMonitor` logs every request and its outcome
-- rtc: the `debug` argument of the `remote` attribute makes the generated request enums
-  implement `Debug`
 
 ### Changed
+- performance: the channel multiplexer now uses a dynamically sized, globally shared
+  receive buffer. This substantially improves throughput, especially when the underlying 
+  connection has high latency.
+- performance: connections established with `Connect::io` are now buffered internally
+  by default; the buffer size is configured via `Cfg::io_buffer_size`
+- considerably reduced monomorphization; thus reducing compile time and binary size
+- codec: update Postbag to 1.0, which changes its data format. The format version is
+  negotiated per connection, thus an endpoint running an earlier version of Remoc is
+  served the format of Postbag 0.4 and remains able to talk to this version.
 - connect: the connection future is no longer required to be `Send`, which allows
   using non-Send transports
+- rch: the `Debug` implementations of the send error types no longer require the item
+  type to implement `Debug` and no longer include the item in their output
 - **BREAKING**: rch, chmux: `is_final` has been removed from the error types of send
   and receive operations; use `is_disconnected` instead
+- **BREAKING**: chmux: the configuration (`Cfg`) has changed:
+    - `receive_buffer` has been replaced by `port_receive_buffer`,
+      `port_receive_throttle` and `shared_receive_buffer`,
+    - `flush_delay` has been replaced by the optional `flush_interval`,
+    - `io_buffer_size` has been added,
+    - the presets `Cfg::balanced()`, `Cfg::compact()` and `Cfg::throughput()` have
+      been removed
+    - `Cfg` no longer implements `Serialize`, `Deserialize`, `PartialEq`, `Eq`,
+      `PartialOrd`, `Ord` and `Hash`,
 - **BREAKING**: chmux: `Cfg::ports_exhausted` has been remodelled and is now 
   acutally being honored
 - **BREAKING**: chmux: `AnyStorage::insert`, `get` and `remove` have been renamed to
@@ -89,8 +175,6 @@ Remoc 0.20 remains wire-compatible with previous versions.
   a request to another client fails
 - **BREAKING**: rtc: `ReqReceiver::forward` takes the request receiver by mutable
   reference and returns a `Forwarded`, which tells why forwarding ended
-- **BREAKING**: rch::mpsc: `channel` no longer takes a local buffer size and uses
-  `DEFAULT_BUFFER`; use `with_local_buffer` where a specific size is required.
 - **BREAKING**: rtc: the constructors of clients, request receivers and all server
   variants no longer take a `request_buffer` argument and use `rch::DEFAULT_BUFFER`;
   use `with_request_buffer` where a specific size is required.
@@ -99,14 +183,13 @@ Remoc 0.20 remains wire-compatible with previous versions.
   defaults to `rtc::DEFAULT_PARALLELISM`. If you passed `spawn` as `false`, call
   `set_parallelism(0)` before serving to keep dispatching one call at a time
 - **BREAKING**: rtc: the reply field of the generated request enums has been renamed
-  from `__reply_tx` to `__rsp` and is now a `rtc::Responder`
-- **BREAKING**: rtc: the monitoring traits and types have moved into the
-  [monitor module](https://docs.rs/remoc/0.20/remoc/rtc/monitor/index.html), where the
-  monitors themselves already lived; `MonitorableClient`, `MonitorableServer` and
-  `MonitorableReqReceiver` remain in the prelude
-- **BREAKING**: rtc: `ReqReceiver` is no longer accepted as a server variant in the
-  `server(...)` argument of the `remote` attribute; the request receiver is now always
-  generated
+  from `__reply_tx` to `__rsp` and is now a `rtc::Responder`; its name in the
+  serialized representation is unchanged
+- **BREAKING**: rch::mpsc: `channel` no longer takes a local buffer size and uses
+  `DEFAULT_BUFFER`; use `with_local_buffer` where a specific size is required.
+- **BREAKING**: rch: `watch::ChangedError` has a new `Recv` variant, so that a
+  receive error is no longer misreported as a closed channel
+- update MSRV to 1.95
 
 ### Deprecated
 - codec: selecting the default codec via a `default-codec-*` crate feature is
@@ -116,9 +199,8 @@ Remoc 0.20 remains wire-compatible with previous versions.
 - rch::lr: the local/remote channel is deprecated in favor of an `rch::mpsc` channel.
 
 ### Removed
-- codec: the crate features `codec-postbag` and `default-codec-postbag`
-  have been removed, since the Postbag codec is always available and the default;
-  remove them from your `Cargo.toml`
+- codec: the crate feature `codec-postbag` has been removed, since the Postbag codec
+  is always available; remove it from your `Cargo.toml`
 
 ### Fixed
 - chmux: `Cfg::ports_exhausted` was ignored and connect requests always waited for
@@ -127,120 +209,17 @@ Remoc 0.20 remains wire-compatible with previous versions.
   channel without doing so gracefully
 - rch, chmux: errors caused by exhausted ports or a rejected channel are now
   reported as a disconnection
-
-
-## 0.19.1 - 2026-08-05
-This release considerably reduces the compile time and code size of crates using
-Remoc and makes the type-erased base channel available for use by custom channel
-implementations.
-
-Remoc 0.19.1 remains wire-compatible with Remoc 0.19 and 0.18.
-
-### Added
-- rch: type-erased base channel via `base::ErasedSender` and `base::ErasedReceiver`,
-  which send and receive `Box<dyn Any + Send>` values using an item type and codec
-  that are fixed at construction time
-- codec: `ErasedSerializer` and `ErasedDeserializer` for type-erased serialization
-  and deserialization, together with the `AnySend` type alias
-
-### Changed
-- rch: the `Debug` implementations of the send error types no longer require the item
-  type to implement `Debug` and no longer include the item in their output
-- considerably reduced monomorphization; thus reducing compile time and binary size
-
-
-## 0.19.0 - 2026-08-03
-This is a large release that significantly improves throughput and latency of the
-underlying channel multiplexer, adds monitoring and rate limiting facilities and
-makes many channels usable locally.
-
-Remoc 0.19 remains wire-compatible with Remoc 0.18, i.e. endpoints running either
-version can still talk to each other.
-
-### Added
-- rch: new [I/O channel](https://docs.rs/remoc/0.19/remoc/rch/io/index.html) that
-  implements `AsyncRead` and `AsyncWrite` for streaming binary data of known or
-  unknown size, with integrity verification once the transfer completes
-- rch: rate limiting for watch channels; both the sender (`watch::Sender::set_rate_limit`)
-  and the receiver (`watch::Receiver::set_rate_limit`) can request a minimum delay
-  between value updates; intermediate values are coalesced and the latest value is
-  always eventually delivered
-- rch: `watch::TransferStrategy` and `WatchExt::with_transfer_strategy` to trade off
-  throughput, latency and buffer usage of a watch channel
-- rch: `watch::Receiver::wait_for`, `has_changed`, `mark_changed` and `mark_unchanged`
-- rch: `watch::Sender::send_if_modified` and `send_if_different`
-- rch: `mpsc::Sender::try_reserve`
-- rch: `mpsc::forward` and `oneshot::forward` to forward a local Tokio channel to a
-  remote endpoint, plus `Receiver::forwarded` constructors for mpsc, oneshot and watch
-- rch: `broadcast::WeakSender` and `broadcast::Sender::downgrade`, `strong_count`
-  and `weak_count`
-- rch: `bin` channels can now be used fully locally; when both ends stay in the same
-  process a lightweight loopback is used and no serialization takes place
-- rch: `base::Sender::into_inner` and `base::Receiver::into_inner` to obtain the
-  underlying chmux channel
-- rtc: [monitors](https://docs.rs/remoc/0.19/remoc/rtc/monitor/index.html) that
-  observe and control every request of a client (`MonitorableClient::set_monitor`),
-  server (`MonitorableServer::set_monitor`) and request receiver
-  (`MonitorableReqReceiver::set_monitor`). A monitor can pass, delay, guard, drop or
-  reject each request. The following ready-to-use monitors are provided:
-    - `RateLimitMonitor` — limits the request rate using a sliding window,
-    - `ConcurrentLimitMonitor` — limits the number of concurrently processed requests,
-    - `IncompatibleClientMonitor` — logs and limits requests from clients that are
-      partly incompatible with the server,
-    - `IncompatibleServerMonitor` — logs and throttles calls to methods that are not
-      supported by the server.
-  
-  Monitors can be combined using `ChainedMonitor`.
-- rtc: remote traits may now declare associated types
-- rtc: request enums expose `trait_name()` and `method_name()` for logging and
-  monitoring purposes
-- rfn: the number of concurrent invocations of a remote function is now limited;
-  configurable via `RFnProvider::set_max_concurrency` (default: 32)
-- robj: lazy blobs can now be used fully locally, without any copying of the data
-- connect: `Connect::loopback` for establishing a connection to yourself, which is
-  useful for testing and for uniformly handling local and remote objects
-- chmux: `Sender::flush` for explicitly flushing the transport, together with the
-  `Cfg::flush_interval` option
-- chmux: `Sender::all_received` to await that the remote endpoint has received all
-  data sent so far
-
-### Changed
-- performance: the channel multiplexer now uses a dynamically sized, globally shared
-  receive buffer. This substantially improves throughput, especially when the underlying 
-  connection has high latency.
-- performance: connections established with `Connect::io` are now buffered internally
-  by default; the buffer size is configured via `Cfg::io_buffer_size`
-- **BREAKING**: chmux: the configuration (`Cfg`) has changed:
-    - `receive_buffer` has been replaced by `port_receive_buffer`,
-      `port_receive_throttle` and `shared_receive_buffer`,
-    - `flush_delay` has been replaced by the optional `flush_interval`,
-    - `io_buffer_size` has been added,
-    - the presets `Cfg::balanced()`, `Cfg::compact()` and `Cfg::throughput()` have
-      been removed
-    - `Cfg` no longer implements `Serialize`, `Deserialize`, `PartialEq`, `Eq`,
-      `PartialOrd`, `Ord` and `Hash`,
-- **BREAKING**: rtc: the request receiver server variant now receives requests of
-  type `rtc::Req<Value, Ref, RefMut>`, which groups the methods of a trait by how
-  they take `self`. Correspondingly the macro now generates `...ReqValue`,
-  `...ReqRef` and `...ReqRefMut` enums instead of a single `...Req` enum.
-- **BREAKING**: rtc: `ReqReceiver` no longer implements `Stream` directly; call
-  `ReqReceiver::into_stream()` to obtain a `ReqReceiverStream`
-- **BREAKING**: rtc: `OnReqReceiveError` and `ServerBase::set_on_req_receive_error`
-  have been removed; use a [server monitor](https://docs.rs/remoc/0.19/remoc/rtc/trait.ServerMonitor.html)
-  to react to failing requests
-- **BREAKING**: rch: `watch::ChangedError` has a new `Recv` variant, so that a
-  receive error is no longer misreported as a closed channel
-- update MSRV to 1.95
-- `Connect::io_buffered` is removed; just use `Connect::io` together with
-  `Cfg::io_buffer_size`
-
-### Fixed
 - robs: subscriptions to mirrors of an observable collection now end when the
   original subscription ends
 - rfn: fixed a panic when an `RFnOnce` was dropped without being called
 - rch: `watch::Receiver::changed` on a receiver that was sent to a
   remote endpoint no longer returns immediately for the initial value; it now waits
   for an actual change of the value
+
+
+## 0.19.0, 0.19.1 - yanked
+These releases have been yanked. Their changes are part of Remoc 0.20.
+
 
 ## 0.18.3 - 2025-09-19
 ### Added

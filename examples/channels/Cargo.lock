@@ -247,9 +247,9 @@ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
 name = "postbag"
-version = "1.0.0-pre9"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8d335f335a6d6d59727de1ae3ae46e59619dc79aecd49d37942e6f946284dc6"
+checksum = "774d59b5d871f918db0135ab6ddce4698abc0feae68bb2bc41271d4ac0035814"
 dependencies = [
  "serde",
 ]
@@ -280,7 +280,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "remoc"
-version = "0.20.0-pre6"
+version = "0.20.0"
 dependencies = [
  "byteorder",
  "bytes",
@@ -298,7 +298,7 @@ dependencies = [
 
 [[package]]
 name = "remoc_macro"
-version = "0.20.0-pre6"
+version = "0.20.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -475,9 +475,9 @@ checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
 
 [[package]]
 name = "uuid"
-version = "1.25.0"
+version = "1.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f053576934f05a761a402421fbbe3d425d9366f75f978806a037b3ca481abecc"
+checksum = "b5772d71c9be8a8a6ac2117d949c5b224c1b72241bb611d9a3012edcf8af7812"
 dependencies = [
  "getrandom",
  "js-sys",

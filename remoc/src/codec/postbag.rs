@@ -140,7 +140,7 @@ fn negotiated_version() -> Option<postbag::cfg::Version> {
         return Some(version);
     }
 
-    if super::ALLOW_OUTSIDE_REMOC.get() {
+    if super::ALLOW_OUTSIDE.get() {
         tracing::warn!("using local postbag version for tests");
         return Some(postbag::cfg::Version::default());
     }

@@ -473,9 +473,26 @@ where
 // ============================================================================
 
 thread_local! {
-    /// Allow using codecs outside of remoc (for testing only).
+    /// Allow using codecs outside of Remoc (for testing only).
     #[doc(hidden)]
-    pub static ALLOW_OUTSIDE_REMOC: Cell<bool> = const { Cell::new(false) };
+    pub static ALLOW_OUTSIDE: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Enable usage of codecs outside of Remoc (for testing only).
+#[doc(hidden)]
+pub fn allow_outside() -> AllowOutsideGuard {
+    assert!(!ALLOW_OUTSIDE.replace(true));
+    AllowOutsideGuard(())
+}
+
+/// Guard that allows usage of codecs outside of Remoc (for testing only).
+#[doc(hidden)]
+pub struct AllowOutsideGuard(());
+
+impl Drop for AllowOutsideGuard {
+    fn drop(&mut self) {
+        assert!(ALLOW_OUTSIDE.replace(false));
+    }
 }
 
 mod active;

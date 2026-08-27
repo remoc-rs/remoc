@@ -342,13 +342,9 @@ impl Sample {
     /// payload bytes match what actually goes over the wire. Codecs differ in how much
     /// they encode, so this is per codec.
     pub fn encoded_len<C: codec::Codec>() -> usize {
-        // The codec refuses to run outside a connection, because the data format version
-        // is normally negotiated with the peer. Sizing a sample involves no peer, so the
-        // local version is used, which is what two current endpoints agree on anyway.
-        let allowed = codec::ALLOW_OUTSIDE_REMOC.replace(true);
+        let _allowed = codec::allow_outside();
         let mut buf = Vec::new();
         <C as codec::Codec>::serialize(&mut buf, &Self::new()).expect("sample is serializable");
-        codec::ALLOW_OUTSIDE_REMOC.set(allowed);
         buf.len()
     }
 

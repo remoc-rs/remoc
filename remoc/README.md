@@ -64,8 +64,8 @@ struct CountReq {
     seq_tx: rch::mpsc::Sender<u32>,
 }
 
-// Sending the sender half opens a new channel to the remote endpoint,
-// inside the connection that is already established.
+// Sending the sender half opens a new channel to the remote
+// endpoint, inside the connection that is already established.
 let (seq_tx, mut seq_rx) = rch::mpsc::channel();
 tx.send(CountReq { up_to: 4, seq_tx }).await.unwrap();
 
@@ -323,16 +323,19 @@ async fn connect_client() {
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
     // Establish TCP connection.
-    let socket =
-        TcpStream::connect((Ipv4Addr::LOCALHOST, 9870)).await.unwrap();
+    let socket = TcpStream::connect((Ipv4Addr::LOCALHOST, 9870))
+        .await
+        .unwrap();
     let (socket_rx, socket_tx) = socket.into_split();
 
     // Establish Remoc connection over TCP.
     // The connection is always bidirectional, but we can just drop
     // the unneeded receiver.
+    let cfg = remoc::Cfg::default();
     let (conn, tx, _rx): (_, _, rch::base::Receiver<()>) =
-        remoc::Connect::io(remoc::Cfg::default(), socket_rx, socket_tx)
-        .await.unwrap();
+        remoc::Connect::io(cfg, socket_rx, socket_tx)
+            .await
+            .unwrap();
     tokio::spawn(conn);
 
     // Run client.
@@ -343,17 +346,20 @@ async fn connect_client() {
 // It accepts a Remoc connection over TCP from the client.
 async fn connect_server() {
     // Listen for incoming TCP connection.
-    let listener =
-        TcpListener::bind((Ipv4Addr::LOCALHOST, 9870)).await.unwrap();
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 9870))
+        .await
+        .unwrap();
     let (socket, _) = listener.accept().await.unwrap();
     let (socket_rx, socket_tx) = socket.into_split();
 
     // Establish Remoc connection over TCP.
     // The connection is always bidirectional, but we can just drop
     // the unneeded sender.
+    let cfg = remoc::Cfg::default();
     let (conn, _tx, rx): (_, rch::base::Sender<()>, _) =
-        remoc::Connect::io(remoc::Cfg::default(), socket_rx, socket_tx)
-        .await.unwrap();
+        remoc::Connect::io(cfg, socket_rx, socket_tx)
+            .await
+            .unwrap();
     tokio::spawn(conn);
 
     // Run server.
@@ -365,8 +371,9 @@ async fn connect_server() {
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct CountReq {
     up_to: u32,
-    // Most Remoc types like channels can be included in serializable
-    // data structures for transmission to remote endpoints.
+    // Most Remoc types like channels can be included in
+    // serializable data structures for transmission to remote
+    // endpoints.
     seq_tx: rch::mpsc::Sender<u32>,
 }
 
@@ -374,9 +381,9 @@ struct CountReq {
 // It sends a count request to the server and receives each number
 // as it is counted over a newly established MPSC channel.
 async fn client(mut tx: rch::base::Sender<CountReq>) {
-    // By sending seq_tx over an existing remote channel, a new remote
-    // channel is automatically created and connected to the server.
-    // This all happens inside the existing TCP connection.
+    // By sending seq_tx over an existing remote channel, a new
+    // remote channel is automatically created and connected to the
+    // server. This all happens inside the existing TCP connection.
     let (seq_tx, mut seq_rx) = rch::mpsc::channel();
     tx.send(CountReq { up_to: 4, seq_tx }).await.unwrap();
 
@@ -389,11 +396,14 @@ async fn client(mut tx: rch::base::Sender<CountReq>) {
 }
 
 // This would be run on the server.
-// It receives a count request from the client and sends each number
-// as it is counted over the MPSC channel sender provided by the client.
+// It receives a count request from the client and sends each
+// number as it is counted over the MPSC channel sender provided
+// by the client.
 async fn server(mut rx: rch::base::Receiver<CountReq>) {
     // Receive count request and channel sender to use for counting.
-    while let Some(CountReq { up_to, seq_tx }) = rx.recv().await.unwrap() {
+    while let Some(CountReq { up_to, seq_tx }) =
+        rx.recv().await.unwrap()
+    {
         for i in 0..up_to {
             // Send each counted number over provided channel.
             seq_tx.send(i).await.unwrap();
@@ -414,26 +424,33 @@ free to pass channels and remote objects through the calls:
 use remoc::prelude::*;
 use remoc::rtc::CallError;
 
-// Tagging the trait generates CounterClient and the CounterServer* types.
+// Tagging the trait generates CounterClient and the
+// CounterServer* types.
 #[rtc::remote]
 pub trait Counter {
     async fn value(&self) -> Result<u32, CallError>;
 
     async fn increase(&mut self, by: u32) -> Result<(), CallError>;
 
-    // Methods can take and return channels and other remote objects.
-    async fn watch(&mut self) -> Result<rch::watch::Receiver<u32>, CallError>;
+    // Methods can take and return channels and other remote
+    // objects.
+    async fn watch(
+        &mut self,
+    ) -> Result<rch::watch::Receiver<u32>, CallError>;
 }
 
-// CounterClient implements Counter, so calling it looks like a local call,
-// but is executed on the counter object located on the server.
-async fn use_counter(mut counter: CounterClient) -> Result<(), CallError> {
+// CounterClient implements Counter, so calling it looks like a
+// local call, but is executed on the counter object located on
+// the server.
+async fn use_counter(
+    mut counter: CounterClient,
+) -> Result<(), CallError> {
     counter.increase(5).await?;
     assert_eq!(counter.value().await?, 5);
 
-    // The watch receiver returned by the call stays connected to the
-    // counter object and reports every change made to it.
-    let mut watch_rx = counter.watch().await?;
+    // The watch receiver returned by the call stays connected to
+    // the counter object and reports every change made to it.
+    let watch_rx = counter.watch().await?;
     assert_eq!(*watch_rx.borrow().unwrap(), 5);
 
     Ok(())
@@ -485,7 +502,8 @@ Then use the following command to execute the test suite:
 
 ```
 WASM_BINDGEN_USE_BROWSER=1 WASM_BINDGEN_TEST_TIMEOUT=90 \
-    cargo +nightly test --target wasm32-unknown-unknown --all-features --release --tests
+    cargo +nightly test --target wasm32-unknown-unknown \
+    --all-features --release --tests
 ```
 
 A proper web-compatible runtime environment is required. Thus Node.js will not work. Deno should

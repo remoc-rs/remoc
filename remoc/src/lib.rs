@@ -425,7 +425,7 @@ async fn use_counter(mut counter: CounterClient) -> Result<(), CallError> {
 
     // The watch receiver returned by the call stays connected to the
     // counter object and reports every change made to it.
-    let mut watch_rx = counter.watch().await?;
+    let watch_rx = counter.watch().await?;
     assert_eq!(*watch_rx.borrow().unwrap(), 5);
 
     Ok(())

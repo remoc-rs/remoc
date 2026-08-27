@@ -29,7 +29,13 @@ pub enum SelfRef {
 
 /// The numerical name reserved by remoc for the response channel field within
 /// generated request enums.
-const REPLY_TX_NAME: &str = "_59";
+///
+/// The Postbag codec encodes it using a single byte.
+const COMPACT_RESPONDER_NAME: &str = "_59";
+
+/// The name of the response channel field within generated request enums that is
+/// used unless the compact representation has been opted into.
+const FULL_RESPONDER_NAME: &str = "__reply_tx";
 
 /// Whether the name is a numerical identifier that the Postbag codec encodes
 /// using a single byte.
@@ -73,12 +79,12 @@ fn numerical_serde_rename(attrs: &[Attribute]) -> syn::Result<bool> {
             let mut check = |value: ParseStream| -> syn::Result<()> {
                 let name: LitStr = value.parse()?;
 
-                // Reject the reserved name, since it would silently collide with
+                // Reject the reserved names, since they would silently collide with
                 // the response channel field of the generated request enum.
-                if name.value() == REPLY_TX_NAME {
+                if matches!(name.value().as_str(), COMPACT_RESPONDER_NAME | FULL_RESPONDER_NAME) {
                     return Err(syn::Error::new(
                         name.span(),
-                        format!("the name `{REPLY_TX_NAME}` is reserved by remoc"),
+                        format!("the name `{}` is reserved by remoc", name.value()),
                     ));
                 }
 
@@ -598,7 +604,11 @@ impl TraitMethod {
         // numerical identifier, they opted into the compact serialized representation
         // for this method. Thus the response channel field also uses the numerical name
         // reserved by remoc.
-        let responder_rename = self.numerical_rename.then(|| quote! { #[serde(rename = #REPLY_TX_NAME)] });
+        let responder_rename = if self.numerical_rename {
+            quote! { #[serde(rename = #COMPACT_RESPONDER_NAME)] }
+        } else {
+            quote! { #[serde(rename = #FULL_RESPONDER_NAME)] }
+        };
 
         let responder_ty = if self.pipelinable {
             quote! { ::remoc::rtc::PipelinableResponder<#ret_ty, Codec> }

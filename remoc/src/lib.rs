@@ -6,14 +6,17 @@
     html_favicon_url = "https://raw.githubusercontent.com/remoc-rs/remoc/master/.misc/Remoc.png"
 )]
 
-//! Remoc 🦑 — remote multiplexed objects and channels
+//! Remoc 🦑 — RPC, remote multiplexed objects and channels for Rust
 //!
 //! Remoc makes remote interaction between Rust programs seamless and smooth.
+//! It is an RPC library in which a call can also pass channels and remote objects
+//! that stay usable after the call has returned.
+//!
 //! Over a [single underlying transport], such as TCP or TLS, it provides:
 //!
+//!   * calling of [trait methods] on a remote object (RPC) and of [remote functions],
 //!   * [multiple channels] of different types like [MPSC], [oneshot], [watch], etc.,
 //!   * [remote synchronization] primitives,
-//!   * calling of [remote functions] and [trait methods] on a remote object (RPC),
 //!   * [remotely observable collections].
 //!
 //! Remoc is written in 100% safe Rust, builds upon [Tokio], and uses [Serde]

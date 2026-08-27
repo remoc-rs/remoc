@@ -67,6 +67,22 @@ Remoc 0.20 remains wire-compatible with previous versions.
 - **BREAKING**: connect: `Connect` is now generic over the type of its connection
   future; use `BoxConnect` (obtained via `Connect::boxed`) where the previous type
   parameters are required
+- **BREAKING**: connect: `Connect::io_buffered` is removed; just use `Connect::io`
+  together with `Cfg::io_buffer_size`
+- **BREAKING**: rtc: the request receiver server variant now receives requests of
+  type `rtc::Req<Value, Ref, RefMut>`, which groups the methods of a trait by how
+  they take `self`. Correspondingly the macro now generates `...ReqValue`,
+  `...ReqRef` and `...ReqRefMut` enums instead of a single `...Req` enum.
+- **BREAKING**: rtc: `ReqReceiver` is no longer accepted as a server variant in the
+  `server(...)` argument of the `remote` attribute; the request receiver is now always
+  generated
+- **BREAKING**: rtc: `ReqReceiver` no longer implements `Stream` directly; call
+  `ReqReceiver::into_stream()` to obtain a `ReqReceiverStream`
+- **BREAKING**: rtc: `OnReqReceiveError` and `ServerBase::set_on_req_receive_error`
+  have been removed; its default behavior is now provided by the
+  [monitors installed by default](https://docs.rs/remoc/0.20/remoc/rtc/monitor/index.html#default-monitors)
+  and a [server monitor](https://docs.rs/remoc/0.20/remoc/rtc/monitor/trait.ServerMonitor.html)
+  reacts to failing requests
 - **BREAKING**: rtc: `ServerBase` has a new associated type `ReqReceiver`, naming the
   request receiver every server variant can be created from
 - **BREAKING**: rtc: `ServeError` has a new `Forward` variant, reported when forwarding

@@ -257,7 +257,7 @@ impl TraitDef {
                     Self {
                         target,
                         req_rx,
-                        monitor: ::std::boxed::Box::new(::remoc::rtc::monitor::DefaultMonitor),
+                        monitor: ::remoc::rtc::monitor::default_server_monitor(),
                         #extra_fields
                     },
                     Self::Client::from_req_tx(req_tx),
@@ -903,6 +903,13 @@ impl TraitDef {
                 fn set_monitor(&mut self, monitor: impl ::remoc::rtc::monitor::ServerMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static) {
                     self.monitor = ::std::boxed::Box::new(monitor);
                 }
+
+                fn add_monitor(&mut self, monitor: impl ::remoc::rtc::monitor::ServerMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static) {
+                    let installed = ::std::mem::replace(
+                        &mut self.monitor, ::remoc::rtc::monitor::default_server_monitor());
+                    self.monitor = ::std::boxed::Box::new(
+                        ::remoc::rtc::monitor::ChainedMonitor(installed, monitor));
+                }
             }
 
             impl #impl_generics_impl ::remoc::rtc::Server <Target, Codec> for #server #impl_generics_ty #impl_generics_where {
@@ -1014,6 +1021,11 @@ impl TraitDef {
 
                 fn set_monitor(&mut self, monitor: impl ::remoc::rtc::monitor::ServerMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static) {
                     self.monitor = ::std::boxed::Box::new(monitor);
+                }
+
+                fn add_monitor(&mut self, monitor: impl ::remoc::rtc::monitor::ServerMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static) {
+                    let installed = ::std::mem::replace(&mut self.monitor, ::remoc::rtc::monitor::default_server_monitor());
+                    self.monitor = ::std::boxed::Box::new(::remoc::rtc::monitor::ChainedMonitor(installed, monitor));
                 }
             }
 
@@ -1127,6 +1139,11 @@ impl TraitDef {
                 fn set_monitor(&mut self, monitor: impl ::remoc::rtc::monitor::ServerMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static) {
                     self.monitor = ::std::boxed::Box::new(monitor);
                 }
+
+                fn add_monitor(&mut self, monitor: impl ::remoc::rtc::monitor::ServerMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static) {
+                    let installed = ::std::mem::replace(&mut self.monitor, ::remoc::rtc::monitor::default_server_monitor());
+                    self.monitor = ::std::boxed::Box::new(::remoc::rtc::monitor::ChainedMonitor(installed, monitor));
+                }
             }
 
             impl #impl_generics_impl ::remoc::rtc::ServerRefMut <'target, Target, Codec> for #server #impl_generics_ty #impl_generics_where
@@ -1236,6 +1253,11 @@ impl TraitDef {
 
                 fn set_monitor(&mut self, monitor: impl ::remoc::rtc::monitor::ServerMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static) {
                     self.monitor = ::std::boxed::Box::new(monitor);
+                }
+
+                fn add_monitor(&mut self, monitor: impl ::remoc::rtc::monitor::ServerMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static) {
+                    let installed = ::std::mem::replace(&mut self.monitor, ::remoc::rtc::monitor::default_server_monitor());
+                    self.monitor = ::std::boxed::Box::new(::remoc::rtc::monitor::ChainedMonitor(installed, monitor));
                 }
             }
 
@@ -1369,6 +1391,11 @@ impl TraitDef {
 
                 fn set_monitor(&mut self, monitor: impl ::remoc::rtc::monitor::ServerMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static) {
                     self.monitor = ::std::boxed::Box::new(monitor);
+                }
+
+                fn add_monitor(&mut self, monitor: impl ::remoc::rtc::monitor::ServerMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static) {
+                    let installed = ::std::mem::replace(&mut self.monitor, ::remoc::rtc::monitor::default_server_monitor());
+                    self.monitor = ::std::boxed::Box::new(::remoc::rtc::monitor::ChainedMonitor(installed, monitor));
                 }
             }
 
@@ -1506,6 +1533,11 @@ impl TraitDef {
                 fn set_monitor(&mut self, monitor: impl ::remoc::rtc::monitor::ReqReceiverMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static) {
                     self.monitor = ::std::boxed::Box::new(monitor);
                 }
+
+                fn add_monitor(&mut self, monitor: impl ::remoc::rtc::monitor::ReqReceiverMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static) {
+                    let installed = ::std::mem::replace(&mut self.monitor, ::remoc::rtc::monitor::default_req_receiver_monitor());
+                    self.monitor = ::std::boxed::Box::new(::remoc::rtc::monitor::ChainedMonitor(installed, monitor));
+                }
             }
 
             impl #impl_generics_impl ::remoc::rtc::ReqReceiver <Codec> for #server #impl_generics_ty #impl_generics_where
@@ -1519,7 +1551,7 @@ impl TraitDef {
                     (
                         Self {
                             req_rx,
-                            monitor: ::std::boxed::Box::new(::remoc::rtc::monitor::DefaultMonitor),
+                            monitor: ::remoc::rtc::monitor::default_req_receiver_monitor(),
                         },
                         Self::Client::from_req_tx(req_tx),
                     )
@@ -2065,6 +2097,11 @@ impl TraitDef {
 
                 fn set_monitor(&mut self, monitor: impl ::remoc::rtc::monitor::ClientMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static) {
                     self.monitor = ::std::sync::Arc::new(monitor);
+                }
+
+                fn add_monitor(&mut self, monitor: impl ::remoc::rtc::monitor::ClientMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static) {
+                    let installed = ::std::sync::Arc::clone(&self.monitor);
+                    self.monitor = ::std::sync::Arc::new(::remoc::rtc::monitor::ChainedMonitor(installed, monitor));
                 }
             }
 

@@ -6,6 +6,25 @@
 //! sent to a remote endpoint or starts serving.
 //! Use [`ChainedMonitor`] to install more than one.
 //!
+//! # Default monitors
+//!
+//! A client, server and request receiver each start out with a monitor that keeps
+//! them working when the remote endpoint was built against a different version of
+//! the trait:
+//!
+//!   * a server and a request receiver use an [`IncompatibleClientMonitor`], which
+//!     skips a request it cannot decode instead of stopping to serve, so that a
+//!     client calling a method they do not know does not end the session,
+//!   * a client uses an [`IncompatibleServerMonitor`], which throttles calls to a
+//!     method that the server repeatedly fails to receive.
+//!
+//! Both give up once the failures exceed their limit, so a wholly incompatible
+//! endpoint is still reported rather than retried forever.
+//!
+//! [`set_monitor`](MonitorableServer::set_monitor) replaces the default monitor;
+//! use [`add_monitor`](MonitorableServer::add_monitor) to keep it and install
+//! another one alongside. Set a [`PassMonitor`] to remove it deliberately.
+//!
 //! # Example
 //!
 //! In the following example the server accepts at most 10 requests per second.
@@ -90,8 +109,17 @@ pub trait MonitorableClient {
     /// Type of request by mutable reference (`&mut self`).
     type RefMut: ReqEnum;
 
-    /// Sets the [client monitor](ClientMonitor).
+    /// Sets the [client monitor](ClientMonitor), replacing the one that is installed.
+    ///
+    /// This also removes the [monitor installed by default](self#default-monitors).
+    /// Use [`add_monitor`](Self::add_monitor) to keep it.
     fn set_monitor(&mut self, monitor: impl ClientMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static);
+
+    /// Adds a [client monitor](ClientMonitor), keeping the one that is installed.
+    ///
+    /// The installed monitor is consulted first; see [`ChainedMonitor`] for how
+    /// the decisions of both are combined.
+    fn add_monitor(&mut self, monitor: impl ClientMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static);
 }
 
 /// Allows monitoring each request a client makes.
@@ -235,8 +263,17 @@ pub trait MonitorableServer {
     /// Type of request by mutable reference (`&mut self`).
     type RefMut: ReqEnum;
 
-    /// Sets the [server monitor](ServerMonitor).
+    /// Sets the [server monitor](ServerMonitor), replacing the one that is installed.
+    ///
+    /// This also removes the [monitor installed by default](self#default-monitors).
+    /// Use [`add_monitor`](Self::add_monitor) to keep it.
     fn set_monitor(&mut self, monitor: impl ServerMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static);
+
+    /// Adds a [server monitor](ServerMonitor), keeping the one that is installed.
+    ///
+    /// The installed monitor is consulted first; see [`ChainedMonitor`] for how
+    /// the decisions of both are combined.
+    fn add_monitor(&mut self, monitor: impl ServerMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static);
 }
 
 /// Allows monitoring each request a server handles.
@@ -265,8 +302,17 @@ pub trait MonitorableReqReceiver {
     /// Type of request by mutable reference (`&mut self`).
     type RefMut: ReqEnum;
 
-    /// Sets the [request receiver monitor](ReqReceiverMonitor).
+    /// Sets the [request receiver monitor](ReqReceiverMonitor), replacing the one that is installed.
+    ///
+    /// This also removes the [monitor installed by default](self#default-monitors).
+    /// Use [`add_monitor`](Self::add_monitor) to keep it.
     fn set_monitor(&mut self, monitor: impl ReqReceiverMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static);
+
+    /// Adds a [request receiver monitor](ReqReceiverMonitor), keeping the one that is installed.
+    ///
+    /// The installed monitor is consulted first; see [`ChainedMonitor`] for how
+    /// the decisions of both are combined.
+    fn add_monitor(&mut self, monitor: impl ReqReceiverMonitor<Self::Value, Self::Ref, Self::RefMut> + 'static);
 }
 
 /// Allows monitoring each request a [request receiver](super::ReqReceiver) receives.
@@ -425,7 +471,7 @@ macro_rules! server_monitor_pre_dispatch {
     ($monitor:expr, $req:expr) => {
         match $monitor.pre_dispatch(&$req).await {
             ::remoc::rtc::monitor::DispatchDecision::Pass => {
-                ::std::boxed::Box::new(::remoc::rtc::monitor::DefaultGuard)
+                ::std::boxed::Box::new(::remoc::rtc::monitor::PassGuard)
             }
             ::remoc::rtc::monitor::DispatchDecision::Guard(guard) => guard,
             ::remoc::rtc::monitor::DispatchDecision::Drop => {
@@ -434,7 +480,7 @@ macro_rules! server_monitor_pre_dispatch {
                     Err(err) if err.is_disconnected() => (),
                     _ => continue,
                 }
-                ::std::boxed::Box::new(::remoc::rtc::monitor::DefaultGuard)
+                ::std::boxed::Box::new(::remoc::rtc::monitor::PassGuard)
             }
             ::remoc::rtc::monitor::DispatchDecision::Error(err) => {
                 return Err(::remoc::rtc::ServeError::Monitor(err))
@@ -444,7 +490,7 @@ macro_rules! server_monitor_pre_dispatch {
     ($monitor:expr, $req:expr, $target:expr) => {
         match $monitor.pre_dispatch(&$req).await {
             ::remoc::rtc::monitor::DispatchDecision::Pass => {
-                ::std::boxed::Box::new(::remoc::rtc::monitor::DefaultGuard)
+                ::std::boxed::Box::new(::remoc::rtc::monitor::PassGuard)
             }
             ::remoc::rtc::monitor::DispatchDecision::Guard(guard) => guard,
             ::remoc::rtc::monitor::DispatchDecision::Drop => {
@@ -453,7 +499,7 @@ macro_rules! server_monitor_pre_dispatch {
                     Err(err) if err.is_disconnected() => (),
                     _ => continue,
                 }
-                ::std::boxed::Box::new(::remoc::rtc::monitor::DefaultGuard)
+                ::std::boxed::Box::new(::remoc::rtc::monitor::PassGuard)
             }
             ::remoc::rtc::monitor::DispatchDecision::Error(err) => {
                 return (Some($target), Err(::remoc::rtc::ServeError::Monitor(err)))
@@ -481,14 +527,15 @@ macro_rules! req_receiver_monitor_pre_recv {
 #[doc(hidden)]
 pub use crate::req_receiver_monitor_pre_recv;
 
-/// The default [client](ClientMonitor) and [server](ServerMonitor).
+/// A [client](ClientMonitor), [server](ServerMonitor) and
+/// [request receiver](ReqReceiverMonitor) monitor that passes every request.
 ///
-/// It passes all requests.
-#[doc(hidden)]
+/// Set it to switch off the [monitors that are installed by default](self#default-monitors).
+/// A request that cannot be decoded then stops serving instead of being skipped.
 #[derive(Debug, Default)]
-pub struct DefaultMonitor;
+pub struct PassMonitor;
 
-impl<Value, Ref, RefMut> ClientMonitor<Value, Ref, RefMut> for DefaultMonitor
+impl<Value, Ref, RefMut> ClientMonitor<Value, Ref, RefMut> for PassMonitor
 where
     Value: ReqEnum,
     Ref: ReqEnum,
@@ -500,7 +547,7 @@ where
     }
 }
 
-impl<Value, Ref, RefMut> ServerMonitor<Value, Ref, RefMut> for DefaultMonitor
+impl<Value, Ref, RefMut> ServerMonitor<Value, Ref, RefMut> for PassMonitor
 where
     Value: ReqEnum,
     Ref: ReqEnum,
@@ -514,7 +561,7 @@ where
     }
 }
 
-impl<Value, Ref, RefMut> ReqReceiverMonitor<Value, Ref, RefMut> for DefaultMonitor
+impl<Value, Ref, RefMut> ReqReceiverMonitor<Value, Ref, RefMut> for PassMonitor
 where
     Value: ReqEnum,
     Ref: ReqEnum,
@@ -535,7 +582,17 @@ where
     Ref: ReqEnum,
     RefMut: ReqEnum,
 {
-    Arc::new(DefaultMonitor)
+    Arc::new(IncompatibleServerMonitor::new())
+}
+
+#[doc(hidden)]
+pub fn default_server_monitor<Value, Ref, RefMut>() -> Box<dyn ServerMonitor<Value, Ref, RefMut>>
+where
+    Value: ReqEnum,
+    Ref: ReqEnum,
+    RefMut: ReqEnum,
+{
+    Box::new(IncompatibleClientMonitor::new())
 }
 
 #[doc(hidden)]
@@ -545,7 +602,47 @@ where
     Ref: ReqEnum,
     RefMut: ReqEnum,
 {
-    Box::new(DefaultMonitor)
+    Box::new(IncompatibleClientMonitor::new())
+}
+
+impl<M, Value, Ref, RefMut> ClientMonitor<Value, Ref, RefMut> for Arc<M>
+where
+    M: ClientMonitor<Value, Ref, RefMut> + ?Sized,
+    Value: ReqEnum,
+    Ref: ReqEnum,
+    RefMut: ReqEnum,
+{
+    fn pre_call<'a>(&'a self, req: &'a Req<Value, Ref, RefMut>) -> BoxFuture<'a, CallDecision> {
+        (**self).pre_call(req)
+    }
+}
+
+impl<M, Value, Ref, RefMut> ServerMonitor<Value, Ref, RefMut> for Box<M>
+where
+    M: ServerMonitor<Value, Ref, RefMut> + ?Sized,
+    Value: ReqEnum,
+    Ref: ReqEnum,
+    RefMut: ReqEnum,
+{
+    fn pre_dispatch<'a>(
+        &'a mut self, req: &'a Result<Option<Req<Value, Ref, RefMut>>, mpsc::RecvError>,
+    ) -> BoxFuture<'a, DispatchDecision> {
+        (**self).pre_dispatch(req)
+    }
+}
+
+impl<M, Value, Ref, RefMut> ReqReceiverMonitor<Value, Ref, RefMut> for Box<M>
+where
+    M: ReqReceiverMonitor<Value, Ref, RefMut> + ?Sized,
+    Value: ReqEnum,
+    Ref: ReqEnum,
+    RefMut: ReqEnum,
+{
+    fn pre_recv<'a>(
+        &'a mut self, req: &'a Result<Option<Req<Value, Ref, RefMut>>, mpsc::RecvError>,
+    ) -> BoxFuture<'a, RecvDecision> {
+        (**self).pre_recv(req)
+    }
 }
 
 /// Adapts a [request receiver monitor](ReqReceiverMonitor) into a
@@ -592,12 +689,10 @@ where
     Box::new(ReqReceiverMonitorAsServerMonitor(monitor))
 }
 
-/// The default [call](CallGuard) and [dispatch](DispatchGuard).
-///
-/// It does nothing.
+/// A [call](CallGuard) and [dispatch](DispatchGuard) guard that does nothing.
 #[doc(hidden)]
 #[derive(Debug, Default)]
-pub struct DefaultGuard;
+pub struct PassGuard;
 
-impl CallGuard for DefaultGuard {}
-impl DispatchGuard for DefaultGuard {}
+impl CallGuard for PassGuard {}
+impl DispatchGuard for PassGuard {}

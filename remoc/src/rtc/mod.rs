@@ -196,6 +196,12 @@
 //! result in an error, but the server will continue serving.
 //! It is thus safe to just attempt to call a server function to see if it is available.
 //!
+//! This is provided by the [monitors that are installed by
+//! default](monitor#default-monitors), which skip a request that cannot be decoded and
+//! give up only when such requests keep arriving. Replacing them using
+//! [`set_monitor`](monitor::MonitorableServer::set_monitor) removes that behavior;
+//! use [`add_monitor`](monitor::MonitorableServer::add_monitor) to keep it.
+//!
 //! # Compact representation
 //!
 //! Serde attributes applied to a trait method are applied to its request enum case

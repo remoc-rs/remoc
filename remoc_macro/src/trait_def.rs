@@ -1961,7 +1961,7 @@ impl TraitDef {
                 /// Creates the response channel for a request, carrying the call
                 /// options of this client.
                 #[doc(hidden)]
-                pub fn __responder<__R>(
+                pub fn __rsp<__R>(
                     &self,
                 ) -> (
                     ::remoc::rtc::Responder<__R, Codec>,

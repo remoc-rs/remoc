@@ -611,7 +611,7 @@ impl TraitMethod {
             #[doc="The channel is closed when the calling async method is cancelled "]
             #[doc="or a connection error occurs."]
             #responder_rename
-            __responder: #responder_ty,
+            __rsp: #responder_ty,
         };
 
         for NamedArg { attrs, ident, ty } in &self.args {
@@ -677,22 +677,22 @@ impl TraitMethod {
 
         let call = if self.pipelinable {
             let pipelined_ident = self.pipelined_ident();
-            let normal = invoke(quote! { __target.#ident }, quote! { __responder }, quote! {}, false);
+            let normal = invoke(quote! { __target.#ident }, quote! { __rsp }, quote! {}, false);
             let pipeline =
                 invoke(quote! { __target.#pipelined_ident }, quote! { responder }, quote! { req_rx, }, true);
             quote! {
-                match __responder {
-                    ::remoc::rtc::PipelinableResponder::Normal(__responder) => { #normal }
+                match __rsp {
+                    ::remoc::rtc::PipelinableResponder::Normal(__rsp) => { #normal }
                     ::remoc::rtc::PipelinableResponder::Pipeline { req_rx, responder } => { #pipeline }
                 }
             }
         } else {
-            invoke(quote! { __target.#ident }, quote! { __responder }, quote! {}, false)
+            invoke(quote! { __target.#ident }, quote! { __rsp }, quote! {}, false)
         };
 
         // Generate match clause.
         quote! {
-            Self :: #enum_ident { #args __responder } => {
+            Self :: #enum_ident { #args __rsp } => {
                 async move { #call }.boxed()
             },
         }
@@ -711,7 +711,7 @@ impl TraitMethod {
     pub fn sequential_clause(&self) -> TokenStream {
         let enum_ident = to_pascal_case(&self.ident);
         quote! {
-            Self :: #enum_ident { __responder, .. } => __responder.sequential(),
+            Self :: #enum_ident { __rsp, .. } => __rsp.sequential(),
         }
     }
 
@@ -742,9 +742,9 @@ impl TraitMethod {
         // A pipelinable method wraps the response channel, so that a request receiver can
         // be handed over in its place.
         let responder = if self.pipelinable {
-            quote! { ::remoc::rtc::PipelinableResponder::Normal(__responder) }
+            quote! { ::remoc::rtc::PipelinableResponder::Normal(__rsp) }
         } else {
-            quote! { __responder }
+            quote! { __rsp }
         };
 
         let pipelined_method = self.pipelinable.then(|| self.pipelined_client_method(req_enum, &req_type, assoc));
@@ -752,9 +752,9 @@ impl TraitMethod {
 
         quote! {
             async fn #ident (#self_ref, #args) -> #ret_ty {
-                let (__responder, response_rx) = self.__responder();
+                let (__rsp, response_rx) = self.__rsp();
 
-                let req_value = #req_enum :: #req_case { __responder: #responder, #entries };
+                let req_value = #req_enum :: #req_case { __rsp: #responder, #entries };
                 let req = ::remoc::rtc::Req::#req_type(req_value);
 
                 let mut guard = match self.monitor.pre_call(&req).await {
@@ -804,9 +804,9 @@ impl TraitMethod {
         };
 
         let responder = if self.pipelinable {
-            quote! { ::remoc::rtc::PipelinableResponder::Normal(__responder) }
+            quote! { ::remoc::rtc::PipelinableResponder::Normal(__rsp) }
         } else {
-            quote! { __responder }
+            quote! { __rsp }
         };
 
         let mut args = quote! {};
@@ -822,9 +822,9 @@ impl TraitMethod {
             async fn #call_ident (#self_ref #args) -> ::remoc::rtc::Call<#ret_ty>
             #self_bound
             {
-                let (__responder, response_rx) = self.__responder();
+                let (__rsp, response_rx) = self.__rsp();
 
-                let req_value = #req_enum :: #req_case { __responder: #responder, #entries };
+                let req_value = #req_enum :: #req_case { __rsp: #responder, #entries };
                 let req = ::remoc::rtc::Req::#req_type(req_value);
 
                 let mut guard = match self.monitor.pre_call(&req).await {
@@ -902,11 +902,11 @@ impl TraitMethod {
                 -> ::remoc::rtc::Call<#ret_ty>
             #self_bound
             {
-                let (__responder, response_rx) = self.__responder();
+                let (__rsp, response_rx) = self.__rsp();
 
                 let req_value = #req_enum :: #req_case {
-                    __responder: ::remoc::rtc::PipelinableResponder::Pipeline {
-                        req_rx: __req_rx, responder: __responder,
+                    __rsp: ::remoc::rtc::PipelinableResponder::Pipeline {
+                        req_rx: __req_rx, responder: __rsp,
                     },
                     #entries
                 };

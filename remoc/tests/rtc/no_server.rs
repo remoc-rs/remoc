@@ -25,8 +25,8 @@ async fn serve_request_receiver() {
     let task = wokio::spawn(async move {
         while let Some(req) = req_rx.recv().await.unwrap() {
             match req {
-                Req::Ref(CounterReqRef::Value { __responder }) => {
-                    let _ = __responder.send(Ok(42));
+                Req::Ref(CounterReqRef::Value { __rsp }) => {
+                    let _ = __rsp.send(Ok(42));
                 }
                 _ => unreachable!(),
             }

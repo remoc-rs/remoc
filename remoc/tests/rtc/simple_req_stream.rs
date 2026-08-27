@@ -40,19 +40,19 @@ impl CounterObj {
         Codec: remoc::codec::Codec,
     {
         match req {
-            remoc::rtc::Req::Ref(CounterReqRef::Value { __responder }) => {
-                let _ = __responder.send(Ok(self.value));
+            remoc::rtc::Req::Ref(CounterReqRef::Value { __rsp }) => {
+                let _ = __rsp.send(Ok(self.value));
             }
-            remoc::rtc::Req::RefMut(CounterReqRefMut::Watch { __responder }) => {
+            remoc::rtc::Req::RefMut(CounterReqRefMut::Watch { __rsp }) => {
                 let (tx, rx) = remoc::rch::watch::channel(self.value);
                 self.watchers.push(tx);
-                let _ = __responder.send(Ok(rx));
+                let _ = __rsp.send(Ok(rx));
             }
-            remoc::rtc::Req::RefMut(CounterReqRefMut::Increase { __responder, by }) => {
+            remoc::rtc::Req::RefMut(CounterReqRefMut::Increase { __rsp, by }) => {
                 match self.value.checked_add(by) {
                     Some(new_value) => self.value = new_value,
                     None => {
-                        let _ = __responder.send(Err(IncreaseError::Overflow));
+                        let _ = __rsp.send(Err(IncreaseError::Overflow));
                         return;
                     }
                 }
@@ -61,7 +61,7 @@ impl CounterObj {
                     let _ = watch.send(self.value);
                 }
 
-                let _ = __responder.send(Ok(()));
+                let _ = __rsp.send(Ok(()));
             }
             _ => (),
         }

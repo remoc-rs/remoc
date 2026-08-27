@@ -35,13 +35,13 @@ async fn simple_req_remote() {
         let mut value = 0;
         while let Some(req) = req_rx.recv().await.unwrap() {
             match req {
-                Req::Ref(CounterReqRef::Value { __responder }) => {
+                Req::Ref(CounterReqRef::Value { __rsp }) => {
                     // Replying with `complete` works the same way as for a pipelined method.
-                    __responder.complete(Ok(value)).await;
+                    __rsp.complete(Ok(value)).await;
                 }
-                Req::RefMut(CounterReqRefMut::Increase { __responder, by }) => {
+                Req::RefMut(CounterReqRefMut::Increase { __rsp, by }) => {
                     value += by;
-                    let _ = __responder.send(Ok(()));
+                    let _ = __rsp.send(Ok(()));
                 }
                 _ => (),
             }

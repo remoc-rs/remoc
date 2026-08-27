@@ -83,7 +83,7 @@ Remoc 0.20 remains wire-compatible with previous versions.
   defaults to `rtc::DEFAULT_PARALLELISM`. If you passed `spawn` as `false`, call
   `set_parallelism(0)` before serving to keep dispatching one call at a time
 - **BREAKING**: rtc: the reply field of the generated request enums has been renamed
-  from `__reply_tx` to `__responder` and is now a `rtc::Responder`
+  from `__reply_tx` to `__rsp` and is now a `rtc::Responder`
 - **BREAKING**: rtc: the monitoring traits and types have moved into the
   [monitor module](https://docs.rs/remoc/0.20/remoc/rtc/monitor/index.html), where the
   monitors themselves already lived; `MonitorableClient`, `MonitorableServer` and

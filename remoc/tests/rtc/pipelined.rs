@@ -237,7 +237,7 @@ async fn manual_req_receiver_completes_pipelined_call() {
 
     wokio::spawn(async move {
         while let Some(req) = req_rx.recv().await.unwrap() {
-            if let Req::Ref(DirectoryReqRef::OpenCounter { __responder, name }) = req {
+            if let Req::Ref(DirectoryReqRef::OpenCounter { __rsp, name }) = req {
                 let result = if name == "allowed" {
                     let obj = Arc::new(RwLock::new(CounterObj { value: 0 }));
                     let (server, client) = CounterServerSharedMut::new(obj);
@@ -249,11 +249,11 @@ async fn manual_req_receiver_completes_pipelined_call() {
 
                 // Completing a pipelined request runs the whole session, so it is
                 // spawned to keep receiving further requests.
-                assert!(__responder.is_pipelined());
+                assert!(__rsp.is_pipelined());
                 wokio::spawn(async move {
                     // Awaiting the returned handle reports whether the response, which is
                     // sent once the session has finished, was transmitted.
-                    __responder.complete(result).await.await.unwrap();
+                    __rsp.complete(result).await.await.unwrap();
                 });
             }
         }

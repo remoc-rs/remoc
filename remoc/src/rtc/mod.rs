@@ -1041,12 +1041,12 @@ where
 ///     let mut value = 0;
 ///     while let Some(req) = req_rx.recv().await.unwrap() {
 ///         match req {
-///             Req::Ref(CounterReqRef::Value { __responder }) => {
-///                 let _ = __responder.send(Ok(value));
+///             Req::Ref(CounterReqRef::Value { __rsp }) => {
+///                 let _ = __rsp.send(Ok(value));
 ///             }
-///             Req::RefMut(CounterReqRefMut::Increase { __responder, by }) => {
+///             Req::RefMut(CounterReqRefMut::Increase { __rsp, by }) => {
 ///                 value += by;
-///                 let _ = __responder.send(Ok(()));
+///                 let _ = __rsp.send(Ok(()));
 ///             }
 ///             _ => (),
 ///         }
@@ -1096,7 +1096,7 @@ where
     /// and [`Req::RefMut`] variants, which group the methods by how they take
     /// `self`, and then on the variants of the contained per-kind request enum,
     /// one per method. Response with the result on the [responder](Responder) provided
-    /// in the `__responder` field of each method variant.
+    /// in the `__rsp` field of each method variant.
     ///
     /// Returns `Ok(None)` after all clients have been dropped and all queued
     /// requests have been received.

@@ -843,15 +843,15 @@ where
     Codec: remoc::codec::Codec,
 {
     match req {
-        Req::Value(CounterReqValue::Value { __responder }) => {
-            let _ = __responder.send(Ok(*value));
+        Req::Value(CounterReqValue::Value { __rsp }) => {
+            let _ = __rsp.send(Ok(*value));
         }
-        Req::Ref(CounterReqRef::ValueRef { __responder }) => {
-            let _ = __responder.send(Ok(*value));
+        Req::Ref(CounterReqRef::ValueRef { __rsp }) => {
+            let _ = __rsp.send(Ok(*value));
         }
-        Req::RefMut(CounterReqRefMut::Increase { __responder, by }) => {
+        Req::RefMut(CounterReqRefMut::Increase { __rsp, by }) => {
             *value += by;
-            let _ = __responder.send(Ok(()));
+            let _ = __rsp.send(Ok(()));
         }
         _ => (),
     }

@@ -80,7 +80,7 @@ impl LengthCodec {
                 self.reserve(src, Self::MAX_HEADER_LEN);
                 return Ok(None);
             }
-            src.get_u32()
+            src.get_u32_le()
         } else {
             loop {
                 if src.is_empty() {
@@ -153,7 +153,7 @@ impl Encoder<Bytes> for LengthCodec {
 
         let length = data.len() as u32;
         if !self.varint.load(Ordering::Relaxed) {
-            dst.put_u32(length);
+            dst.put_u32_le(length);
         } else {
             let mut buf = [0u8; varint_max::<u32>()];
             let used_buf = varint_u32(length, &mut buf);

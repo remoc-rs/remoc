@@ -323,7 +323,7 @@ impl MultiplexMsg {
                 let pre_connect_count = ports.iter().filter(|port| port.pre_connect).count();
                 let need_port_flags = if pre_connect_count == 0 {
                     false
-                } else if ports.iter().any(|port| port.port != port.id) {
+                } else if pre_connect_count == ports.len() {
                     flags |= MSG_PORT_DATA_FLAG_PRE_CONNECT_ALL;
                     false
                 } else {
@@ -507,6 +507,7 @@ impl MultiplexMsg {
                 let first = flags & MSG_PORT_DATA_FLAG_FIRST != 0;
                 let last = flags & MSG_PORT_DATA_FLAG_LAST != 0;
                 let wait = flags & MSG_PORT_DATA_FLAG_WAIT != 0;
+                let pre_connect_all = flags & MSG_PORT_DATA_FLAG_PRE_CONNECT_ALL != 0;
                 let mut ports = Vec::with_capacity(16);
                 loop {
                     let port = match reader.read_v32(varint) {
@@ -515,7 +516,7 @@ impl MultiplexMsg {
                         Err(err) => return Err(err),
                     };
                     let id = if flags & MSG_PORT_DATA_FLAG_IDS != 0 { reader.read_v32(varint)? } else { port };
-                    let mut pre_connect = false;
+                    let mut pre_connect = pre_connect_all;
                     if flags & MSG_PORT_DATA_FLAG_PORTS_FLAGS != 0 {
                         let port_flags = reader.read_u8()?;
                         pre_connect = port_flags & MSG_PORT_DATA_FLAG_PORT_FLAG_PRE_CONNECT != 0;

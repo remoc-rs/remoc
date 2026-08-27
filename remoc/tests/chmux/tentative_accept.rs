@@ -1,12 +1,16 @@
 //! Tentative acceptance of pre-connected connection requests.
 
 use std::time::Duration;
+use wokio::time::timeout;
 
 #[cfg(all(target_family = "wasm", feature = "js"))]
 use wasm_bindgen_test::wasm_bindgen_test;
 
 use super::{cfg, connected, connected_with_cfg, spawn_forwarder};
 use remoc::chmux::{self, OnPortsExhausted, Received, RecvError, SendError, TentativeAcceptError};
+
+/// Time an exchange is given before the test fails.
+const LIMIT: Duration = Duration::from_secs(60);
 
 /// A tentatively accepted port that is rejected afterwards is reported as rejected
 /// to the requester, even though data has already been exchanged over it.
@@ -244,4 +248,68 @@ async fn forwarded_port_exhaustion_keeps_channel_alive() {
     assert_eq!(Vec::from(c_rx.recv().await.unwrap().unwrap()), b"still forwarding");
     c_tx.send("in both directions".into()).await.unwrap();
     assert_eq!(Vec::from(a_rx.recv().await.unwrap().unwrap()), b"in both directions");
+}
+
+/// A pre-connected port that is sent over a port arrives pre-connected, also when it
+/// carries an id that differs from its port number.
+///
+/// The id and the pre-connect flag are encoded independently of each other, so a
+/// differing id must not affect whether the port is pre-connected.
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
+async fn pre_connect_survives_id() {
+    crate::init();
+    let (a_client, mut b_server) = connected().await;
+
+    let (mut a_tx, _a_rx) = timeout(LIMIT, a_client.connect_port()).await.unwrap().unwrap();
+    let (_b_tx, mut b_rx) = timeout(LIMIT, b_server.accept()).await.unwrap().unwrap().unwrap();
+
+    let req = timeout(LIMIT, a_tx.connect_req().unwrap().with_id(4711).pre_connect()).await.unwrap();
+    assert!(req.is_pre_connected(), "port was not pre-connected");
+    let _connect = timeout(LIMIT, a_tx.connect(vec![req])).await.unwrap().unwrap().remove(0);
+
+    match timeout(LIMIT, b_rx.recv_any()).await.unwrap().unwrap() {
+        Some(Received::Requests(reqs)) => {
+            assert_eq!(reqs[0].id(), 4711, "the id was lost");
+            assert!(reqs[0].is_pre_connected(), "the pre-connect flag was lost in transit");
+        }
+        other => panic!("unexpected receive result: {other:?}"),
+    }
+}
+
+/// Only the ports that are pre-connected arrive pre-connected, when a batch of ports
+/// mixes pre-connected and normal ones.
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
+async fn pre_connect_of_mixed_ports() {
+    crate::init();
+    let (a_client, mut b_server) = connected().await;
+
+    let (mut a_tx, _a_rx) = timeout(LIMIT, a_client.connect_port()).await.unwrap().unwrap();
+    let (_b_tx, mut b_rx) = timeout(LIMIT, b_server.accept()).await.unwrap().unwrap().unwrap();
+
+    // Every second port is pre-connected and all of them carry a custom id.
+    let mut reqs = Vec::new();
+    for i in 0..4u32 {
+        let req = a_tx.connect_req().unwrap().with_id(100 + i);
+        let req = if i % 2 == 0 { timeout(LIMIT, req.pre_connect()).await.unwrap() } else { req };
+        assert_eq!(req.is_pre_connected(), i % 2 == 0);
+        reqs.push(req);
+    }
+    let _connects = timeout(LIMIT, a_tx.connect(reqs)).await.unwrap().unwrap();
+
+    match timeout(LIMIT, b_rx.recv_any()).await.unwrap().unwrap() {
+        Some(Received::Requests(reqs)) => {
+            assert_eq!(reqs.len(), 4, "not all ports arrived");
+            for (i, req) in reqs.iter().enumerate() {
+                assert_eq!(req.id(), 100 + i as u32, "the id of port {i} was lost");
+                assert_eq!(
+                    req.is_pre_connected(),
+                    i % 2 == 0,
+                    "port {i} arrived with the wrong pre-connect state"
+                );
+            }
+        }
+        other => panic!("unexpected receive result: {other:?}"),
+    }
 }

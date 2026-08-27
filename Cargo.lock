@@ -482,9 +482,9 @@ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
 name = "postbag"
-version = "1.0.0-pre9"
+version = "1.0.0-pre10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8d335f335a6d6d59727de1ae3ae46e59619dc79aecd49d37942e6f946284dc6"
+checksum = "79c523c61d91af0430580d719b93618603f7db5cae827070c31d71988b64db4c"
 dependencies = [
  "serde",
 ]
@@ -562,7 +562,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "remoc"
-version = "0.20.0-pre6"
+version = "0.20.0-pre7"
 dependencies = [
  "async-trait",
  "bincode",
@@ -596,7 +596,7 @@ dependencies = [
 
 [[package]]
 name = "remoc_macro"
-version = "0.20.0-pre6"
+version = "0.20.0-pre7"
 dependencies = [
  "proc-macro2",
  "quote",

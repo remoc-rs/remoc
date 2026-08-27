@@ -56,7 +56,7 @@ full-codecs = [
 default-codec-no-warn = []
 
 [dependencies]
-remoc_macro = { version = "=0.20.0-pre6", path = "../remoc_macro", optional = true }
+remoc_macro = { version = "=0.20.0-pre7", path = "../remoc_macro", optional = true }
 
 custom_debug = "0.6"
 futures = { version = "0.3.31", default-features = false, features = ["std"] }
@@ -70,7 +70,7 @@ uuid = { version = "1.15", features = ["serde", "v4"] }
 serde = { version = "1.0", features = ["derive"], optional = true }
 
 # Codecs
-postbag = { version = "=1.0.0-pre9", optional = true }
+postbag = { version = "=1.0.0-pre10", optional = true }
 serde_json = { version = "1.0", optional = true }
 bincode = { version = "2.0", default-features = false, features = ["std", "serde"], optional = true }
 ciborium = { version = "0.2", optional = true }

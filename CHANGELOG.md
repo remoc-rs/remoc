@@ -41,6 +41,8 @@ Remoc 0.20 remains wire-compatible with previous versions.
 - chmux: `AnyStorage` can now store values indexed by their type using `insert`,
   `get`, `with` and `remove`, and exposes the configuration of the connection
   via `AnyStorage::cfg`
+- chmux: `Receiver::discard_chunks` to discard remaining chunks of an in-progress
+  chunked reception 
 - rtc: `LogMonitor` logs every request and its outcome
 - rtc: the `debug` argument of the `remote` attribute makes the generated request enums
   implement `Debug`

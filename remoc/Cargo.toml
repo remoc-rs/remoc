@@ -1,6 +1,6 @@
 [package]
 name = "remoc"
-description = "🦑 Remote multiplexed objects, channels, observable collections and RPC making remote interactions seamless. Provides multiple remote channels and RPC over TCP, TLS or any other transport."
+description = "🦑 Rust RPC library whose calls can pass Tokio-style remote channels and remote objects over a single transport connection."
 keywords = ["remote", "channel", "rpc", "serde", "multiplexer"]
 categories = ["asynchronous", "network-programming"]
 

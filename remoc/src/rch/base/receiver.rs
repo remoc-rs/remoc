@@ -337,6 +337,8 @@ impl ErasedReceiver {
                     if let Some(Some(Received::Chunks)) = &self.recved
                         && !wokio::task::has_threads().await
                     {
+                        self.recved = None;
+                        self.receiver.discard_chunks();
                         return Err(RecvError::Deserialize(DeserializationError::new(StreamingUnavailable)));
                     }
 
@@ -399,26 +401,22 @@ impl ErasedReceiver {
                         // Feed received data chunks to deserialization thread.
                         if let Some(tx) = &tx {
                             let res = loop {
-                                let tx_permit = match tx.reserve().await {
-                                    Ok(tx_permit) => tx_permit,
-                                    _ => {
-                                        break Ok(());
-                                    }
-                                };
-
+                                let Ok(tx_permit) = tx.reserve().await else { break Ok(()) };
                                 match self.receiver.recv_chunk().await {
                                     Ok(Some(chunk)) => {
                                         *total += chunk.remaining();
                                         if *total > self.max_item_size {
                                             break Err(FeedError::MaxItemSizeExceeded);
                                         }
-
                                         tx_permit.send(Ok(chunk));
                                     }
                                     Ok(None) => break Ok(()),
                                     Err(err) => break Err(FeedError::RecvChunkError(err)),
                                 }
                             };
+
+                            // Discard potentially remaining chunks, if the receive loop exited early.
+                            self.receiver.discard_chunks();
 
                             match res {
                                 Ok(()) => (),

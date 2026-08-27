@@ -129,7 +129,7 @@ pub(crate) async fn forward(rx: &mut super::Receiver, tx: &mut super::Sender) ->
                     match rx.recv_chunk().await {
                         Ok(Some(chunk)) => {
                             total += chunk.remaining();
-                            chunk_tx = chunk_tx.send(chunk).await?;
+                            chunk_tx = chunk_tx.send(chunk).await.inspect_err(|_| rx.discard_chunks())?;
                         }
                         Ok(None) => {
                             chunk_tx.finish().await?;

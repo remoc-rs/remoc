@@ -201,3 +201,152 @@ async fn receiving_resumes_an_incomplete_message() {
         .await
         .expect("receiving an incomplete message stalled");
 }
+
+/// A message exceeding the maximum data size must be dropped by `recv`, so that the
+/// message following it can be received.
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
+async fn recv_drops_an_oversized_message() {
+    crate::init();
+    let (client, mut listener) = connected_with_cfg(tight_cfg(), tight_cfg()).await;
+    let (mut a_tx, _a_rx) = client.connect_port().await.unwrap();
+    let (_b_tx, mut b_rx) = listener.accept().await.unwrap().unwrap();
+
+    let sender = async {
+        a_tx.send(vec![1u8; CHUNK * 4].into()).await.unwrap();
+        a_tx.send("next".into()).await.unwrap();
+    };
+
+    let receiver = async {
+        match b_rx.recv().await {
+            Err(chmux::RecvError::ExceedsMaxDataSize(_)) => (),
+            other => panic!("oversized message was not rejected: {other:?}"),
+        }
+
+        let next = b_rx.recv().await.unwrap().expect("no message followed the oversized one");
+        assert_eq!(Vec::from(next), b"next");
+    };
+
+    timeout(Duration::from_secs(10), futures::future::join(sender, receiver))
+        .await
+        .expect("receiving after an oversized message stalled");
+}
+
+/// Discarding the chunks of a message that was cancelled by the sender must not
+/// swallow the message that follows it, since that one has already begun.
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
+async fn discarding_chunks_after_cancellation_keeps_next_message() {
+    crate::init();
+    let (client, mut listener) = connected_with_cfg(tight_cfg(), tight_cfg()).await;
+    let (mut a_tx, _a_rx) = client.connect_port().await.unwrap();
+    let (_b_tx, mut b_rx) = listener.accept().await.unwrap().unwrap();
+
+    let sender = async { cancel_message(&mut a_tx).await };
+
+    let receiver = async {
+        match b_rx.recv_any().await.unwrap() {
+            Some(Received::Chunks) => (),
+            other => panic!("unexpected receive result: {other:?}"),
+        }
+
+        loop {
+            match b_rx.recv_chunk().await {
+                Ok(Some(_)) => (),
+                Ok(None) => panic!("an abandoned message was reported as complete"),
+                Err(RecvChunkError::Cancelled) => break,
+                Err(err) => panic!("receiving chunks failed: {err}"),
+            }
+        }
+
+        // The chunked reception has already ended, so this must not discard the
+        // message that the sender started when it cancelled.
+        b_rx.discard_chunks();
+
+        assert_eq!(recv_message(&mut b_rx).await, b"next");
+    };
+
+    timeout(Duration::from_secs(10), futures::future::join(sender, receiver))
+        .await
+        .expect("receiving after discarding chunks stalled");
+}
+
+/// A chunked reception that is abandoned by discarding its chunks must not have its
+/// remainder reported as a new message.
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
+async fn discarding_chunks_skips_the_rest_of_the_message() {
+    crate::init();
+    let (client, mut listener) = connected_with_cfg(tight_cfg(), tight_cfg()).await;
+    let (mut a_tx, _a_rx) = client.connect_port().await.unwrap();
+    let (_b_tx, mut b_rx) = listener.accept().await.unwrap().unwrap();
+
+    const CHUNKS: usize = 4;
+    let sender = async {
+        let mut chunks = a_tx.send_chunks();
+        for i in 0..CHUNKS - 1 {
+            chunks = chunks.send(vec![i as u8; CHUNK].into()).await.unwrap();
+        }
+        chunks.send_final(vec![(CHUNKS - 1) as u8; CHUNK].into()).await.unwrap();
+
+        a_tx.send("next".into()).await.unwrap();
+    };
+
+    let receiver = async {
+        match b_rx.recv_any().await.unwrap() {
+            Some(Received::Chunks) => (),
+            other => panic!("unexpected receive result: {other:?}"),
+        }
+
+        // Receive one chunk and abandon the rest of the message.
+        b_rx.recv_chunk().await.unwrap().expect("no chunk was received");
+        b_rx.discard_chunks();
+
+        assert_eq!(recv_message(&mut b_rx).await, b"next");
+    };
+
+    timeout(Duration::from_secs(10), futures::future::join(sender, receiver))
+        .await
+        .expect("receiving after discarding chunks stalled");
+}
+
+/// A message that is forwarded only partially, because forwarding it fails, must not
+/// have its remainder reported as a new message by the receiver.
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
+async fn failed_forwarding_discards_the_partial_message() {
+    crate::init();
+    let (client, mut listener) = connected_with_cfg(tight_cfg(), tight_cfg()).await;
+    let (mut a_tx, _a_rx) = client.connect_port().await.unwrap();
+    let (_b_tx, mut b_rx) = listener.accept().await.unwrap().unwrap();
+
+    // A second connection whose receiving end is dropped, so that forwarding to it fails.
+    let (fwd_client, mut fwd_listener) = connected_with_cfg(tight_cfg(), tight_cfg()).await;
+    let (mut fwd_tx, _fwd_rx) = fwd_client.connect_port().await.unwrap();
+    let (far_tx, far_rx) = fwd_listener.accept().await.unwrap().unwrap();
+    drop(far_rx);
+    drop(far_tx);
+    fwd_tx.closed().await;
+
+    const CHUNKS: usize = 4;
+    let sender = async {
+        let mut chunks = a_tx.send_chunks();
+        for i in 0..CHUNKS - 1 {
+            chunks = chunks.send(vec![i as u8; CHUNK].into()).await.unwrap();
+        }
+        chunks.send_final(vec![(CHUNKS - 1) as u8; CHUNK].into()).await.unwrap();
+    };
+
+    let receiver = async {
+        b_rx.forward(&mut fwd_tx).await.expect_err("forwarding to a dropped receiver succeeded");
+
+        // The remainder of the partially forwarded message must be discarded, so that
+        // nothing more is received on this channel.
+        match timeout(Duration::from_millis(500), b_rx.recv_any()).await {
+            Err(_elapsed) => (),
+            Ok(other) => panic!("remainder of the partially forwarded message was received: {other:?}"),
+        }
+    };
+
+    timeout(Duration::from_secs(10), futures::future::join(sender, receiver)).await.expect("forwarding stalled");
+}

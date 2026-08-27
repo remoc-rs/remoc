@@ -328,8 +328,12 @@ enum Receiving {
     Nothing,
     Data(DataBuf),
     Chunks {
+        /// Received chunks that have not been passed to the caller yet.
         chunks: VecDeque<Bytes>,
+        /// The last chunk of the message has been received.
         completed: bool,
+        /// Whether the message has been announced to the caller.
+        announced: bool,
     },
     Requests(Vec<Request>),
 }
@@ -500,14 +504,20 @@ impl Receiver {
     ///
     /// Waits for data to become available.
     /// Received port open requests are silently rejected.
+    ///
     /// The size of the received data is limited by [max_data_size](Self::max_data_size).
+    /// Data exceeding that limit is discarded, i.e. after the returned
+    /// [`RecvError::ExceedsMaxDataSize`] the next message is received.
     pub async fn recv(&mut self) -> Result<Option<DataBuf>, RecvError> {
         self.wait_pre_connect_done().await?;
 
         loop {
             match self.recv_any().await? {
                 Some(Received::Data(data)) => break Ok(Some(data)),
-                Some(Received::Chunks) => break Err(RecvError::ExceedsMaxDataSize(self.max_data_size)),
+                Some(Received::Chunks) => {
+                    self.discard_chunks();
+                    break Err(RecvError::ExceedsMaxDataSize(self.max_data_size));
+                }
                 Some(Received::Requests(_)) => (),
                 None => break Ok(None),
             }
@@ -521,6 +531,10 @@ impl Receiver {
     /// [None] is returned after the last chunk of a message.
     ///
     /// This is unlimited in size.
+    ///
+    /// The chunked reception must either be finished, i.e. by calling this until it
+    /// returns [None] or an error, or be abandoned by calling
+    /// [discard_chunks](Self::discard_chunks).
     pub async fn recv_chunk(&mut self) -> Result<Option<Bytes>, RecvChunkError> {
         self.wait_pre_connect_done().await.map_err(|err| match err {
             RecvError::ChMux => RecvChunkError::ChMux,
@@ -536,8 +550,10 @@ impl Receiver {
 
             match &mut self.receiving {
                 // Chunks from receive operation started by recv_any available.
-                Receiving::Chunks { chunks, .. } if !chunks.is_empty() => {
-                    return Ok(Some(chunks.pop_front().unwrap()));
+                Receiving::Chunks { chunks, announced, .. } if !chunks.is_empty() => {
+                    let chunk = chunks.pop_front().unwrap();
+                    *announced = true;
+                    return Ok(Some(chunk));
                 }
 
                 // Previous received chunk was last of message.
@@ -559,14 +575,20 @@ impl Receiver {
                             // First segment without last segment indicates that last transmission
                             // was cancelled.
                             (Receiving::Chunks { .. }, true) => {
-                                self.receiving =
-                                    Receiving::Chunks { chunks: vec![data.buf].into(), completed: data.last };
+                                self.receiving = Receiving::Chunks {
+                                    chunks: vec![data.buf].into(),
+                                    completed: data.last,
+                                    announced: false,
+                                };
                                 return Err(RecvChunkError::Cancelled);
                             }
                             // Either continuation or start of transmission.
                             (Receiving::Chunks { .. }, false) | (_, true) => {
-                                self.receiving =
-                                    Receiving::Chunks { chunks: VecDeque::new(), completed: data.last };
+                                self.receiving = Receiving::Chunks {
+                                    chunks: VecDeque::new(),
+                                    completed: data.last,
+                                    announced: true,
+                                };
                                 return Ok(Some(data.buf));
                             }
                             // Ignore transmission without start.
@@ -607,11 +629,27 @@ impl Receiver {
         }
     }
 
+    /// Discards a chunked reception in progress.
+    ///
+    /// The remaining chunks of the message are discarded as they are received, so that
+    /// the next call to [recv_any](Self::recv_any) reports the message following it.
+    ///
+    /// This has no effect when no chunked reception is in progress.
+    pub fn discard_chunks(&mut self) {
+        if let Receiving::Chunks { announced: true, .. } = &self.receiving {
+            self.receiving = Receiving::Nothing;
+        }
+    }
+
     /// Receives data or ports over the channel.
     ///
     /// Returns binary data, a marker for chunked data, or port-opening requests;
     /// see [`Received`]. [`None`] indicates that the remote sender finished the
     /// channel and no further messages will arrive.
+    ///
+    /// While a chunked reception is in progress, i.e. it has neither been finished
+    /// nor discarded using [discard_chunks](Self::discard_chunks), [`Received::Chunks`]
+    /// is returned again.
     pub async fn recv_any(&mut self) -> Result<Option<Received>, RecvError> {
         self.wait_pre_connect_done().await?;
 
@@ -619,9 +657,10 @@ impl Receiver {
             return Ok(None);
         }
 
-        // Chunk if chunked reception is already in progress.
-        if let Receiving::Chunks { chunks, completed } = &self.receiving {
+        // Chunked reception is already in progress, so announce it again.
+        if let Receiving::Chunks { chunks, completed, announced } = &mut self.receiving {
             if !chunks.is_empty() || !*completed {
+                *announced = true;
                 return Ok(Some(Received::Chunks));
             }
             self.receiving = Receiving::Nothing;
@@ -654,8 +693,11 @@ impl Receiver {
                             // Maximum message size has been reached.
                             Err(buf) => {
                                 data_buf.bufs.push_back(buf);
-                                self.receiving =
-                                    Receiving::Chunks { chunks: data_buf.bufs, completed: data.last };
+                                self.receiving = Receiving::Chunks {
+                                    chunks: data_buf.bufs,
+                                    completed: data.last,
+                                    announced: true,
+                                };
                                 return Ok(Some(Received::Chunks));
                             }
                         }

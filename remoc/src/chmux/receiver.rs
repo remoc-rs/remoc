@@ -316,7 +316,8 @@ pub enum Received {
     Data(DataBuf),
     /// Data was received that exceeds the receive buffer size.
     ///
-    /// Use [Receiver::recv_chunk] to stream the data in chunks.
+    /// Use [`Receiver::recv_chunk`] to stream the data in chunks
+    /// or [`Receiver::discard_chunks`] to discard the chunked message.
     Chunks,
     /// Port open requests.
     Requests(Vec<Request>),

@@ -78,8 +78,15 @@ impl Counter for CounterObj {
 
 #[tokio::main]
 async fn main() {
-    // Initialize logging.
-    tracing_subscriber::fmt::init();
+    // Initialize logging to the terminal at info level, overridable using
+    // the `RUST_LOG` environment variable.
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::builder()
+                .with_default_directive(tracing_subscriber::filter::LevelFilter::INFO.into())
+                .from_env_lossy(),
+        )
+        .init();
 
     // Create a counter object that will be shared between all clients.
     // You could also create one counter object per connection.
@@ -106,8 +113,7 @@ async fn main() {
 
                 // Create a server proxy and client for the accepted connection.
                 //
-                // The server proxy executes all incoming method calls on the shared counter_obj
-                // with a request queue length of 1.
+                // The server proxy executes all incoming method calls on the shared counter_obj.
                 //
                 // Current limitations of the Rust compiler require that we explicitly
                 // specify the codec.
@@ -118,7 +124,8 @@ async fn main() {
                 remoc::Connect::io(remoc::Cfg::default(), socket_rx, socket_tx).provide(client).await.unwrap();
 
                 // Serve incoming requests from the client on this task.
-                // `true` indicates that requests are handled in parallel.
+                // Calls taking `&self` are executed in parallel, while calls taking
+                // `&mut self` are serialized through the lock on the counter object.
                 server.serve().await.unwrap();
             }
             .instrument(info_span!("incoming", %addr)),

@@ -60,7 +60,15 @@ impl Counter for CounterObj {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
+    // Initialize logging to the terminal at info level, overridable using
+    // the `RUST_LOG` environment variable.
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::builder()
+                .with_default_directive(tracing_subscriber::filter::LevelFilter::INFO.into())
+                .from_env_lossy(),
+        )
+        .init();
 
     let counter = Arc::new(RwLock::new(CounterObj::default()));
     let app = Router::new()

@@ -8,5 +8,5 @@ counter = { path = "../counter" }
 remoc = { path = "../../../remoc" }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time"] }
 tracing = "0.1"
-tracing-subscriber = "0.3.22"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 

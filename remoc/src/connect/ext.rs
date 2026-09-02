@@ -56,7 +56,7 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::ChMux(err) => write!(f, "Remoc connection failed: {err}"),
+            Self::ChMux(err) => write!(f, "remoc connection failed: {err}"),
             Self::Connect(err) => write!(f, "connect error: {err}"),
             Self::Send(err) => write!(f, "send error: {err}"),
         }
@@ -115,7 +115,7 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::ChMux(err) => write!(f, "Remoc connection failed: {err}"),
+            Self::ChMux(err) => write!(f, "remoc connection failed: {err}"),
             Self::Connect(err) => write!(f, "connect error: {err}"),
             Self::Recv(err) => write!(f, "receive error: {err}"),
             Self::NoValueReceived => write!(f, "no value was received for consumption"),

@@ -95,7 +95,7 @@ async fn websocket(State(counter): State<SharedCounter>, upgrade: WebSocketUpgra
     // Axum hands the upgraded WebSocket to this future.
     upgrade.on_upgrade(move |socket| async move {
         if let Err(error) = serve_client(socket, counter).await {
-            tracing::warn!(%error, "Remoc client connection failed");
+            tracing::warn!(%error, "remoc client connection failed");
         }
     })
 }

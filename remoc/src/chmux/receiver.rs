@@ -67,7 +67,7 @@ impl RecvError {
 impl fmt::Display for RecvError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::ChMux => write!(f, "Remoc connection terminated"),
+            Self::ChMux => write!(f, "remoc connection terminated"),
             Self::ExceedsMaxDataSize(max_size) => {
                 write!(f, "data exceeds maximum allowed size of {max_size} bytes")
             }
@@ -124,7 +124,7 @@ impl RecvAnyError {
 impl fmt::Display for RecvAnyError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::ChMux => write!(f, "Remoc connection terminated"),
+            Self::ChMux => write!(f, "remoc connection terminated"),
             Self::Rejected { .. } => write!(f, "pre-connected port was rejected"),
         }
     }
@@ -160,7 +160,7 @@ impl RecvChunkError {
 impl fmt::Display for RecvChunkError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::ChMux => write!(f, "Remoc connection terminated"),
+            Self::ChMux => write!(f, "remoc connection terminated"),
             Self::Cancelled => write!(f, "transmission cancelled"),
         }
     }

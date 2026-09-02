@@ -82,7 +82,7 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::ChMux(err) => write!(f, "Remoc connection failed: {err}"),
+            Self::ChMux(err) => write!(f, "remoc connection failed: {err}"),
             Self::Connect(err) => write!(f, "channel connect failed: {err}"),
         }
     }

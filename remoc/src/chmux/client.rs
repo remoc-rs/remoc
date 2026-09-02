@@ -58,7 +58,7 @@ impl fmt::Display for ConnectError {
             Self::RemotePortsExhausted => write!(f, "all remote ports are in use"),
             Self::TooManyPendingConnectReqs => write!(f, "too many connection requests are pending"),
             Self::Rejected => write!(f, "connection has been rejected by server"),
-            Self::ChMux => write!(f, "Remoc connection terminated"),
+            Self::ChMux => write!(f, "remoc connection terminated"),
         }
     }
 }

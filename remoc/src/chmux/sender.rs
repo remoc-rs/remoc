@@ -85,7 +85,7 @@ impl SendError {
 impl fmt::Display for SendError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::ChMux => write!(f, "Remoc connection terminated"),
+            Self::ChMux => write!(f, "remoc connection terminated"),
             Self::Closed { gracefully } => write!(
                 f,
                 "remote endpoint closed channel{}",

@@ -46,7 +46,7 @@ impl fmt::Display for ListenerError {
         match self {
             Self::LocalPortsExhausted => write!(f, "all local ports are in use"),
             Self::RemotePortAlreadyAllocated(port) => write!(f, "remote port {port} is already allocated"),
-            Self::ChMux => write!(f, "Remoc connection terminated"),
+            Self::ChMux => write!(f, "remoc connection terminated"),
         }
     }
 }

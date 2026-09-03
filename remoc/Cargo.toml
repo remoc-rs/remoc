@@ -1,7 +1,7 @@
 [package]
 name = "remoc"
-description = "🦑 Rust RPC library whose calls can pass Tokio-style remote channels and remote objects over a single transport connection."
-keywords = ["remote", "channel", "rpc", "serde", "multiplexer"]
+description = "🦑 Rust RPC with remote channels and objects. Calls can pass Tokio-style channels and remote objects over a single transport connection."
+keywords = ["rpc", "ipc", "channel", "tokio", "multiplexer"]
 categories = ["asynchronous", "network-programming"]
 
 version = { workspace = true }
@@ -57,7 +57,7 @@ full-codecs = [
 default-codec-no-warn = []
 
 [dependencies]
-remoc_macro = { version = "=0.20.0", path = "../remoc_macro", optional = true }
+remoc_macro = { version = "=0.20.1", path = "../remoc_macro", optional = true }
 
 custom_debug = "0.6"
 futures = { version = "0.3.31", default-features = false, features = ["std"] }

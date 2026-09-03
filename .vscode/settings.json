@@ -48,13 +48,15 @@
     },
     "rust-analyzer.linkedProjects": [
         "Cargo.toml",
-        // "examples/rtc/Cargo.toml"
+        "examples/rtc/Cargo.toml",
+        "examples/tracing/Cargo.toml",
+        "examples/transports/Cargo.toml",
     ],
-    "rust-analyzer.cargo.features": [
-        "full",
-        "full-codecs",
-        // "js",
-    ],
+    // "rust-analyzer.cargo.features": [
+    //     "full",
+    //     "full-codecs",
+    //     // "js",
+    // ],
     //"rust-analyzer.cargo.target": "wasm32-unknown-unknown",
     //"rust-analyzer.cargo.target": "wasm32-wasip1",
     //"rust-analyzer.cargo.target": "wasm32-wasip1-threads",

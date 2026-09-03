@@ -2,6 +2,9 @@
 //!
 //! This module contains channels that can be used to exchange data of
 //! arbitrary type with a remote endpoint.
+//! They are Tokio-style [MPSC](mpsc), [oneshot], [watch] and [broadcast] channels,
+//! and their sender and receiver halves can themselves be sent to another process
+//! or machine, inside a message or as the argument of a remote call.
 //!
 //! The data type must be serializable and deserializable by [serde] and
 //! [sendable across thread boundaries](Send).

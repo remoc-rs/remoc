@@ -4,6 +4,20 @@ All notable changes to Remoc will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.20.1 - 2026-09-03
+Remote calls can now be traced across endpoints. When tracing is enabled for a
+remote trait or function, the client creates a span for each call and the server
+one for processing it, which becomes a child of the span of the caller. With an
+OpenTelemetry layer installed on the tracing subscriber, the spans of both endpoints
+join one distributed trace. Without it, a random span id is recorded on both spans,
+so that the logs of client and server can still be correlated.
+
+### Added
+- tracing: `tracing` argument of the `remote` attribute and `#[tracing]`
+  method attribute enable spans for remote trait calls
+- examples: distributed tracing example with span export to an OpenTelemetry
+  collector.
+
 ## 0.20.0 - 2026-08-27
 This is a large release that significantly improves throughput and latency of the
 underlying channel multiplexer, adds pipelining for remote trait calls (RTC),

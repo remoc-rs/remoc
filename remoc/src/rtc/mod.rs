@@ -1,6 +1,9 @@
 //! Remote trait calling.
 //!
 //! This module allows calling of methods on an object located on a remote endpoint via a trait.
+//! It is the RPC part of Remoc. Arguments and results are ordinary Serde types and can
+//! include [remote channels](crate::rch) and remote objects, which stay usable after
+//! the call has returned.
 //!
 //! By tagging a trait with the [remote attribute](remote), server, client and request receiver
 //! types are generated for that trait.

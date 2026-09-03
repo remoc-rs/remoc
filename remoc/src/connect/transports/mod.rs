@@ -16,6 +16,22 @@
 //! If the underlying network is unreliable, see [aggligator], which keeps a Remoc
 //! connection alive across link failures.
 //!
+//! # Nagle's algorithm
+//!
+//! Remoc itself sends data without waiting for acknowledgments, so streaming data
+//! through channels is unaffected by the latency of the link.
+//! Request-response patterns of the application, such as awaiting a remote call
+//! before making the next one, are sensitive to it though.
+//! With Nagle's algorithm, which is enabled by default on TCP sockets, a small
+//! packet is held back while a previous one is still unacknowledged, and the peer
+//! delays its acknowledgment by up to 40 ms when it has nothing to send itself.
+//! Each round trip of such a pattern can then cost tens of milliseconds, even on
+//! a local network.
+//!
+//! Thus the examples disable it by enabling `TCP_NODELAY` on every TCP socket
+//! underlying a Remoc connection, whether it is used directly or through TLS or
+//! WebSocket. Aggligator does so on its own.
+//!
 //! # Placeholder types
 //!
 //! Each example exchanges these two placeholder types over the initial

@@ -20,6 +20,8 @@ pub async fn connect(
     let connector = TlsConnector::from(Arc::new(config));
 
     let tcp = TcpStream::connect((host, port)).await?;
+    tcp.set_nodelay(true)?;
+
     let tls = connector.connect(ServerName::try_from(host)?.to_owned(), tcp).await?;
 
     // Any AsyncRead and AsyncWrite pair works, so the TLS stream is simply split.

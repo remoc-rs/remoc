@@ -11,6 +11,7 @@ use axum::{
     http::{HeaderValue, header},
     response::{Html, IntoResponse, Response},
     routing::{any, get},
+    serve::ListenerExt,
 };
 use counter_web::{ChangeError, Counter, CounterServerSharedMut, HTTP_PORT};
 use futures::{SinkExt, StreamExt, future};
@@ -81,7 +82,10 @@ async fn main() -> anyhow::Result<()> {
     let address = (Ipv4Addr::LOCALHOST, HTTP_PORT);
     let listener = tokio::net::TcpListener::bind(address)
         .await
-        .with_context(|| format!("failed to listen on {}:{}", address.0, address.1))?;
+        .with_context(|| format!("failed to listen on {}:{}", address.0, address.1))?
+        .tap_io(|tcp| {
+            let _ = tcp.set_nodelay(true);
+        });
 
     println!("Open http://{}:{} in a web browser.", address.0, address.1);
     axum::serve(listener, app).await.context("web server failed")

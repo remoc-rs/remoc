@@ -4,20 +4,32 @@ use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
     response::Response,
     routing::any,
+    serve::ListenerExt,
 };
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt, future};
 use remoc::prelude::*;
+use tokio::net::TcpListener;
 
 /// Serves a Remoc endpoint at `/remoc` over WebSocket.
+pub async fn serve(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let listener = TcpListener::bind(addr).await?.tap_io(|tcp| {
+        let _ = tcp.set_nodelay(true);
+    });
+
+    axum::serve(listener, router()).await?;
+    Ok(())
+}
+
+/// The router serving the Remoc endpoint at `/remoc`.
 pub fn router() -> Router {
     Router::new().route(
         "/remoc",
-        any(async |ws: WebSocketUpgrade| -> Response { ws.on_upgrade(serve) }),
+        any(async |ws: WebSocketUpgrade| -> Response { ws.on_upgrade(serve_websocket) }),
     )
 }
 
-async fn serve(websocket: WebSocket) {
+async fn serve_websocket(websocket: WebSocket) {
     let (websocket_tx, websocket_rx) = websocket.split();
 
     // Each chmux packet is carried as one binary WebSocket message.

@@ -42,7 +42,7 @@ opening and closing spans logged as well. Without OpenTelemetry, Remoc identifie
 call by a random span id, which is recorded in the `span_id` field
 of the span of the call at the client:
 
-    INFO order_pizzas:call{otel.name="Pizzeria::order" otel.kind="client" span_id=0253f0dff882434b}: remoc::rtc::call: close time.busy=117µs time.idle=998ms
+    INFO order_pizzas:call{otel.name="Pizzeria::order" otel.kind="client" span_id=0253f0dff882434b}: remoc::rtc::call: close time.busy=70.9µs time.idle=969ms
 
 The server records it in the same field of the span processing the call,
 so the log lines of both sides can be matched by searching for the id:
@@ -55,11 +55,11 @@ The calls of the progress callback work the same way with the roles swapped.
 The server creates the span of the call, nested within the span processing
 the order, and uses the target `remoc::rfn::call`:
 
-    INFO incoming{addr=127.0.0.1:49126}:call{otel.name="Pizzeria::order" otel.kind="server" span_id=0253f0dff882434b}:call{otel.name="progress" otel.kind="client" span_id=53a42815129e4234}: remoc::rfn::call: close time.busy=74.0µs time.idle=42.1ms
+    INFO incoming{addr=127.0.0.1:49126}:call{otel.name="Pizzeria::order" otel.kind="server" span_id=0253f0dff882434b}:call{otel.name="progress" otel.kind="client" span_id=53a42815129e4234}: remoc::rfn::call: close time.busy=210µs time.idle=5.12ms
 
 The client processes the call within a span carrying the same id:
 
-    INFO order_pizzas:call{otel.name="progress" otel.kind="server" span_id=53a42815129e4234}: pizzeria_client: Margherita: dough is ready
+    INFO order_pizzas:call{otel.name="progress" otel.kind="server" span_id=53a42815129e4234}: pizzeria_client: progress report: Margherita: dough is ready
 
 ## Running with a collector
 

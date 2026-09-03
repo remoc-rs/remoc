@@ -10,6 +10,8 @@ pub async fn connect(
     Box<dyn std::error::Error>,
 > {
     let socket = TcpStream::connect(addr).await?;
+    socket.set_nodelay(true)?;
+
     let (socket_rx, socket_tx) = socket.into_split();
 
     let (conn, tx, rx) =
@@ -27,6 +29,8 @@ pub async fn serve(addr: &str) -> Result<(), Box<dyn std::error::Error>> {
         let (socket, _peer) = listener.accept().await?;
 
         tokio::spawn(async move {
+            let Ok(()) = socket.set_nodelay(true) else { return };
+
             let (socket_rx, socket_tx) = socket.into_split();
 
             let Ok((conn, tx, rx)) =

@@ -32,6 +32,7 @@ pub async fn serve(
         let acceptor = acceptor.clone();
 
         tokio::spawn(async move {
+            let Ok(()) = tcp.set_nodelay(true) else { return };
             let Ok(tls) = acceptor.accept(tcp).await else { return };
 
             // Any AsyncRead and AsyncWrite pair works, so the TLS stream is simply split.

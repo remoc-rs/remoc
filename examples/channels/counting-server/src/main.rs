@@ -20,6 +20,7 @@ async fn main() {
     loop {
         // Accept an incoming TCP connection.
         let (socket, addr) = listener.accept().await.unwrap();
+        socket.set_nodelay(true).unwrap();
         let (socket_rx, socket_tx) = socket.into_split();
         println!("Accepted connection from {addr}");
 

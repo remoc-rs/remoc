@@ -3,7 +3,7 @@ use bytes::Bytes;
 use futures::{SinkExt, StreamExt, future};
 use remoc::prelude::*;
 use tokio_tungstenite::{
-    connect_async,
+    connect_async_with_config,
     tungstenite::{Error, Message},
 };
 
@@ -14,7 +14,7 @@ pub async fn connect(
     (rch::base::Sender<MyInitialReq>, rch::base::Receiver<MyInitialRsp>),
     Box<dyn std::error::Error>,
 > {
-    let (websocket, _response) = connect_async(url).await?;
+    let (websocket, _response) = connect_async_with_config(url, None, true).await?;
     let (websocket_tx, websocket_rx) = websocket.split();
 
     // Each chmux packet is carried as one binary WebSocket message.

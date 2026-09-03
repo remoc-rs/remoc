@@ -21,6 +21,7 @@ async fn main() {
 
     // Establish TCP connection to server.
     let socket = TcpStream::connect((Ipv4Addr::LOCALHOST, TCP_PORT)).await.unwrap();
+    socket.set_nodelay(true).unwrap();
     let (socket_rx, socket_tx) = socket.into_split();
 
     // Establish a Remoc connection with default configuration over the TCP connection and

@@ -249,7 +249,17 @@ impl<const WITH_IDENTS: bool, const DEPTH_LIMIT: usize> Codec for PostbagWith<WI
 /// | Add a variant | **anywhere** | at the end |
 /// | Remove a variant | **anywhere** | at the end |
 /// | Rename a variant | **when numbered** | always |
-/// | Reorder variants | yes | no |
+/// | Reorder variants | **yes** | no |
+/// | Change between struct variant and newtype variant holding a struct | **yes** | yes |
+/// | Change between tuple variant and newtype variant holding a tuple | **yes** | yes |
+/// | Change between unit variant and empty tuple variant | **yes** | yes |
+/// | Change between unit variant and empty struct variant | **yes** | no |
+/// | **Field types** | | |
+/// | Wrap in [`Recoverable`](recoverable::Recoverable) | **struct fields and newtype variants** | no |
+/// | Change `bool` to `Option<Recoverable<T>>` | **struct fields** | no |
+/// | Wrap in or unwrap from a newtype struct | **yes** | yes |
+/// | Change between tuple, tuple struct and fixed-size array | **yes** | yes |
+/// | Change between `Vec<(K, V)>` and a map | **yes** | yes |
 /// | **Size** | **small** | even smaller |
 ///
 /// ## Recoverable deserialization
@@ -363,6 +373,16 @@ pub type Postbag<const DEPTH_LIMIT: usize = { postbag::cfg::DEFAULT_DEPTH_LIMIT 
 /// | Remove a variant | anywhere | **at the end** |
 /// | Rename a variant | when numbered | **always** |
 /// | Reorder variants | yes | **no** |
+/// | Change between struct variant and newtype variant holding a struct | yes | **yes** |
+/// | Change between tuple variant and newtype variant holding a tuple | yes | **yes** |
+/// | Change between unit variant and empty tuple variant | yes | **yes** |
+/// | Change between unit variant and empty struct variant | yes | **no** |
+/// | **Field types** | | |
+/// | Wrap in [`Recoverable`](recoverable::Recoverable) | struct fields and newtype variants | **no** |
+/// | Change `bool` to `Option<Recoverable<T>>` | struct fields | **no** |
+/// | Wrap in or unwrap from a newtype struct | yes | **yes** |
+/// | Change between tuple, tuple struct and fixed-size array | yes | **yes** |
+/// | Change between `Vec<(K, V)>` and a map | yes | **yes** |
 /// | **Size** | small | **even smaller** |
 ///
 /// ## When to Use

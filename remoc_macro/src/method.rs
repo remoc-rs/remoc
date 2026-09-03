@@ -16,6 +16,53 @@ use crate::{
     util::{attribute_tokens, to_pascal_case},
 };
 
+/// Level of the span created by the server for processing a call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpanLevel {
+    /// No span is created.
+    Off,
+    /// Error level.
+    Error,
+    /// Warn level.
+    Warn,
+    /// Info level.
+    Info,
+    /// Debug level.
+    Debug,
+    /// Trace level.
+    Trace,
+}
+
+impl SpanLevel {
+    /// Parses the level from a string literal.
+    pub fn parse(lit: &LitStr) -> syn::Result<Self> {
+        match lit.value().to_ascii_lowercase().as_str() {
+            "off" => Ok(Self::Off),
+            "error" => Ok(Self::Error),
+            "warn" => Ok(Self::Warn),
+            "info" => Ok(Self::Info),
+            "debug" => Ok(Self::Debug),
+            "trace" => Ok(Self::Trace),
+            _ => Err(syn::Error::new(
+                lit.span(),
+                "expected one of \"error\", \"warn\", \"info\", \"debug\", \"trace\" or \"off\"",
+            )),
+        }
+    }
+
+    /// The corresponding `LevelFilter` expression.
+    pub fn tokens(&self) -> TokenStream {
+        match self {
+            Self::Off => quote! { ::remoc::rtc::LevelFilter::OFF },
+            Self::Error => quote! { ::remoc::rtc::LevelFilter::ERROR },
+            Self::Warn => quote! { ::remoc::rtc::LevelFilter::WARN },
+            Self::Info => quote! { ::remoc::rtc::LevelFilter::INFO },
+            Self::Debug => quote! { ::remoc::rtc::LevelFilter::DEBUG },
+            Self::Trace => quote! { ::remoc::rtc::LevelFilter::TRACE },
+        }
+    }
+}
+
 /// Self reference of method.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelfRef {
@@ -163,6 +210,9 @@ pub struct TraitMethod {
     pub pipelinable: bool,
     /// Name of that twin method, if specified by the user.
     pub pipelined_name: Option<Ident>,
+    /// Level of the span created by the server for processing a call,
+    /// if specified by the user.
+    pub span_level: Option<SpanLevel>,
     /// Method body.
     pub body: Option<Vec<Stmt>>,
 }
@@ -211,16 +261,48 @@ impl TraitMethod {
         input.parse::<Token![fn]>()?;
         let ident: Ident = input.parse()?;
 
-        // Check for no_cancel and pipelinable attributes.
+        // Check for no_cancel, pipelinable and tracing attributes.
         let mut cancel = true;
         let mut pipelinable = false;
         let mut pipelined_name = None;
+        let mut span_level = None;
         let mut attr_err = None;
         attrs.retain(|attr| {
             let Some(name) = attr.path().get_ident() else { return true };
 
             if *name == "no_cancel" {
                 cancel = false;
+                return false;
+            }
+
+            if *name == "tracing" {
+                match &attr.meta {
+                    // #[tracing]
+                    Meta::Path(_) => span_level = Some(SpanLevel::Info),
+                    // #[tracing(level = "...")]
+                    Meta::List(_) => {
+                        let mut level = None;
+                        let res = attr.parse_nested_meta(|meta| {
+                            if meta.path.is_ident("level") {
+                                let lit: LitStr = meta.value()?.parse()?;
+                                level = Some(SpanLevel::parse(&lit)?);
+                                Ok(())
+                            } else {
+                                Err(meta.error("expected `level`"))
+                            }
+                        });
+                        match res {
+                            Ok(()) => span_level = Some(level.unwrap_or(SpanLevel::Info)),
+                            Err(err) => attr_err = Some(err),
+                        }
+                    }
+                    Meta::NameValue(_) => {
+                        attr_err = Some(syn::Error::new_spanned(
+                            attr,
+                            "expected `#[tracing]` or `#[tracing(level = \"...\")]`",
+                        ))
+                    }
+                }
                 return false;
             }
 
@@ -369,6 +451,7 @@ impl TraitMethod {
             cancel,
             pipelinable,
             pipelined_name,
+            span_level,
             body,
         })
     }
@@ -474,10 +557,13 @@ impl TraitMethod {
         let body = quote! {
             ::remoc::rtc::Call::ready(#full_name, async {
                 let __client = self.#ident(#call_args).await?;
-                ::remoc::rtc::spawn(::remoc::rtc::Instrument::in_current_span(async move {
-                    let mut __req_rx = __req_rx;
-                    let _ = ::remoc::rtc::ReqReceiver::forward(&mut __req_rx, __client).await;
-                }));
+                ::remoc::rtc::spawn(::remoc::rtc::Instrument::instrument(
+                    async move {
+                        let mut __req_rx = __req_rx;
+                        let _ = ::remoc::rtc::ReqReceiver::forward(&mut __req_rx, __client).await;
+                    },
+                    ::remoc::rtc::pipeline_forward_span(),
+                ));
                 ::std::result::Result::Ok(())
             }.await)
         };
@@ -645,9 +731,10 @@ impl TraitMethod {
     }
 
     /// Enum match discriminator and dispatch code.
-    pub fn dispatch_discriminator(&self) -> TokenStream {
+    pub fn dispatch_discriminator(&self, default_span_level: SpanLevel) -> TokenStream {
         let ident = &self.ident;
         let enum_ident = to_pascal_case(ident);
+        let span_level = self.span_level.unwrap_or(default_span_level).tokens();
 
         // Build call argument list.
         let mut args = quote! {};
@@ -703,7 +790,8 @@ impl TraitMethod {
         // Generate match clause.
         quote! {
             Self :: #enum_ident { #args __rsp } => {
-                async move { #call }.boxed()
+                let __span = __rsp.span(#span_level, #full_name);
+                ::remoc::rtc::Instrument::instrument(async move { #call }, __span).boxed()
             },
         }
     }
@@ -725,9 +813,37 @@ impl TraitMethod {
         }
     }
 
+    /// Statements creating the span of a call at the client, if the method is traced.
+    ///
+    /// The span is disabled when the client is configured not to create spans.
+    fn client_span_setup(&self, default_span_level: SpanLevel) -> Option<TokenStream> {
+        let level = self.span_level.unwrap_or(default_span_level);
+        if level == SpanLevel::Off {
+            return None;
+        }
+
+        let level = level.tokens();
+        let full_name = self.full_name_str();
+        Some(quote! {
+            let (__span, __tracing) = ::remoc::rtc::client_call(#level, #full_name, self.tracing);
+        })
+    }
+
+    /// The tracing context passed to the response channel of a call.
+    ///
+    /// A traced method obtains it when setting up its span; otherwise none is sent.
+    fn tracing_arg(span_setup: &Option<TokenStream>) -> TokenStream {
+        if span_setup.is_some() {
+            quote! { __tracing }
+        } else {
+            quote! { ::std::option::Option::None }
+        }
+    }
+
     /// Client method implementation.
     pub fn client_method(
         &self, req_value: &Ident, req_ref: &Ident, req_ref_mut: &Ident, assoc: &[AssocType],
+        default_span_level: SpanLevel,
     ) -> TokenStream {
         let Self { ident, self_ref, .. } = self;
         let ret_ty = remove_self_type(&self.ret_ty, assoc);
@@ -757,37 +873,55 @@ impl TraitMethod {
             quote! { __rsp }
         };
 
-        let pipelined_method = self.pipelinable.then(|| self.pipelined_client_method(req_enum, &req_type, assoc));
-        let call_method = self.call_client_method(req_enum, &req_type, assoc);
+        let pipelined_method = self
+            .pipelinable
+            .then(|| self.pipelined_client_method(req_enum, &req_type, assoc, default_span_level));
+        let call_method = self.call_client_method(req_enum, &req_type, assoc, default_span_level);
+
+        let span_setup = self.client_span_setup(default_span_level);
+        let tracing = Self::tracing_arg(&span_setup);
+
+        let body = quote! {
+            let (__rsp, response_rx) = self.__rsp(#tracing);
+
+            let req_value = #req_enum :: #req_case { __rsp: #responder, #entries };
+            let req = ::remoc::rtc::Req::#req_type(req_value);
+
+            let mut guard = match self.monitor.pre_call(&req).await {
+                ::remoc::rtc::monitor::CallDecision::Pass => ::std::boxed::Box::new(::remoc::rtc::monitor::PassGuard),
+                ::remoc::rtc::monitor::CallDecision::Guard(guard) => guard,
+                ::remoc::rtc::monitor::CallDecision::Drop => return Err(::remoc::rtc::CallError::Dropped.into()),
+            };
+
+            self.req_tx.send(req).await.map_err(::remoc::rtc::CallError::from)?;
+
+            match response_rx.await {
+                Ok(response) => {
+                    let response: #ret_ty = ::std::convert::Into::into(response);
+                    if response.is_err() {
+                        guard.failed();
+                    }
+                    response
+                }
+                Err(err) => {
+                    guard.response_failed(&err);
+                    Err(::remoc::rtc::CallError::from(err).into())
+                }
+            }
+        };
+
+        // A traced method runs the call within its span.
+        let body = match span_setup {
+            Some(span_setup) => quote! {
+                #span_setup
+                ::remoc::tracing::instrumented::<#ret_ty>(async move { #body }, __span).await
+            },
+            None => body,
+        };
 
         quote! {
             async fn #ident (#self_ref, #args) -> #ret_ty {
-                let (__rsp, response_rx) = self.__rsp();
-
-                let req_value = #req_enum :: #req_case { __rsp: #responder, #entries };
-                let req = ::remoc::rtc::Req::#req_type(req_value);
-
-                let mut guard = match self.monitor.pre_call(&req).await {
-                    ::remoc::rtc::monitor::CallDecision::Pass => ::std::boxed::Box::new(::remoc::rtc::monitor::PassGuard),
-                    ::remoc::rtc::monitor::CallDecision::Guard(guard) => guard,
-                    ::remoc::rtc::monitor::CallDecision::Drop => return Err(::remoc::rtc::CallError::Dropped.into()),
-                };
-
-                self.req_tx.send(req).await.map_err(::remoc::rtc::CallError::from)?;
-
-                match response_rx.await {
-                    Ok(response) => {
-                        let response: #ret_ty = ::std::convert::Into::into(response);
-                        if response.is_err() {
-                            guard.failed();
-                        }
-                        response
-                    }
-                    Err(err) => {
-                        guard.response_failed(&err);
-                        Err(::remoc::rtc::CallError::from(err).into())
-                    }
-                }
+                #body
             }
 
             #call_method
@@ -800,10 +934,13 @@ impl TraitMethod {
     ///
     /// It sends the same request as the normal method, but returns once the request has
     /// been queued, instead of awaiting the response.
-    fn call_client_method(&self, req_enum: &Ident, req_type: &TokenStream, assoc: &[AssocType]) -> TokenStream {
+    fn call_client_method(
+        &self, req_enum: &Ident, req_type: &TokenStream, assoc: &[AssocType], default_span_level: SpanLevel,
+    ) -> TokenStream {
         let full_name = self.full_name_str();
         let call_ident = self.call_ident();
         let ret_ty = remove_self_type(&self.ret_ty, assoc);
+        let ret_ty = quote! { #ret_ty };
         let self_bound = self.twin_self_bound();
         let req_case = to_pascal_case(&self.ident);
 
@@ -827,50 +964,89 @@ impl TraitMethod {
             entries.append_all(quote! { #ident , });
         }
 
+        let span_setup = self.client_span_setup(default_span_level);
+        let response = Self::response_future(&ret_ty, span_setup.is_some());
+        let tracing = Self::tracing_arg(&span_setup);
+
+        let body = quote! {
+            let (__rsp, response_rx) = self.__rsp(#tracing);
+
+            let req_value = #req_enum :: #req_case { __rsp: #responder, #entries };
+            let req = ::remoc::rtc::Req::#req_type(req_value);
+
+            let mut guard = match self.monitor.pre_call(&req).await {
+                ::remoc::rtc::monitor::CallDecision::Pass => ::std::boxed::Box::new(::remoc::rtc::monitor::PassGuard),
+                ::remoc::rtc::monitor::CallDecision::Guard(guard) => guard,
+                ::remoc::rtc::monitor::CallDecision::Drop => {
+                    return ::remoc::rtc::Call::ready(
+                        #full_name,
+                        ::remoc::rtc::Response::from_call_error(::remoc::rtc::CallError::Dropped)
+                    );
+                }
+            };
+
+            if let ::std::result::Result::Err(err) = self.req_tx.send(req).await {
+                return ::remoc::rtc::Call::ready(
+                    #full_name,
+                    ::remoc::rtc::Response::from_call_error(::remoc::rtc::CallError::from(err))
+                );
+            }
+
+            ::remoc::rtc::Call::pending(#full_name, #response)
+        };
+        let body = Self::traced_call_body(body, &ret_ty, span_setup);
+
         quote! {
             #[allow(clippy::async_yields_async)]
             async fn #call_ident (#self_ref #args) -> ::remoc::rtc::Call<#ret_ty>
             #self_bound
             {
-                let (__rsp, response_rx) = self.__rsp();
-
-                let req_value = #req_enum :: #req_case { __rsp: #responder, #entries };
-                let req = ::remoc::rtc::Req::#req_type(req_value);
-
-                let mut guard = match self.monitor.pre_call(&req).await {
-                    ::remoc::rtc::monitor::CallDecision::Pass => ::std::boxed::Box::new(::remoc::rtc::monitor::PassGuard),
-                    ::remoc::rtc::monitor::CallDecision::Guard(guard) => guard,
-                    ::remoc::rtc::monitor::CallDecision::Drop => {
-                        return ::remoc::rtc::Call::ready(
-                            #full_name,
-                            ::remoc::rtc::Response::from_call_error(::remoc::rtc::CallError::Dropped)
-                        );
-                    }
-                };
-
-                if let ::std::result::Result::Err(err) = self.req_tx.send(req).await {
-                    return ::remoc::rtc::Call::ready(
-                        #full_name,
-                        ::remoc::rtc::Response::from_call_error(::remoc::rtc::CallError::from(err))
-                    );
-                }
-
-                ::remoc::rtc::Call::pending(#full_name, async move {
-                    match response_rx.await {
-                        Ok(response) => {
-                            let response: #ret_ty = ::std::convert::Into::into(response);
-                            if ::remoc::rtc::Response::is_error(&response) {
-                                guard.failed();
-                            }
-                            response
-                        }
-                        Err(err) => {
-                            guard.response_failed(&err);
-                            ::remoc::rtc::Response::from_call_error(::remoc::rtc::CallError::from(err))
-                        }
-                    }
-                })
+                #body
             }
+        }
+    }
+
+    /// The future obtaining the response of a started call.
+    ///
+    /// For a traced call it runs within the span of the call.
+    fn response_future(ret_ty: &TokenStream, traced: bool) -> TokenStream {
+        let response = quote! {
+            async move {
+                match response_rx.await {
+                    Ok(response) => {
+                        let response: #ret_ty = ::std::convert::Into::into(response);
+                        if ::remoc::rtc::Response::is_error(&response) {
+                            guard.failed();
+                        }
+                        response
+                    }
+                    Err(err) => {
+                        guard.response_failed(&err);
+                        ::remoc::rtc::Response::from_call_error(::remoc::rtc::CallError::from(err))
+                    }
+                }
+            }
+        };
+
+        if traced {
+            quote! { ::remoc::tracing::instrumented(#response, __response_span) }
+        } else {
+            response
+        }
+    }
+
+    /// Runs the body of a twin method starting a call within the span of the call,
+    /// if the method is traced.
+    ///
+    /// The span is kept for the future obtaining the response.
+    fn traced_call_body(body: TokenStream, ret_ty: &TokenStream, span_setup: Option<TokenStream>) -> TokenStream {
+        match span_setup {
+            Some(span_setup) => quote! {
+                #span_setup
+                let __response_span = __span.clone();
+                ::remoc::tracing::instrumented::<::remoc::rtc::Call<#ret_ty>>(async move { #body }, __span).await
+            },
+            None => body,
         }
     }
 
@@ -883,7 +1059,7 @@ impl TraitMethod {
     /// It sends the same request as the pipelined method, but returns once the request
     /// has been queued, instead of awaiting the response.
     fn pipelined_client_method(
-        &self, req_enum: &Ident, req_type: &TokenStream, assoc: &[AssocType],
+        &self, req_enum: &Ident, req_type: &TokenStream, assoc: &[AssocType], default_span_level: SpanLevel,
     ) -> TokenStream {
         let full_name = self.full_name_str();
         let call_ident = self.pipelined_ident();
@@ -906,53 +1082,48 @@ impl TraitMethod {
             entries.append_all(quote! { #ident , });
         }
 
+        let span_setup = self.client_span_setup(default_span_level);
+        let response = Self::response_future(&ret_ty, span_setup.is_some());
+        let tracing = Self::tracing_arg(&span_setup);
+
+        let body = quote! {
+            let (__rsp, response_rx) = self.__rsp(#tracing);
+
+            let req_value = #req_enum :: #req_case {
+                __rsp: ::remoc::rtc::PipelinableResponder::Pipeline {
+                    req_rx: __req_rx, responder: __rsp,
+                },
+                #entries
+            };
+            let req = ::remoc::rtc::Req::#req_type(req_value);
+
+            let mut guard = match self.monitor.pre_call(&req).await {
+                ::remoc::rtc::monitor::CallDecision::Pass => ::std::boxed::Box::new(::remoc::rtc::monitor::PassGuard),
+                ::remoc::rtc::monitor::CallDecision::Guard(guard) => guard,
+                ::remoc::rtc::monitor::CallDecision::Drop => {
+                    return ::remoc::rtc::Call::ready(#full_name, ::remoc::rtc::Response::from_call_error(
+                        ::remoc::rtc::CallError::Dropped,
+                    ));
+                }
+            };
+
+            if let ::std::result::Result::Err(err) = self.req_tx.send(req).await {
+                return ::remoc::rtc::Call::ready(#full_name, ::remoc::rtc::Response::from_call_error(
+                    ::remoc::rtc::CallError::from(err),
+                ));
+            }
+
+            ::remoc::rtc::Call::pending(#full_name, #response)
+        };
+        let body = Self::traced_call_body(body, &ret_ty, span_setup);
+
         quote! {
             #[allow(clippy::async_yields_async)]
             async fn #call_ident (#self_ref #args __req_rx: #req_rx_ty)
                 -> ::remoc::rtc::Call<#ret_ty>
             #self_bound
             {
-                let (__rsp, response_rx) = self.__rsp();
-
-                let req_value = #req_enum :: #req_case {
-                    __rsp: ::remoc::rtc::PipelinableResponder::Pipeline {
-                        req_rx: __req_rx, responder: __rsp,
-                    },
-                    #entries
-                };
-                let req = ::remoc::rtc::Req::#req_type(req_value);
-
-                let mut guard = match self.monitor.pre_call(&req).await {
-                    ::remoc::rtc::monitor::CallDecision::Pass => ::std::boxed::Box::new(::remoc::rtc::monitor::PassGuard),
-                    ::remoc::rtc::monitor::CallDecision::Guard(guard) => guard,
-                    ::remoc::rtc::monitor::CallDecision::Drop => {
-                        return ::remoc::rtc::Call::ready(#full_name, ::remoc::rtc::Response::from_call_error(
-                            ::remoc::rtc::CallError::Dropped,
-                        ));
-                    }
-                };
-
-                if let ::std::result::Result::Err(err) = self.req_tx.send(req).await {
-                    return ::remoc::rtc::Call::ready(#full_name, ::remoc::rtc::Response::from_call_error(
-                        ::remoc::rtc::CallError::from(err),
-                    ));
-                }
-
-                ::remoc::rtc::Call::pending(#full_name, async move {
-                    match response_rx.await {
-                        Ok(response) => {
-                            let response: #ret_ty = ::std::convert::Into::into(response);
-                            if ::remoc::rtc::Response::is_error(&response) {
-                                guard.failed();
-                            }
-                            response
-                        }
-                        Err(err) => {
-                            guard.response_failed(&err);
-                            ::remoc::rtc::Response::from_call_error(::remoc::rtc::CallError::from(err))
-                        }
-                    }
-                })
+                #body
             }
         }
     }

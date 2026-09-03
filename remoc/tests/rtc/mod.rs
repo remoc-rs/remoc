@@ -29,6 +29,7 @@ mod simple_req;
 mod simple_req_remote;
 mod simple_req_stream;
 mod simple_rpit;
+mod tracing_level;
 mod value;
 mod variants;
 mod version_skew;

@@ -268,8 +268,12 @@ while let Some(i) = seq_rx.recv().await.unwrap() {
 //!
 //! # Logging and tracing
 //!
-//! Remoc uses the [Tracing crate](tracing) for logging of events.
+//! Remoc uses the [Tracing crate](::tracing) for logging of events.
 //! Setting the log level to `TRACE` logs multiplexer lifetime events and messages as they are being processed.
+//!
+//! Remote trait and function calls can create spans at both endpoints, which are
+//! linked into one distributed trace when OpenTelemetry is used; see the
+//! [tracing module](crate::tracing).
 //!
 //! # Example
 //!
@@ -459,6 +463,8 @@ pub use chmux::Cfg;
 #[cfg(feature = "serde")]
 pub mod codec;
 
+#[cfg(any(feature = "rtc", feature = "rfn"))]
+pub mod tracing;
 #[cfg(feature = "serde")]
 pub mod versioned;
 

@@ -52,7 +52,7 @@ where
                 }
                 value
             }
-            .in_current_span(),
+            .instrument(crate::util::task_span!(::tracing::Level::TRACE, "rw_lock_owner")),
         );
 
         let read_lock = ReadLock::new(read_req_tx);

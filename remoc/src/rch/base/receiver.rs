@@ -501,7 +501,7 @@ impl ErasedReceiver {
 
             // Spawn registered tasks.
             for task in pds.tasks.drain(..) {
-                wokio::spawn(task.in_current_span());
+                wokio::spawn(task.instrument(crate::util::task_span!(::tracing::Level::TRACE, "channel_task")));
             }
 
             return Ok(Some(self.item.take().unwrap()));

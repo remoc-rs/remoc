@@ -7,11 +7,12 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use tracing::Instrument;
+use tracing::{Instrument, Span, level_filters::LevelFilter};
 
 use crate::{
     codec,
     rch::{Sending, SendingError, oneshot},
+    tracing::TracingContext,
 };
 
 #[doc(hidden)]
@@ -198,6 +199,8 @@ where
     sequential: bool,
     /// Whether the server shall stop serving when the call fails.
     stop_on_error: bool,
+    /// Tracing context of the caller.
+    tracing: Option<TracingContext>,
 }
 
 impl<R, Codec> std::fmt::Debug for Responder<R, Codec>
@@ -208,6 +211,7 @@ where
         f.debug_struct("Responder")
             .field("sequential", &self.sequential)
             .field("stop_on_error", &self.stop_on_error)
+            .field("tracing", &self.tracing)
             .finish()
     }
 }
@@ -217,7 +221,7 @@ where
     R: Response,
 {
     fn from(responder: ResponseSender<R, Codec>) -> Self {
-        Self { tx: responder, sequential: false, stop_on_error: false }
+        Self { tx: responder, sequential: false, stop_on_error: false, tracing: None }
     }
 }
 
@@ -237,7 +241,7 @@ where
     /// Creates a new response target with the specified call options.
     #[doc(hidden)]
     pub fn new(tx: ResponseSender<R, Codec>, sequential: bool, stop_on_error: bool) -> Self {
-        Self { tx, sequential, stop_on_error }
+        Self { tx, sequential, stop_on_error, tracing: None }
     }
 
     /// Whether the server shall dispatch the call inline, i.e. process it before
@@ -249,6 +253,40 @@ where
     /// Whether the server shall stop serving when the call fails.
     pub fn stop_on_error(&self) -> bool {
         self.stop_on_error
+    }
+
+    /// Tracing context of the caller, if it provided one.
+    pub fn tracing(&self) -> Option<TracingContext> {
+        self.tracing
+    }
+
+    /// Sets the tracing context.
+    #[doc(hidden)]
+    pub fn set_tracing(&mut self, tracing: Option<TracingContext>) {
+        self.tracing = tracing;
+    }
+
+    /// Creates the span for processing the call.
+    ///
+    /// The span is created at the specified level, using the target
+    /// `remoc::rtc::call` and recording the method name. Pass the full
+    /// method name, including the trait, as `method`.
+    /// [`LevelFilter::OFF`](tracing::level_filters::LevelFilter::OFF)
+    /// returns a disabled span.
+    ///
+    /// When the caller provided a [tracing context](TracingContext),
+    /// the span of the caller becomes the parent of the created span,
+    /// linking it into the distributed trace of the caller using the
+    /// active [tracing provider](crate::tracing::TracingProvider).
+    /// The identifiers of the caller are also recorded in the fields
+    /// `trace_id` and `span_id` of the span, so that the logs of
+    /// client and server can be correlated.
+    ///
+    /// Process the call within the returned span, for example by using
+    /// [`instrument`](tracing::Instrument::instrument) on the future
+    /// processing it.
+    pub fn span(&self, level: LevelFilter, method: &str) -> Span {
+        super::tracing::server_span(level, method, self.tracing.as_ref())
     }
 }
 
@@ -394,6 +432,24 @@ where
             Self::Pipeline { responder, .. } => responder.stop_on_error(),
         }
     }
+
+    /// Tracing context of the caller, if it provided one.
+    pub fn tracing(&self) -> Option<TracingContext> {
+        match self {
+            Self::Normal(responder) => responder.tracing(),
+            Self::Pipeline { responder, .. } => responder.tracing(),
+        }
+    }
+
+    /// Creates the span for processing the call.
+    ///
+    /// See [`Responder::span`] for details.
+    pub fn span(&self, level: LevelFilter, method: &str) -> Span {
+        match self {
+            Self::Normal(responder) => responder.span(level, method),
+            Self::Pipeline { responder, .. } => responder.span(level, method),
+        }
+    }
 }
 
 impl<R, Codec> PipelinableResponder<R, Codec>
@@ -425,10 +481,13 @@ where
             Self::Pipeline { req_rx, responder } => {
                 let pipelined = match result.split() {
                     Ok(client) => {
-                        crate::rtc::spawn(tracing::Instrument::in_current_span(async move {
-                            let mut req_rx = req_rx;
-                            let _ = super::ReqReceiver::forward(&mut req_rx, client).await;
-                        }));
+                        crate::rtc::spawn(tracing::Instrument::instrument(
+                            async move {
+                                let mut req_rx = req_rx;
+                                let _ = super::ReqReceiver::forward(&mut req_rx, client).await;
+                            },
+                            super::tracing::pipeline_forward_span(),
+                        ));
                         R::without_value()
                     }
                     Err(pipelined) => pipelined,
@@ -535,15 +594,16 @@ where
             req_rx: None,
             sequential: self.sequential,
             stop_on_error: self.stop_on_error,
+            tracing: self.tracing,
         })
     }
 
     type Current = transported::TransportedResponder<R, (), Codec>;
 
     fn from_current(current: Self::Current) -> Result<Self, crate::versioned::Error> {
-        let transported::TransportedResponder { tx, req_rx, sequential, stop_on_error } = current;
+        let transported::TransportedResponder { tx, req_rx, sequential, stop_on_error, tracing } = current;
         match (tx, req_rx) {
-            (transported::Sender::Full(tx), None) => Ok(Self { tx, sequential, stop_on_error }),
+            (transported::Sender::Full(tx), None) => Ok(Self { tx, sequential, stop_on_error, tracing }),
             _ => Err(transported::unsupported_combination()),
         }
     }
@@ -600,12 +660,14 @@ where
                 req_rx: None,
                 sequential: responder.sequential,
                 stop_on_error: responder.stop_on_error,
+                tracing: responder.tracing,
             },
             Self::Pipeline { req_rx, responder } => transported::ResponderRef {
                 tx: transported::SenderRef::WithoutValue(&responder.tx),
                 req_rx: Some(req_rx),
                 sequential: responder.sequential,
                 stop_on_error: responder.stop_on_error,
+                tracing: responder.tracing,
             },
         })
     }
@@ -613,13 +675,13 @@ where
     type Current = transported::TransportedResponder<R, <R as PipelinableResponse>::ReqReceiver, Codec>;
 
     fn from_current(current: Self::Current) -> Result<Self, crate::versioned::Error> {
-        let transported::TransportedResponder { tx, req_rx, sequential, stop_on_error } = current;
+        let transported::TransportedResponder { tx, req_rx, sequential, stop_on_error, tracing } = current;
         match (tx, req_rx) {
             (transported::Sender::Full(tx), None) => {
-                Ok(Self::Normal(Responder { tx, sequential, stop_on_error }))
+                Ok(Self::Normal(Responder { tx, sequential, stop_on_error, tracing }))
             }
             (transported::Sender::WithoutValue(tx), Some(req_rx)) => {
-                Ok(Self::Pipeline { req_rx, responder: Responder { tx, sequential, stop_on_error } })
+                Ok(Self::Pipeline { req_rx, responder: Responder { tx, sequential, stop_on_error, tracing } })
             }
             _ => Err(transported::unsupported_combination()),
         }
@@ -712,6 +774,9 @@ mod transported {
         #[serde(rename = "_3")]
         #[serde(skip_serializing_if = "crate::codec::skip::if_default")]
         pub stop_on_error: bool,
+        #[serde(rename = "_4")]
+        #[serde(skip_serializing_if = "crate::codec::skip::Option::is_none")]
+        pub tracing: Option<TracingContext>,
     }
 
     /// Transported response, for deserialization.
@@ -736,6 +801,9 @@ mod transported {
         #[serde(rename = "_3")]
         #[serde(default)]
         pub stop_on_error: bool,
+        #[serde(rename = "_4")]
+        #[serde(default = "none")]
+        pub tracing: Option<TracingContext>,
     }
 
     pub fn none<T>() -> Option<T> {

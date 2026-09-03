@@ -56,6 +56,30 @@
 //! [RFnProvider::set_max_concurrency](RFnProvider::set_max_concurrency)
 //! and queried via [RFnProvider::max_concurrency](RFnProvider::max_concurrency).
 //!
+//! # Tracing
+//!
+//! Calls of a remote function can create [tracing](::tracing) spans,
+//! one at the caller and one for processing the call where the function was created.
+//! The caller sends the [context](crate::tracing::TracingContext) of its span along with
+//! the call, so that the span processing it becomes a child of it.
+//! If an OpenTelemetry layer is installed on the tracing subscriber, both spans thus appear
+//! in one distributed trace; otherwise they share a random span id, which is recorded on
+//! both of them, so that the logs of both endpoints can be matched.
+//! See the [tracing](crate::tracing) module for details.
+//!
+//! By default no spans are created; use the `set_tracing_level` method of the wrapper
+//! to enable them at the specified level.
+//! The spans use the target `remoc::rfn::call` and are named after the function,
+//! which by default is derived from the wrapper and argument types and can be
+//! changed using the `set_name` method.
+//!
+//! Both settings are applied to the spans created at the caller and, as long as the
+//! wrapper has not been sent to a remote endpoint, to the spans processing the calls.
+//! A received wrapper can only change the spans of its own calls.
+//! The settings take effect for subsequent calls.
+//! The `set_tracing` method adjusts whether the caller creates a span and whether
+//! it sends the context, see [`Tracing`](crate::tracing::Tracing).
+//!
 //! # Alternatives
 //!
 //! If you need to expose several functions remotely that operate on the same object
@@ -192,10 +216,75 @@ macro_rules! arg_stub {
     };
 }
 
+/// Generates the accessors for the tracing settings of a remote function.
+macro_rules! trace_accessors {
+    ($wrapper:literal) => {
+        /// Name of the remote function.
+        ///
+        /// The name is used for the tracing spans of its calls.
+        /// Unless set, it is derived from the wrapper and argument types.
+        pub fn name(&self) -> String {
+            self.trace.name::<A>($wrapper)
+        }
+
+        /// Sets the name of the remote function.
+        ///
+        /// See the [module-level documentation](super) for details on tracing.
+        pub fn set_name(&mut self, name: impl Into<String>) {
+            self.trace.set_name(Some(name.into()));
+        }
+
+        /// The tracing performed for calls of the remote function at the client.
+        ///
+        /// This is [`Tracing::Both`](crate::tracing::Tracing::Both) by default.
+        pub fn tracing(&self) -> $crate::tracing::Tracing {
+            self.trace.tracing()
+        }
+
+        /// Sets the tracing performed for calls of the remote function at the client.
+        pub fn set_tracing(&mut self, tracing: $crate::tracing::Tracing) {
+            self.trace.set_tracing(tracing);
+        }
+
+        /// The level of the tracing spans of calls.
+        ///
+        /// This is [`LevelFilter::OFF`](::tracing::level_filters::LevelFilter::OFF)
+        /// by default, i.e. no spans are created.
+        pub fn tracing_level(&self) -> ::tracing::level_filters::LevelFilter {
+            self.trace.level()
+        }
+
+        /// Sets the level of the tracing spans of calls.
+        ///
+        /// See the [module-level documentation](super) for details on tracing.
+        pub fn set_tracing_level(&mut self, level: ::tracing::level_filters::LevelFilter) {
+            self.trace.set_level(level);
+        }
+
+        /// Sets the span within which calls of the remote function are processed.
+        ///
+        /// By default calls are processed within the span of the task serving the
+        /// remote function, which is detached from the span the function was created in,
+        /// so that the latter can close while the function lives on.
+        /// Setting a span, for example [`Span::current()`](::tracing::Span::current)
+        /// at creation, makes the processing of calls nest within it instead.
+        /// The span is kept open until the provider of the remote function is dropped or,
+        /// if it is kept, until the remote function is dropped.
+        /// A disabled span restores the default.
+        ///
+        /// This only takes effect if the wrapper has not been sent to a remote endpoint yet.
+        /// See the [module-level documentation](super) for details on tracing.
+        pub fn set_span(&mut self, span: ::tracing::Span) {
+            self.trace.set_span(span);
+        }
+    };
+}
+
 mod msg;
 mod rfn_const;
 mod rfn_mut;
 mod rfn_once;
+mod tracing;
 
 pub use rfn_const::{RFn, RFnProvider};
 pub use rfn_mut::{RFnMut, RFnMutProvider};

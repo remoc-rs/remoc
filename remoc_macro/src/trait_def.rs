@@ -4,7 +4,7 @@ use proc_macro2::TokenStream;
 use quote::{TokenStreamExt, format_ident, quote};
 use std::{collections::HashSet, str::FromStr};
 use syn::{
-    Attribute, GenericParam, Generics, Ident, Lifetime, LifetimeParam, Token, TypeParam, TypeParamBound,
+    Attribute, GenericParam, Generics, Ident, Lifetime, LifetimeParam, LitStr, Token, TypeParam, TypeParamBound,
     Visibility, WhereClause, braced,
     meta::ParseNestedMeta,
     parse::{Parse, ParseStream},
@@ -14,7 +14,7 @@ use syn::{
 
 use crate::{
     assoc_type::AssocType,
-    method::{SelfRef, TraitMethod},
+    method::{SelfRef, SpanLevel, TraitMethod},
     util::attribute_tokens,
 };
 
@@ -72,6 +72,8 @@ pub struct TraitDef {
     debug: bool,
     /// Server variants to generate.
     server_variants: Option<HashSet<ServerVariant>>,
+    /// Default level of the span created by the server for processing a call.
+    span_level: Option<SpanLevel>,
 }
 
 impl Parse for TraitDef {
@@ -158,6 +160,7 @@ impl Parse for TraitDef {
             debug: false,
             async_trait: false,
             server_variants: None,
+            span_level: None,
         })
     }
 }
@@ -191,6 +194,21 @@ impl TraitDef {
             Ok(())
         } else if meta.path.is_ident("debug") {
             self.debug = true;
+            Ok(())
+        } else if meta.path.is_ident("tracing") {
+            let mut level = None;
+            if meta.input.peek(token::Paren) {
+                meta.parse_nested_meta(|meta| {
+                    if meta.path.is_ident("level") {
+                        let lit: LitStr = meta.value()?.parse()?;
+                        level = Some(SpanLevel::parse(&lit)?);
+                        Ok(())
+                    } else {
+                        Err(meta.error("expected `level`"))
+                    }
+                })?;
+            }
+            self.span_level = Some(level.unwrap_or(SpanLevel::Info));
             Ok(())
         } else if meta.path.is_ident("server") || meta.path.is_ident("Server") {
             let content;
@@ -619,23 +637,24 @@ impl TraitDef {
         let (mut value_clauses, mut ref_clauses, mut ref_mut_clauses) = (quote! {}, quote! {}, quote! {});
         let (mut value_names, mut ref_names, mut ref_mut_names) = (quote! {}, quote! {}, quote! {});
         let (mut value_seqs, mut ref_seqs, mut ref_mut_seqs) = (quote! {}, quote! {}, quote! {});
+        let span_level = self.span_level.unwrap_or(SpanLevel::Off);
         for md in &self.methods {
             match md.self_ref {
                 SelfRef::Value => {
                     value_entries.append_all(md.request_enum_entry(assoc));
-                    value_clauses.append_all(md.dispatch_discriminator());
+                    value_clauses.append_all(md.dispatch_discriminator(span_level));
                     value_names.append_all(md.method_name_clause());
                     value_seqs.append_all(md.sequential_clause());
                 }
                 SelfRef::Ref => {
                     ref_entries.append_all(md.request_enum_entry(assoc));
-                    ref_clauses.append_all(md.dispatch_discriminator());
+                    ref_clauses.append_all(md.dispatch_discriminator(span_level));
                     ref_names.append_all(md.method_name_clause());
                     ref_seqs.append_all(md.sequential_clause());
                 }
                 SelfRef::RefMut => {
                     ref_mut_entries.append_all(md.request_enum_entry(assoc));
-                    ref_mut_clauses.append_all(md.dispatch_discriminator());
+                    ref_mut_clauses.append_all(md.dispatch_discriminator(span_level));
                     ref_mut_names.append_all(md.method_name_clause());
                     ref_mut_seqs.append_all(md.sequential_clause());
                 }
@@ -1909,7 +1928,13 @@ impl TraitDef {
         // Generate client method implementations.
         let mut methods = quote! {};
         for m in &self.methods {
-            methods.append_all(m.client_method(&req_value, &req_ref, &req_ref_mut, assoc));
+            methods.append_all(m.client_method(
+                &req_value,
+                &req_ref,
+                &req_ref_mut,
+                assoc,
+                self.span_level.unwrap_or(SpanLevel::Off),
+            ));
         }
 
         // Associated type items for the client's `impl Trait for Client`.
@@ -1932,6 +1957,7 @@ impl TraitDef {
                             max_response_size: self.max_response_size,
                             sequential: self.sequential,
                             stop_on_error: self.stop_on_error,
+                            tracing: self.tracing,
                             drop_tx: self.drop_tx.clone(),
                             monitor: self.monitor.clone(),
                         }
@@ -1959,6 +1985,7 @@ impl TraitDef {
                 max_response_size: u64,
                 sequential: bool,
                 stop_on_error: bool,
+                tracing: ::remoc::tracing::Tracing,
                 drop_tx: ::remoc::rtc::local_broadcast::Sender<()>,
                 monitor: ::std::sync::Arc<dyn ::remoc::rtc::monitor::ClientMonitor<#req_params>>,
             }
@@ -1979,6 +2006,9 @@ impl TraitDef {
                     #[serde(default)]
                     #[serde(skip_serializing_if = "::remoc::codec::skip::if_default_ref")]
                     stop_on_error: bool => "_3",
+                    #[serde(default)]
+                    #[serde(skip_serializing_if = "::remoc::codec::skip::if_default_ref")]
+                    tracing: ::remoc::tracing::Tracing => "_4",
                 }
                 default {
                     drop_tx = ::remoc::rtc::empty_client_drop_tx(),
@@ -1991,10 +2021,11 @@ impl TraitDef {
 
             impl #impl_generics_impl #client_ident #impl_generics_ty #impl_generics_where {
                 /// Creates the response channel for a request, carrying the call
-                /// options of this client.
+                /// options of this client and the tracing context of the call.
                 #[doc(hidden)]
                 pub fn __rsp<__R>(
                     &self,
+                    tracing: ::std::option::Option<::remoc::tracing::TracingContext>,
                 ) -> (
                     ::remoc::rtc::Responder<__R, Codec>,
                     ::remoc::rch::oneshot::Receiver<::remoc::rtc::TransportedResponse<__R>, Codec>,
@@ -2004,9 +2035,10 @@ impl TraitDef {
                     ::remoc::rtc::TransportedResponse<__R>: ::remoc::RemoteSend,
                 {
                     let (responder, response_rx) = ::remoc::rtc::response_channel(::remoc::rtc::Client::max_response_size(self));
-                    let responder = ::remoc::rtc::Responder::new(
+                    let mut responder = ::remoc::rtc::Responder::new(
                         responder, self.sequential, self.stop_on_error,
                     );
+                    responder.set_tracing(tracing);
                     (responder, response_rx)
                 }
 
@@ -2020,6 +2052,7 @@ impl TraitDef {
                         max_response_size: ::remoc::rch::default_max_item_size(),
                         sequential: false,
                         stop_on_error: false,
+                        tracing: ::remoc::tracing::Tracing::default(),
                         drop_tx: ::remoc::rtc::empty_client_drop_tx(),
                         monitor: ::remoc::rtc::monitor::default_client_monitor(),
                     }
@@ -2087,6 +2120,14 @@ impl TraitDef {
 
                 fn set_stop_on_error(&mut self, stop_on_error: bool) {
                     self.stop_on_error = stop_on_error
+                }
+
+                fn tracing(&self) -> ::remoc::tracing::Tracing {
+                    self.tracing
+                }
+
+                fn set_tracing(&mut self, tracing: ::remoc::tracing::Tracing) {
+                    self.tracing = tracing
                 }
             }
 

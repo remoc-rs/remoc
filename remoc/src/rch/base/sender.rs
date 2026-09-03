@@ -597,7 +597,7 @@ impl ErasedSender {
 
         // Spawn registered tasks.
         for task in tasks {
-            wokio::spawn(task.in_current_span());
+            wokio::spawn(task.instrument(crate::util::task_span!(::tracing::Level::TRACE, "channel_task")));
         }
 
         Ok(())

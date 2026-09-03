@@ -1,9 +1,12 @@
+use ::tracing::Instrument;
 use futures::{Future, future, pin_mut};
-use std::{fmt, sync::Arc};
+use std::{
+    fmt,
+    sync::{Arc, Mutex},
+};
 use tokio::sync::Semaphore;
-use tracing::Instrument;
 
-use super::{CallError, msg::RFnRequest};
+use super::{CallError, msg::RFnRequest, tracing};
 use crate::{
     RemoteSend, codec,
     rch::{mpsc, oneshot},
@@ -15,6 +18,7 @@ use crate::{
 pub struct RFnProvider {
     keep_tx: Option<tokio::sync::oneshot::Sender<()>>,
     max_concurrency_tx: tokio::sync::watch::Sender<usize>,
+    settings: Arc<Mutex<tracing::ProviderSettings>>,
 }
 
 impl fmt::Debug for RFnProvider {
@@ -71,7 +75,11 @@ impl RFnProvider {
 
 impl Drop for RFnProvider {
     fn drop(&mut self) {
-        // empty
+        // Release the span calls are processed within, unless the provider
+        // is kept, so that the span can close before the serving task ends.
+        if self.keep_tx.is_some() {
+            self.settings.lock().unwrap_or_else(|err| err.into_inner()).set_span(::tracing::Span::none());
+        }
     }
 }
 
@@ -110,25 +118,29 @@ impl Drop for RFnProvider {
 /// ```
 pub struct RFn<A, R, Codec = codec::Default> {
     request_tx: mpsc::Sender<RFnRequest<A, R, Codec>, Codec>,
+    trace: tracing::Settings,
 }
 
 crate::versioned::compact::impl_struct! {
     RFn<A, R, Codec>,
     fields {
         request_tx: mpsc::Sender<RFnRequest<A, R, Codec>, Codec> => "_0",
+        #[serde(default)]
+        #[serde(skip_serializing_if = "tracing::Settings::is_default_ref")]
+        trace: tracing::Settings => "_1",
     }
     where A: RemoteSend, R: RemoteSend, Codec: codec::Codec
 }
 
 impl<A, R, Codec> Clone for RFn<A, R, Codec> {
     fn clone(&self) -> Self {
-        Self { request_tx: self.request_tx.clone() }
+        Self { request_tx: self.request_tx.clone(), trace: self.trace.clone() }
     }
 }
 
 impl<A, R, Codec> fmt::Debug for RFn<A, R, Codec> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("RFn").finish()
+        f.debug_struct("RFn").field("name", &self.trace.name::<A>("RFn")).finish()
     }
 }
 
@@ -162,6 +174,8 @@ where
         let (max_concurrency_tx, mut max_concurrency_rx) =
             tokio::sync::watch::channel(RFnProvider::DEFAULT_MAX_CONCURRENCY);
         let fun = Arc::new(fun);
+        let provider_settings = tracing::ProviderSettings::new();
+        let task_settings = provider_settings.clone();
 
         wokio::spawn(
             async move {
@@ -186,14 +200,15 @@ where
 
                         req_res = request_rx.recv() => {
                             match req_res {
-                                Ok(Some(RFnRequest {argument, result_tx})) => {
+                                Ok(Some(RFnRequest {argument, result_tx, tracing})) => {
                                     let fun_task = fun.clone();
                                     let semaphore = semaphore.clone();
+                                    let span = task_settings.lock().unwrap().server_span::<A>("RFn", tracing.as_ref());
                                     wokio::spawn(async move {
                                         let _permit = semaphore.acquire().await.ok();
                                         let result = fun_task(argument).await;
                                         let _ = result_tx.send(result);
-                                    }.in_current_span());
+                                    }.instrument(span));
                                 }
                                 Ok(None) => break,
                                 Err(err) if err.is_disconnected() => break,
@@ -203,20 +218,29 @@ where
                     }
                 }
             }
-            .in_current_span(),
+            .instrument(crate::util::task_span!(::tracing::Level::TRACE, "rfn_provider")),
         );
 
-        (Self { request_tx }, RFnProvider { keep_tx: Some(keep_tx), max_concurrency_tx })
+        let rfn = Self { request_tx, trace: tracing::Settings::new(&provider_settings) };
+        (rfn, RFnProvider { keep_tx: Some(keep_tx), max_concurrency_tx, settings: provider_settings })
     }
 
     /// Try to call the remote function.
     async fn try_call_int(&self, argument: A) -> Result<R, CallError> {
-        let (result_tx, result_rx) = oneshot::channel();
-        let _ = self.request_tx.send(RFnRequest { argument, result_tx }).await;
+        let (span, tracing) = self.trace.client_call::<A>("RFn");
 
-        let result = result_rx.await?;
-        Ok(result)
+        async move {
+            let (result_tx, result_rx) = oneshot::channel();
+            let _ = self.request_tx.send(RFnRequest { argument, result_tx, tracing }).await;
+
+            let result = result_rx.await?;
+            Ok(result)
+        }
+        .instrument(span)
+        .await
     }
+
+    trace_accessors!("RFn");
 }
 
 impl<A, RT, RE, Codec> RFn<A, Result<RT, RE>, Codec>

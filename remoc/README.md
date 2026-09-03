@@ -242,6 +242,22 @@ complete compatibility table and format limitations.
 [versioned]: https://docs.rs/remoc/latest/remoc/versioned/index.html
 
 
+## Distributed tracing
+
+Remote trait and function calls can create [tracing] spans, one at the caller
+for the duration of the call and one at the server for processing it.
+The identity of the caller's span travels with the call, so the span of the
+server becomes a child of it.
+If an [OpenTelemetry] layer is installed on the tracing subscriber, its trace
+and span ids are used and the spans of both endpoints show up in one
+distributed trace in your collector.
+Without it, a random span id is recorded on both spans, so that the log lines
+of client and server can still be matched.
+
+[tracing]: https://docs.rs/tracing
+[OpenTelemetry]: https://opentelemetry.io
+
+
 ## Crate features
 
 Most functionality of Remoc is gated by crate features.
@@ -254,6 +270,8 @@ The following features are available:
   * `robj` enables remote object utilities provided by the `robj` module.
   * `robs` enables remotely observable collections provided by the `robs` module.
   * `rtc` enables remote trait calling provided by the `rtc` module.
+  * `otel` links the spans of remote calls into OpenTelemetry traces, see
+    [Distributed tracing](#distributed-tracing).
 
 The meta-feature `full` enables all features from above but no additional codecs.
 By default the `full` feature is enabled.

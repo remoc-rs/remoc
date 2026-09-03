@@ -245,7 +245,7 @@ where
                     () = do_send => (),
                 }
             }
-            .in_current_span(),
+            .instrument(crate::util::task_span!(::tracing::Level::TRACE, "lazy_blob_provider")),
         );
 
         let lazy_blob = LazyBlob { req_tx, len, fetch_task: Default::default() };

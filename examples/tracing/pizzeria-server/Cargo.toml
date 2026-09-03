@@ -1,0 +1,10 @@
+[package]
+name = "pizzeria-server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+pizzeria = { path = "../pizzeria" }
+remoc = { path = "../../../remoc" }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "signal", "sync", "time"] }
+tracing = "0.1"

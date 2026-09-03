@@ -415,7 +415,7 @@ where
 
                         storage.remove_entry(id);
                     }
-                    .in_current_span(),
+                    .instrument(crate::util::task_span!(::tracing::Level::TRACE, "handle_provider")),
                 );
 
                 (id, dropped_tx)

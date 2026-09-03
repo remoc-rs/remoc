@@ -1,8 +1,11 @@
+use ::tracing::Instrument;
 use futures::{Future, future, pin_mut};
-use std::fmt;
-use tracing::Instrument;
+use std::{
+    fmt,
+    sync::{Arc, Mutex},
+};
 
-use super::{CallError, msg::RFnRequest};
+use super::{CallError, msg::RFnRequest, tracing};
 use crate::{
     RemoteSend, codec,
     rch::{mpsc, oneshot},
@@ -13,6 +16,7 @@ use crate::{
 /// Dropping the provider will stop making the function available for remote calls.
 pub struct RFnMutProvider {
     keep_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    settings: Arc<Mutex<tracing::ProviderSettings>>,
 }
 
 impl fmt::Debug for RFnMutProvider {
@@ -40,7 +44,11 @@ impl RFnMutProvider {
 
 impl Drop for RFnMutProvider {
     fn drop(&mut self) {
-        // empty
+        // Release the span calls are processed within, unless the provider
+        // is kept, so that the span can close before the serving task ends.
+        if self.keep_tx.is_some() {
+            self.settings.lock().unwrap_or_else(|err| err.into_inner()).set_span(::tracing::Span::none());
+        }
     }
 }
 
@@ -81,19 +89,23 @@ impl Drop for RFnMutProvider {
 /// ```
 pub struct RFnMut<A, R, Codec = codec::Default> {
     request_tx: mpsc::Sender<RFnRequest<A, R, Codec>, Codec, 1>,
+    trace: tracing::Settings,
 }
 
 crate::versioned::compact::impl_struct! {
     RFnMut<A, R, Codec>,
     fields {
         request_tx: mpsc::Sender<RFnRequest<A, R, Codec>, Codec, 1> => "_0",
+        #[serde(default)]
+        #[serde(skip_serializing_if = "tracing::Settings::is_default_ref")]
+        trace: tracing::Settings => "_1",
     }
     where A: RemoteSend, R: RemoteSend, Codec: codec::Codec
 }
 
 impl<A, R, Codec> fmt::Debug for RFnMut<A, R, Codec> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("RFnMut").finish()
+        f.debug_struct("RFnMut").field("name", &self.trace.name::<A>("RFnMut")).finish()
     }
 }
 
@@ -126,6 +138,8 @@ where
         let request_tx = request_tx.set_buffer();
         let mut request_rx = request_rx.set_buffer::<1>();
         let (keep_tx, keep_rx) = tokio::sync::oneshot::channel();
+        let provider_settings = tracing::ProviderSettings::new();
+        let task_settings = provider_settings.clone();
 
         wokio::spawn(
             async move {
@@ -144,8 +158,9 @@ where
 
                         req_res = request_rx.recv() => {
                             match req_res {
-                                Ok(Some(RFnRequest {argument, result_tx})) => {
-                                    let result = fun(argument).await;
+                                Ok(Some(RFnRequest {argument, result_tx, tracing})) => {
+                                    let span = task_settings.lock().unwrap().server_span::<A>("RFnMut", tracing.as_ref());
+                                    let result = fun(argument).instrument(span).await;
                                     let _ = result_tx.send(result);
                                 }
                                 Ok(None) => break,
@@ -156,20 +171,29 @@ where
                     }
                 }
             }
-            .in_current_span(),
+            .instrument(crate::util::task_span!(::tracing::Level::TRACE, "rfn_provider")),
         );
 
-        (Self { request_tx }, RFnMutProvider { keep_tx: Some(keep_tx) })
+        let rfn = Self { request_tx, trace: tracing::Settings::new(&provider_settings) };
+        (rfn, RFnMutProvider { keep_tx: Some(keep_tx), settings: provider_settings })
     }
 
     /// Try to call the remote function.
     async fn try_call_int(&mut self, argument: A) -> Result<R, CallError> {
-        let (result_tx, result_rx) = oneshot::channel();
-        let _ = self.request_tx.send(RFnRequest { argument, result_tx }).await;
+        let (span, tracing) = self.trace.client_call::<A>("RFnMut");
 
-        let result = result_rx.await?;
-        Ok(result)
+        async move {
+            let (result_tx, result_rx) = oneshot::channel();
+            let _ = self.request_tx.send(RFnRequest { argument, result_tx, tracing }).await;
+
+            let result = result_rx.await?;
+            Ok(result)
+        }
+        .instrument(span)
+        .await
     }
+
+    trace_accessors!("RFnMut");
 }
 
 impl<A, RT, RE, Codec> RFnMut<A, Result<RT, RE>, Codec>

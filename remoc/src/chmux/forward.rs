@@ -93,7 +93,7 @@ pub(crate) async fn forward(rx: &mut super::Receiver, tx: &mut super::Sender) ->
                     tracing::debug!("port forwarding for id {id} failed: {err}");
                 }
             }
-            .in_current_span(),
+            .instrument(crate::util::task_span!(::tracing::Level::TRACE, "port_forward", id)),
         );
     }
 

@@ -1,8 +1,11 @@
+use ::tracing::Instrument;
 use futures::Future;
-use std::fmt;
-use tracing::Instrument;
+use std::{
+    fmt,
+    sync::{Arc, Mutex},
+};
 
-use super::{CallError, msg::RFnRequest};
+use super::{CallError, msg::RFnRequest, tracing};
 use crate::{RemoteSend, codec, rch::oneshot};
 
 /// Provides a remotely callable async [FnOnce] function.
@@ -10,6 +13,7 @@ use crate::{RemoteSend, codec, rch::oneshot};
 /// Dropping the provider will stop making the function available for remote calls.
 pub struct RFnOnceProvider {
     keep_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    settings: Arc<Mutex<tracing::ProviderSettings>>,
 }
 
 impl fmt::Debug for RFnOnceProvider {
@@ -37,7 +41,11 @@ impl RFnOnceProvider {
 
 impl Drop for RFnOnceProvider {
     fn drop(&mut self) {
-        // empty
+        // Release the span calls are processed within, unless the provider
+        // is kept, so that the span can close before the serving task ends.
+        if self.keep_tx.is_some() {
+            self.settings.lock().unwrap_or_else(|err| err.into_inner()).set_span(::tracing::Span::none());
+        }
     }
 }
 
@@ -73,19 +81,23 @@ impl Drop for RFnOnceProvider {
 /// ```
 pub struct RFnOnce<A, R, Codec = codec::Default> {
     request_tx: oneshot::Sender<RFnRequest<A, R, Codec>, Codec>,
+    trace: tracing::Settings,
 }
 
 crate::versioned::compact::impl_struct! {
     RFnOnce<A, R, Codec>,
     fields {
         request_tx: oneshot::Sender<RFnRequest<A, R, Codec>, Codec> => "_0",
+        #[serde(default)]
+        #[serde(skip_serializing_if = "tracing::Settings::is_default_ref")]
+        trace: tracing::Settings => "_1",
     }
     where A: RemoteSend, R: RemoteSend, Codec: codec::Codec
 }
 
 impl<A, R, Codec> fmt::Debug for RFnOnce<A, R, Codec> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("RFnOnce").finish()
+        f.debug_struct("RFnOnce").field("name", &self.trace.name::<A>("RFnOnce")).finish()
     }
 }
 
@@ -116,6 +128,8 @@ where
     {
         let (request_tx, request_rx) = oneshot::channel();
         let (keep_tx, keep_rx) = tokio::sync::oneshot::channel();
+        let provider_settings = tracing::ProviderSettings::new();
+        let task_settings = provider_settings.clone();
 
         wokio::spawn(
             async move {
@@ -125,27 +139,37 @@ where
                     Err(_) = keep_rx => (),
 
                     req_res = request_rx => {
-                        if let Ok(RFnRequest {argument, result_tx}) = req_res {
-                            let result = fun(argument).await;
+                        if let Ok(RFnRequest {argument, result_tx, tracing}) = req_res {
+                            let span = task_settings.lock().unwrap().server_span::<A>("RFnOnce", tracing.as_ref());
+                            let result = fun(argument).instrument(span).await;
                             let _ = result_tx.send(result);
                         }
                     }
                 }
             }
-            .in_current_span(),
+            .instrument(crate::util::task_span!(::tracing::Level::TRACE, "rfn_provider")),
         );
 
-        (Self { request_tx }, RFnOnceProvider { keep_tx: Some(keep_tx) })
+        let rfn = Self { request_tx, trace: tracing::Settings::new(&provider_settings) };
+        (rfn, RFnOnceProvider { keep_tx: Some(keep_tx), settings: provider_settings })
     }
 
     /// Try to call the remote function.
     async fn try_call_int(self, argument: A) -> Result<R, CallError> {
-        let (result_tx, result_rx) = oneshot::channel();
-        let _ = self.request_tx.send(RFnRequest { argument, result_tx });
+        let (span, tracing) = self.trace.client_call::<A>("RFnOnce");
 
-        let result = result_rx.await?;
-        Ok(result)
+        async move {
+            let (result_tx, result_rx) = oneshot::channel();
+            let _ = self.request_tx.send(RFnRequest { argument, result_tx, tracing });
+
+            let result = result_rx.await?;
+            Ok(result)
+        }
+        .instrument(span)
+        .await
     }
+
+    trace_accessors!("RFnOnce");
 }
 
 impl<A, RT, RE, Codec> RFnOnce<A, Result<RT, RE>, Codec>

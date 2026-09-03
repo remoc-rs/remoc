@@ -80,7 +80,10 @@ where
 {
     pub(crate) fn new(rx: Receiver<T, Codec, BUFFER, MAX_ITEM_SIZE>, wait_on_empty: bool) -> Self {
         let (sub_tx, sub_rx) = tokio::sync::mpsc::channel(1);
-        wokio::spawn(Self::distribute(rx, sub_rx, wait_on_empty).in_current_span());
+        wokio::spawn(
+            Self::distribute(rx, sub_rx, wait_on_empty)
+                .instrument(crate::util::task_span!(::tracing::Level::TRACE, "mpsc_distributor")),
+        );
         Self { sub_tx }
     }
 

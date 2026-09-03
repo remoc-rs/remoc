@@ -315,7 +315,7 @@ where
             res = tx.send(value) => res?,
         }
 
-        wokio::spawn(conn.in_current_span());
+        wokio::spawn(conn.instrument(crate::util::task_span!(::tracing::Level::TRACE, "connection")));
 
         Ok(())
     }
@@ -339,7 +339,7 @@ where
             }
         };
 
-        wokio::spawn(conn.in_current_span());
+        wokio::spawn(conn.instrument(crate::util::task_span!(::tracing::Level::TRACE, "connection")));
 
         Ok(value)
     }

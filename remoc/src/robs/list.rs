@@ -223,7 +223,10 @@ where
         let (sub_tx, sub_rx) = mpsc::unbounded_channel();
         let len = Arc::new(AtomicUsize::new(initial.len()));
         let subscriber_count = Arc::new(AtomicUsize::new(0));
-        wokio::spawn(Self::task(initial, rx, sub_rx, subscriber_count.clone()).in_current_span());
+        wokio::spawn(
+            Self::task(initial, rx, sub_rx, subscriber_count.clone())
+                .instrument(crate::util::task_span!(::tracing::Level::TRACE, "robs_list")),
+        );
         Self {
             tx,
             change: ChangeSender::new(),
@@ -716,7 +719,7 @@ where
                     }
                 }
             }
-            .in_current_span(),
+            .instrument(crate::util::task_span!(::tracing::Level::TRACE, "robs_mirror")),
         );
 
         MirroredList { inner: Some(inner), changed_rx, _dropped_tx: dropped_tx }

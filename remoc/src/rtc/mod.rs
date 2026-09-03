@@ -152,6 +152,25 @@
 //! Rate limiting, limiting the number of concurrent calls and rejecting incompatible
 //! endpoints are [provided](monitor#structs).
 //!
+//! # Tracing
+//!
+//! Specify the `tracing` argument of the [remote attribute](remote) to have the client
+//! create a [tracing](::tracing) span for each call and the server one for processing it.
+//! The client sends the [context](crate::tracing::TracingContext) of its span along with
+//! the request, so that the span of the server becomes a child of it.
+//! If an OpenTelemetry layer is installed on the tracing subscriber, both spans thus appear
+//! in one distributed trace; otherwise they share a random span id, which is recorded on
+//! both of them, so that the logs of client and server can be matched.
+//!
+//! Enable tracing for the whole trait or set the level per method using the `#[tracing]`
+//! attribute; see the [attribute documentation](remote#tracing) for both.
+//! [`Client::set_tracing`] adjusts per client whether a span is created and whether
+//! the context is sent.
+//!
+//! See the [tracing](crate::tracing) module for how the identifiers are obtained and the
+//! [tracing example](https://github.com/remoc-rs/remoc/tree/master/examples/tracing)
+//! for the complete setup, including span export to a collector.
+//!
 //! # Error handling
 //!
 //! Since a remote trait call can fail due to connection problems, the return type
@@ -416,6 +435,11 @@ pub use response::{
 #[doc(hidden)]
 pub use response::{ResponseErrorSender, complete_call, response_channel, response_error_channel};
 
+mod tracing;
+#[doc(hidden)]
+pub use tracing::{client_call, pipeline_forward_span};
+
+#[doc(hidden)]
 use std::{
     error::Error,
     fmt,
@@ -486,23 +510,34 @@ pub const DEFAULT_PARALLELISM: usize = 32;
 /// Default implementations of methods may be provided.
 /// However, this requires specifying [`Send`] and [`Sync`] as supertraits of the remote trait.
 ///
-/// # Attributes
+/// # Arguments
 ///
-/// If the `clone` argument is specified (by invoking the attribute macro as `#[remoc::rtc::remote(clone)]`),
-/// the generated `TraitClient` will even be [clonable](std::clone::Clone) when the trait contains
-/// methods taking the receiver by mutable reference (`&mut self`).
+/// The following arguments can be passed to the attribute, for example as
+/// `#[remoc::rtc::remote(clone, server(SharedMut))]`.
+///
+/// ## `clone`
+///
+/// If the `clone` argument is specified, the generated `TraitClient` will even be
+/// [clonable](std::clone::Clone) when the trait contains methods taking the receiver
+/// by mutable reference (`&mut self`).
 /// In this case the client can invoke more than one mutable method simultaneously; however,
 /// the execution on the server will be serialized through locking.
 ///
-/// If the `async_trait` argument is specified (by invoking the attribute macro as `#[remoc::rtc::remote(async_trait)]`),
-/// the remote trait will be processed through the [`#[async_trait] macro`](https://docs.rs/async-trait), enabling
-/// `dyn` dispatch. You must then include `async-trait` as a dependency in your `Cargo.toml` and apply the
+/// ## `async_trait`
+///
+/// If the `async_trait` argument is specified, the remote trait will be processed through the
+/// [`#[async_trait]` macro](https://docs.rs/async-trait), enabling `dyn` dispatch.
+/// You must then include `async-trait` as a dependency in your `Cargo.toml` and apply the
 /// `#[async_trait::async_trait]` attribute on all implementations of the trait.
 ///
-/// If the `debug` argument is specified (by invoking the attribute macro as `#[remoc::rtc::remote(debug)]`),
-/// the generated request enums implement [`Debug`](std::fmt::Debug), showing the called method and its
-/// arguments. This requires every method argument and every associated type to implement
+/// ## `debug`
+///
+/// If the `debug` argument is specified, the generated request enums implement
+/// [`Debug`](std::fmt::Debug), showing the called method and its arguments.
+/// This requires every method argument and every associated type to implement
 /// [`Debug`](std::fmt::Debug) as well.
+///
+/// ## `server(...)`
 ///
 /// The `server(...)` argument allows to limit the generated server variants.
 /// Supported variants are: `Value`, `Ref`, `RefMut`, `Shared`, `SharedMut`.
@@ -514,8 +549,43 @@ pub const DEFAULT_PARALLELISM: usize = 32;
 /// this is useful when the requests are only handled through the request receiver.
 /// The request receiver `TraitReqReceiver` is always generated.
 ///
+/// ## `tracing`
+///
+/// The `tracing` argument makes the generated client and servers create
+/// [tracing](https://docs.rs/tracing) spans for each call: one at the client,
+/// covering the call, and one at the server, covering its processing.
+/// The latter joins the trace of the caller; see [`Tracing`](crate::tracing::Tracing)
+/// for the details and how to adjust this per client.
+/// By default no span is created, thus, like for local methods, tracing is opted
+/// into per trait or method.
+/// Bare `tracing` uses level `"info"`, analogous to `#[instrument]` on a local method;
+/// `tracing(level = "...")` sets one of `"error"`, `"warn"`, `"info"`, `"debug"`,
+/// `"trace"` or `"off"`.
+/// The level can be overridden per method using the `#[tracing]` method attribute
+/// described below.
+///
+/// The span records the method name using the target `remoc::rtc::call` and, when the
+/// caller provided a [tracing context](crate::tracing::TracingContext), it is linked to the distributed
+/// trace of the caller; see [`Responder::span`] for details.
+///
+/// # Method attributes
+///
+/// The following attributes can be applied on the methods of the trait.
+///
+/// ## `#[tracing]`
+///
+/// The `#[tracing]` or `#[tracing(level = "...")]` attribute sets the level of the
+/// tracing spans for calls to that method, overriding the `tracing` argument of the
+/// trait described above.
+/// Use `#[tracing(level = "off")]` to exclude a cheap and frequently called method
+/// from tracing.
+///
+/// ## `#[no_cancel]`
+///
 /// If the `#[no_cancel]` attribute is applied on a trait method, it will run to completion,
 /// even if the client cancels the request by dropping the future.
+///
+/// ## `#[pipelinable]`
 ///
 /// If the `#[pipelinable]` attribute is applied on a trait method returning the
 /// [client](Client) of another remotable trait, a twin method called `<name>_pipelined`
@@ -540,6 +610,8 @@ pub const DEFAULT_PARALLELISM: usize = 32;
 /// See the [pipelining] module for how to combine the resulting calls and in which order
 /// the server executes them.
 ///
+/// ## `#[serde(...)]`
+///
 /// All [serde field attributes](https://serde.rs/field-attrs.html) `#[serde(...)]`
 /// are allowed on the arguments of the functions.
 /// They will be transferred to the respective field of the request struct that will
@@ -553,6 +625,11 @@ pub use remoc_macro::remote;
 ///
 /// One is generated per remotable trait and kind of `self` reference, holding one
 /// variant per method. [Monitors](monitor) are generic over them.
+///
+/// # Compatibility
+///
+/// This trait is meant to be implemented only by the code generated by the
+/// [remote attribute](remote). Implementing it by hand is not supported.
 pub trait ReqEnum {
     /// The name of the remotely callable trait this request enum belongs to.
     fn trait_name() -> &'static str;
@@ -623,6 +700,11 @@ where
 }
 
 /// Client of a remotable trait.
+///
+/// # Compatibility
+///
+/// This trait is meant to be implemented only by the code generated by the
+/// [remote attribute](remote). Implementing it by hand is not supported.
 pub trait Client {
     /// The [request receiver](ReqReceiver) of the same remotable trait.
     ///
@@ -712,6 +794,22 @@ pub trait Client {
 
     /// Sets whether the server shall stop serving when a call made by this client fails.
     fn set_stop_on_error(&mut self, stop_on_error: bool);
+
+    /// The [tracing](crate::tracing::Tracing) performed for the calls of this client.
+    ///
+    /// This is [`Tracing::Both`](crate::tracing::Tracing::Both) by default: for each call to a method that has
+    /// tracing enabled, a span is created at the client and the
+    /// [tracing context](crate::tracing::TracingContext) is sent to the server together with
+    /// the request, so that the spans of the server become children of it.
+    ///
+    /// The tracing context is obtained from the registered
+    /// [tracing providers](crate::tracing::TracingProvider) for the span of the call or, if
+    /// none is created, for the current span. Nothing is sent when no provider
+    /// yields a context for that span.
+    fn tracing(&self) -> crate::tracing::Tracing;
+
+    /// Sets the [tracing](crate::tracing::Tracing) performed for the calls of this client.
+    fn set_tracing(&mut self, tracing: crate::tracing::Tracing);
 }
 
 /// A future that completes when the server or client has been dropped
@@ -742,6 +840,12 @@ impl Future for Closed {
 }
 
 /// Base trait shared between all server variants of a remotable trait.
+///
+/// # Compatibility
+///
+/// This trait is meant to be implemented only by the code generated by the
+/// [remote attribute](remote). Implementing it by hand is not supported;
+/// members may be added to it at any time.
 pub trait ServerBase {
     /// The client type, which can be sent to a remote endpoint.
     type Client: Client;
@@ -759,6 +863,11 @@ pub trait ServerBase {
 /// This variant processes calls one at a time and supports methods that consume
 /// `self`. The future returned by [`serve`](Self::serve) must be polled for calls
 /// to be processed.
+///
+/// # Compatibility
+///
+/// This trait is meant to be implemented only by the code generated by the
+/// [remote attribute](remote). Implementing it by hand is not supported.
 pub trait Server<Target, Codec>: ServerBase
 where
     Self: Sized,
@@ -803,6 +912,11 @@ where
 ///
 /// Calls are processed one at a time. The server cannot outlive the borrowed
 /// target, and its [`serve`](Self::serve) future must be polled.
+///
+/// # Compatibility
+///
+/// This trait is meant to be implemented only by the code generated by the
+/// [remote attribute](remote). Implementing it by hand is not supported.
 pub trait ServerRef<'target, Target, Codec>: ServerBase
 where
     Self: Sized,
@@ -845,6 +959,11 @@ where
 ///
 /// Calls are processed one at a time. The server cannot outlive the borrowed
 /// target, and its [`serve`](Self::serve) future must be polled.
+///
+/// # Compatibility
+///
+/// This trait is meant to be implemented only by the code generated by the
+/// [remote attribute](remote). Implementing it by hand is not supported.
 pub trait ServerRefMut<'target, Target, Codec>: ServerBase
 where
     Self: Sized,
@@ -887,6 +1006,11 @@ where
 ///
 /// The target is held in an [`Arc`]. Calls can be processed concurrently when
 /// [`serve`](Self::serve) is invoked with `spawn` set to `true`.
+///
+/// # Compatibility
+///
+/// This trait is meant to be implemented only by the code generated by the
+/// [remote attribute](remote). Implementing it by hand is not supported.
 pub trait ServerShared<Target, Codec>: ServerBase
 where
     Self: Sized,
@@ -945,6 +1069,11 @@ where
 ///
 /// The target is held in a Tokio [`RwLock`](tokio::sync::RwLock). Immutable calls
 /// may run concurrently, while mutable calls acquire the write lock.
+///
+/// # Compatibility
+///
+/// This trait is meant to be implemented only by the code generated by the
+/// [remote attribute](remote). Implementing it by hand is not supported.
 pub trait ServerSharedMut<Target, Codec>: ServerBase
 where
     Self: Sized,
@@ -1067,6 +1196,11 @@ where
 /// }
 /// # tokio_test::block_on(remoc::doctest::client_server(server, client));
 /// ```
+///
+/// # Compatibility
+///
+/// This trait is meant to be implemented only by the code generated by the
+/// [remote attribute](remote). Implementing it by hand is not supported.
 pub trait ReqReceiver<Codec>: ServerBase
 where
     Self: Sized,
@@ -1341,6 +1475,12 @@ impl Error for ServeError {}
 
 // Re-exports for proc macro usage.
 #[doc(hidden)]
+pub use ::tracing::Instrument;
+#[doc(hidden)]
+pub use ::tracing::Span;
+#[doc(hidden)]
+pub use ::tracing::level_filters::LevelFilter;
+#[doc(hidden)]
 pub use futures::future::FutureExt;
 #[doc(hidden)]
 pub use futures::stream::Stream;
@@ -1356,8 +1496,6 @@ pub use tokio::sync::RwLock as LocalRwLock;
 pub use tokio::sync::broadcast as local_broadcast;
 #[doc(hidden)]
 pub use tokio::sync::mpsc as local_mpsc;
-#[doc(hidden)]
-pub use tracing::Instrument;
 #[doc(hidden)]
 pub use wokio::task::spawn;
 

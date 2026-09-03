@@ -18,6 +18,8 @@ For the same idea built on plain channels instead of a trait, see
 [the channels example](../channels).
 For a Rust WebAssembly client connected through a browser WebSocket, see
 [the web RTC example](../rtc-web).
+For distributed tracing of the calls via OpenTelemetry, see
+[the tracing example](../tracing).
 
 ## Running
 

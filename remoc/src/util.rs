@@ -27,3 +27,15 @@ pub fn dbg_option_bytes(bytes: &Option<Bytes>, f: &mut fmt::Formatter) -> fmt::R
     }
     Ok(())
 }
+
+/// Creates the span of a task that outlives the operation spawning it.
+///
+/// Level, name and fields are specified as for [`span!`](tracing::span).
+macro_rules! task_span {
+    ($level:expr, $name:literal $(, $($fields:tt)*)?) => {{
+        let span = ::tracing::span!($level, $name $(, $($fields)*)?);
+        span.follows_from(::tracing::Span::current());
+        span
+    }};
+}
+pub(crate) use task_span;

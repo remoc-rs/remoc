@@ -809,7 +809,7 @@ where
                     }
                 }
             }
-            .in_current_span(),
+            .instrument(crate::util::task_span!(::tracing::Level::TRACE, "robs_initial_send")),
         );
 
         Self::Incremental { len, rx }
@@ -1012,7 +1012,7 @@ where
                     }
                 }
             }
-            .in_current_span(),
+            .instrument(crate::util::task_span!(::tracing::Level::TRACE, "robs_mirror")),
         );
 
         MirroredVec { inner, tx: tx.downgrade(), changed_rx, _dropped_tx: dropped_tx }

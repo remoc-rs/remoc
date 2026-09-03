@@ -75,7 +75,7 @@ impl Serialize for Sender {
                         // data is verified by size.
                         let _ = bin_fw_rx.forward(&mut bin_tx).await;
                     }
-                    .in_current_span(),
+                    .instrument(crate::util::task_span!(::tracing::Level::TRACE, "lazy_blob_forward")),
                 );
                 TransportedSender { bin_tx: bin_fw_tx }.serialize(serializer)
             }

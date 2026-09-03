@@ -15,7 +15,8 @@ authors = { workspace = true }
 
 [features]
 default = ["full"]
-full = ["serde", "rch", "rfn", "robj", "robs", "rtc"]
+full = ["otel", "serde", "rch", "rfn", "robj", "robs", "rtc"]
+otel = ["dep:opentelemetry", "dep:tracing-opentelemetry"]
 serde = ["dep:serde", "dep:postbag"]
 rch = ["serde", "tokio-util/codec", "tokio/io-util"]
 rfn = ["rch"]
@@ -64,6 +65,8 @@ wokio = { version = "0.1" }
 tokio = { version = "1.43", features = ["macros", "rt", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 tracing = "0.1.29"
+opentelemetry = { version = "0.32", default-features = false, features = ["trace"], optional = true }
+tracing-opentelemetry = { version = "0.33", default-features = false, optional = true }
 bytes = { version = "1", features = ["serde"] }
 byteorder = "1.4"
 uuid = { version = "1.15", features = ["serde", "v4"] }

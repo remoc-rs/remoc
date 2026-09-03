@@ -206,7 +206,7 @@ where
                     _ => (),
                 }
             }
-            .in_current_span(),
+            .instrument(crate::util::task_span!(::tracing::Level::TRACE, "rw_lock_cache")),
         );
 
         // Store value in cache.

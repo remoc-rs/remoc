@@ -16,7 +16,7 @@ use super::{
     mux::PortEvt,
     port_allocator::SidePort,
 };
-use wokio::runtime;
+use crate::util::Spawner;
 
 /// An error returned when a data message cannot be received.
 ///
@@ -355,7 +355,7 @@ pub struct Receiver {
     port_allocator: PortAllocator,
     storage: AnyStorage,
     pre_connected_rx: Option<watch::Receiver<PreConnectState>>,
-    handle: runtime::Handle,
+    handle: Spawner,
 }
 
 impl fmt::Debug for Receiver {
@@ -395,7 +395,7 @@ impl Receiver {
             port_allocator,
             storage,
             pre_connected_rx,
-            handle: runtime::Handle::current(),
+            handle: Spawner::current(),
         }
     }
 

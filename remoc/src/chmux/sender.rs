@@ -26,7 +26,7 @@ use super::{
     mux::PortEvt,
     port_allocator::{PortsExhausted, SidePort},
 };
-use wokio::{self, runtime};
+use crate::util::Spawner;
 
 /// An error returned when a message cannot be sent over a multiplexed channel.
 ///
@@ -276,7 +276,7 @@ pub struct Sender {
     storage: AnyStorage,
     all_received_supported: bool,
     pre_connected_rx: Option<watch::Receiver<PreConnectState>>,
-    handle: runtime::Handle,
+    handle: Spawner,
 }
 
 impl fmt::Debug for Sender {
@@ -314,7 +314,7 @@ impl Sender {
             storage,
             all_received_supported,
             pre_connected_rx,
-            handle: runtime::Handle::current(),
+            handle: Spawner::current(),
         }
     }
 

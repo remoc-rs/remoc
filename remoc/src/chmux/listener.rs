@@ -16,7 +16,7 @@ use super::{
     receiver::Receiver,
     sender::Sender,
 };
-use wokio::runtime;
+use crate::util::Spawner;
 
 /// An error returned when a multiplexed channel listener cannot be created.
 ///
@@ -164,7 +164,7 @@ pub struct Request {
     tx: mpsc::Sender<PortEvt>,
     pre_connected: Option<std::sync::Mutex<(Sender, Receiver)>>,
     done: bool,
-    handle: runtime::Handle,
+    handle: Spawner,
 }
 
 impl fmt::Debug for Request {
@@ -191,7 +191,7 @@ impl Request {
             tx,
             pre_connected: pre_connected.map(std::sync::Mutex::new),
             done: false,
-            handle: runtime::Handle::current(),
+            handle: Spawner::current(),
         }
     }
 

@@ -1,8 +1,8 @@
 # Remoc 🦑 — Rust RPC with remote channels and objects
 
-Remoc makes remote interaction between Rust programs seamless and smooth.
-It is an RPC library in which a call can also pass channels and remote objects
-that stay usable after the call has returned.
+Remoc is an async RPC and IPC library for Rust. Unlike conventional RPC,
+calls can pass live Tokio-style channels and remote objects that remain usable
+after the call returns.
 
 Over a [single underlying transport], such as TCP or TLS, it provides:
 
@@ -16,7 +16,12 @@ with the compact, forward- and backward-compatible [Postbag] binary codec.
 Remoc does not depend on any particular transport type, so it serves for
 inter-process communication over a UNIX socket or pipe as well as over the network.
 
-An illustrated overview and benchmarks are available at [remoc.rs](https://remoc.rs).
+See [**remoc.rs**](https://remoc.rs/) for an illustrated overview,
+[benchmarks](https://remoc.rs/benchmarks.html), [examples](https://remoc.rs/examples/rtc.html),
+and an [RPC library comparison](https://remoc.rs/comparison.html).
+
+[Getting started](#getting-started) · [Remote procedure calls](#remote-procedure-calls) ·
+[Channels](#channels) · [When to use Remoc](#when-to-use-remoc)
 
 [single underlying transport]: https://docs.rs/remoc/latest/remoc/struct.Connect.html#physical-transport
 [multiple channels]: https://docs.rs/remoc/latest/remoc/rch/index.html
@@ -87,11 +92,14 @@ closures.
 Furthermore, a trait can be made remotely callable with automatically generated
 client and server implementations, resembling a classical remote procedure
 calling (RPC) model; see the [RPC example](#remote-procedure-calls) below.
+When an RPC method returns another remote object, [pipelining] can send
+dependent calls without waiting for each intermediate response.
 
 [TCP network connection]: https://docs.rs/remoc/latest/remoc/transports/tcp/index.html
 [WebSocket]: https://docs.rs/remoc/latest/remoc/transports/websocket/index.html
 [UNIX pipe]: https://docs.rs/remoc/latest/remoc/transports/process/index.html
 [serial link]: https://docs.rs/tokio-serial
+[pipelining]: https://docs.rs/remoc/latest/remoc/rtc/index.html#pipelining
 
 
 ## When to use Remoc

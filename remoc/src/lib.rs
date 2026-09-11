@@ -9,9 +9,9 @@
 
 //! Remoc 🦑 — Rust RPC with remote channels and objects
 //!
-//! Remoc makes remote interaction between Rust programs seamless and smooth.
-//! It is an RPC library in which a call can also pass channels and remote objects
-//! that stay usable after the call has returned.
+//! Remoc is an async RPC and IPC library for Rust. Unlike conventional RPC,
+//! calls can pass live Tokio-style channels and remote objects that remain usable
+//! after the call returns.
 //!
 //! Over a [single underlying transport], such as TCP or TLS, it provides:
 //!
@@ -25,7 +25,9 @@
 //! Remoc does not depend on any particular [transport type], so it serves for
 //! inter-process communication over a UNIX socket or pipe as well as over the network.
 //!
-//! An illustrated overview and benchmarks are available at [remoc.rs](https://remoc.rs).
+//! See [**remoc.rs**](https://remoc.rs/) for an illustrated overview,
+//! [benchmarks](https://remoc.rs/benchmarks.html), [examples](https://remoc.rs/examples/rtc.html),
+//! and an [RPC library comparison](https://remoc.rs/comparison.html).
 //!
 //! [single underlying transport]: Connect
 //! [multiple channels]: rch

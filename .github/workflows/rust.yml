@@ -287,6 +287,21 @@ jobs:
           RUSTFLAGS: --cfg postbag_fast_compile
         run: cargo test
 
+  test-explicit-auto-traits:
+    name: Test with explicit auto traits
+    needs: [test]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v7
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run cargo test
+        run: cargo test --features explicit-auto-traits
+
   test-features:
     name: Test ${{ matrix.feature }} feature
     needs: [test]

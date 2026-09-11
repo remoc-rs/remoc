@@ -306,6 +306,12 @@ runtime environment (like a web browser) you must enable the `js` crate feature.
 This will enable JavaScript promises support and spawn tasks onto the browser's
 native event queue.
 
+### Compile time
+
+The `explicit-auto-traits` feature implements `Send` and `Sync` explicitly for
+most types instead of leaving them to the compiler's auto trait inference.
+This significantly reduces trait solver recursion and thus compile time;
+however, it requires allowing unsafe code.
 
 ## Example
 

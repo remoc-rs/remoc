@@ -323,3 +323,10 @@ where
         })
     }
 }
+
+crate::util::explicit_auto_traits! {
+    Sender[T, Codec];
+    Send: [T, Codec] where [base::Sender<T, Codec>: Send, base::Receiver<T, Codec>: Send];
+    Sync: [T, Codec] where [base::Sender<T, Codec>: Send + Sync, base::Receiver<T, Codec>: Send];
+    fields: { sender, sender_rx, receiver_tx, interlock, max_item_size }
+}

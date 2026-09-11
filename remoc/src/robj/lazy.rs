@@ -330,3 +330,10 @@ impl<T> Drop for Ref<'_, T> {
         // empty
     }
 }
+
+crate::util::explicit_auto_traits! {
+    Lazy[T, Codec];
+    Send: [T: Send + Sync, Codec: Send];
+    Sync: [T: Send + Sync, Codec: Send + Sync];
+    fields: { request_tx, fetch_task }
+}

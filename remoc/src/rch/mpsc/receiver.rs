@@ -809,3 +809,10 @@ impl<T, Codec, const BUFFER: usize, const MAX_ITEM_SIZE: usize> Unpin
     for Receiver<T, Codec, BUFFER, MAX_ITEM_SIZE>
 {
 }
+
+crate::util::explicit_auto_traits! {
+    Receiver[T, Codec, BUFFER, MAX_ITEM_SIZE];
+    Send: [T: Send, Codec: Send, const BUFFER: usize, const MAX_ITEM_SIZE: usize];
+    Sync: [T: Send, Codec: Sync, const BUFFER: usize, const MAX_ITEM_SIZE: usize];
+    fields: { inner, successor_tx, final_err, remote_max_item_size, parallel, _codec }
+}

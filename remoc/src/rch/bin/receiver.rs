@@ -199,3 +199,9 @@ impl Drop for Receiver {
         }
     }
 }
+
+crate::util::explicit_auto_traits! {
+    Receiver;
+    Send: [];
+    fields: { receiver, sender_tx, receiver_rx, interlock, successor_tx, local }
+}

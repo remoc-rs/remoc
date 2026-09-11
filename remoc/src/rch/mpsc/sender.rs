@@ -967,3 +967,10 @@ where
         Self::new(tx)
     }
 }
+
+crate::util::explicit_auto_traits! {
+    Sender[T, Codec, BUFFER];
+    Send: [T: Send, Codec: Send, const BUFFER: usize];
+    Sync: [T: Send, Codec: Sync, const BUFFER: usize];
+    fields: { tx, closed_rx, remote_send_err_rx, dropped_tx, max_item_size, parallel, _codec }
+}

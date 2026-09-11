@@ -584,3 +584,10 @@ where
         ))
     }
 }
+
+crate::util::explicit_auto_traits! {
+    Sender[T, Codec];
+    Send: [T: Send + Sync, Codec: Send];
+    Sync: [T: Send + Sync, Codec: Send + Sync];
+    fields: { inner, successor_tx }
+}

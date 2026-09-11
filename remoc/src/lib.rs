@@ -1,4 +1,5 @@
-#![forbid(unsafe_code)]
+#![cfg_attr(not(feature = "explicit-auto-traits"), forbid(unsafe_code))]
+#![cfg_attr(feature = "explicit-auto-traits", deny(unsafe_code))]
 #![warn(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc(

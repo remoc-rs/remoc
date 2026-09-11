@@ -205,3 +205,10 @@ impl Drop for Sender {
         }
     }
 }
+
+crate::util::explicit_auto_traits! {
+    Sender;
+    Send: [];
+    Sync: [];
+    fields: { sender, sender_rx, receiver_tx, interlock, successor_tx, local }
+}

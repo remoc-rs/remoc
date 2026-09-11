@@ -260,3 +260,10 @@ where
         }
     }
 }
+
+crate::util::explicit_auto_traits! {
+    Receiver[T, Codec, MAX_ITEM_SIZE];
+    Send: [T: Send, Codec: Send, const MAX_ITEM_SIZE: usize];
+    Sync: [T: Send, Codec: Sync, const MAX_ITEM_SIZE: usize];
+    fields: (inner)
+}

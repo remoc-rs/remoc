@@ -549,3 +549,9 @@ impl ErasedReceiver {
         self.receiver.set_global_credits_allowed(allowed);
     }
 }
+
+crate::util::explicit_auto_traits! {
+    Receiver[T, Codec];
+    Send: [T, Codec];
+    fields: { erased, _phantom }
+}

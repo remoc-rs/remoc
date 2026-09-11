@@ -667,3 +667,10 @@ impl ErasedSender {
         self.sender.set_global_credits_allowed(allowed);
     }
 }
+
+crate::util::explicit_auto_traits! {
+    Sender[T, Codec];
+    Send: [T, Codec];
+    Sync: [T, Codec];
+    fields: { erased, _phantom }
+}

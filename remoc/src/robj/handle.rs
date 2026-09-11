@@ -493,3 +493,10 @@ where
         write!(f, "{:?}", **self)
     }
 }
+
+crate::util::explicit_auto_traits! {
+    Handle[T, Codec];
+    Send: [T: Send, Codec: Send];
+    Sync: [T: Sync, Codec: Sync];
+    fields: { state, _data }
+}

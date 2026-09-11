@@ -56,6 +56,10 @@ full-codecs = [
 ]
 default-codec-no-warn = []
 
+# Provides explicit `Send` and `Sync` implementations for channel types to 
+# reduce trait solver recursion depth and thus compile time.
+explicit-auto-traits = []
+
 [dependencies]
 remoc_macro = { version = "=0.20.1", path = "../remoc_macro", optional = true }
 

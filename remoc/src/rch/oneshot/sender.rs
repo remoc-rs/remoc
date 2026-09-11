@@ -170,3 +170,10 @@ where
         self.0.set_max_item_size(max_item_size)
     }
 }
+
+crate::util::explicit_auto_traits! {
+    Sender[T, Codec];
+    Send: [T: Send, Codec: Send];
+    Sync: [T: Send, Codec: Sync];
+    fields: (inner)
+}

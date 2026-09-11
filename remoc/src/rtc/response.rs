@@ -818,3 +818,17 @@ mod transported {
         "unsupported combination of response channel and request receiver".into()
     }
 }
+
+crate::util::explicit_auto_traits! {
+    ResponseSender[R, Codec];
+    Send: [R: Response, Codec: Send] where [TransportedResponse<R>: Send];
+    Sync: [R: Response, Codec: Sync] where [TransportedResponse<R>: Send];
+    fields: (inner)
+}
+
+crate::util::explicit_auto_traits! {
+    Responder[R, Codec];
+    Send: [R: Response, Codec: Send] where [TransportedResponse<R>: Send];
+    Sync: [R: Response, Codec: Sync] where [TransportedResponse<R>: Send];
+    fields: { tx, sequential, stop_on_error, tracing }
+}

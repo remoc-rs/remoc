@@ -448,3 +448,17 @@ impl<T, Codec> Drop for WriteGuard<T, Codec> {
         // empty
     }
 }
+
+crate::util::explicit_auto_traits! {
+    ReadLock[T, Codec];
+    Send: [T: Send + Sync, Codec: Send + Sync];
+    Sync: [T: Send + Sync, Codec: Send + Sync];
+    fields: { req_tx, cache }
+}
+
+crate::util::explicit_auto_traits! {
+    RwLock[T, Codec];
+    Send: [T: Send + Sync, Codec: Send + Sync];
+    Sync: [T: Send + Sync, Codec: Send + Sync];
+    fields: { read, req_tx }
+}

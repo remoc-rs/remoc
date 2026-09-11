@@ -325,3 +325,10 @@ where
         }
     }
 }
+
+crate::util::explicit_auto_traits! {
+    LazyBlob[Codec];
+    Send: [Codec: Send];
+    Sync: [Codec: Sync];
+    fields: { req_tx, len, fetch_task }
+}

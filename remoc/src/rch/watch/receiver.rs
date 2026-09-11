@@ -595,3 +595,10 @@ where
         Self::new(recv)
     }
 }
+
+crate::util::explicit_auto_traits! {
+    Receiver[T, Codec, MAX_ITEM_SIZE];
+    Send: [T: Send + Sync, Codec: Send, const MAX_ITEM_SIZE: usize];
+    Sync: [T: Send + Sync, Codec: Sync, const MAX_ITEM_SIZE: usize];
+    fields: { rx, remote_send_err_tx, remote_max_item_size, sender_rate_limit_rx, receiver_rate_limit_tx, transfer_strategy, _codec }
+}

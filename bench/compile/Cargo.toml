@@ -17,3 +17,7 @@ futures = "0.3"
 [[bin]]
 name = "remoc_channels"
 path = "src/remoc_channels.rs"
+
+[[bin]]
+name = "remoc_rtc_nested"
+path = "src/remoc_rtc_nested.rs"

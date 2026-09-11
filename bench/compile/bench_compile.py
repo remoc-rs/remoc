@@ -10,10 +10,19 @@ Besides wall-clock build time it collects machine-independent metrics that
 track the amount of code handed to LLVM, which is what actually drives the
 build time of this crate.
 
+Two benchmark binaries are available, selected with --bin:
+
+  remoc_channels    channel endpoints of many nested types sent through
+                    channels; dominated by monomorphization and LLVM
+  remoc_rtc_nested  remote traits whose methods return clients of other remote
+                    traits and remote objects; dominated by trait solving
+                    (proving generated futures `Send`) during type checking
+
 Usage:
   bench_compile.py                        run and compare against baseline.json
   bench_compile.py --save baseline.json   run and store the result (updates baseline)
   bench_compile.py --print a.json b.json  compare stored results (1 file just prints)
+  bench_compile.py --features explicit-auto-traits --bin remoc_rtc_nested --save on.json
 """
 
 from __future__ import annotations
@@ -32,8 +41,10 @@ from pathlib import Path
 from typing import NoReturn
 
 HERE = Path(__file__).resolve().parent
-BIN = "remoc_channels"
+BINS = ("remoc_channels", "remoc_rtc_nested")
+BIN = BINS[0]
 SRC = HERE / "src" / f"{BIN}.rs"
+FEATURES: list[str] = []
 DEFAULT_BASELINE = HERE / "baseline.json"
 
 SCHEMA = 1
@@ -125,7 +136,10 @@ def git_info() -> dict:
 
 
 def build_flags(profile: str) -> list[str]:
-    return ["--release"] if profile == "release" else []
+    flags = ["--release"] if profile == "release" else []
+    if FEATURES:
+        flags += ["--features", ",".join(f"remoc/{feature}" for feature in FEATURES)]
+    return flags
 
 
 def timed_build(profile: str, target_dir: Path) -> tuple[float, Path]:
@@ -293,6 +307,8 @@ def run_benchmark(profiles: list[str], toolchain: str | None, repeat: int, label
     return {
         "schema": SCHEMA,
         "label": label,
+        "bin": BIN,
+        "features": FEATURES,
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "git": git_info(),
         "toolchain": {
@@ -343,6 +359,10 @@ def print_report(results: list[tuple[str, dict]]) -> None:
             parts.append(result["timestamp"])
         if dig(result, ("toolchain", "rustc")):
             parts.append(dig(result, ("toolchain", "rustc")))
+        if result.get("bin"):
+            parts.append(result["bin"])
+        if result.get("features"):
+            parts.append("features=" + ",".join(result["features"]))
         print("  ".join(parts))
 
     profiles = []
@@ -454,8 +474,9 @@ def main() -> None:
         help="build profile to benchmark (default: release)",
     )
     parser.add_argument(
-        "--baseline", type=Path, default=DEFAULT_BASELINE,
-        help=f"result file to compare against (default: {DEFAULT_BASELINE.name})",
+        "--baseline", type=Path,
+        help=f"result file to compare against (default: {DEFAULT_BASELINE.name} for "
+        f"{BINS[0]}, baseline-<bin>.json otherwise)",
     )
     parser.add_argument("--no-baseline", action="store_true", help="do not compare against a baseline")
     parser.add_argument("--save", type=Path, metavar="FILE", help="write the result to FILE")
@@ -468,7 +489,20 @@ def main() -> None:
         "--toolchain", default="nightly",
         help="toolchain providing the unstable stats flags (default: nightly)",
     )
+    parser.add_argument(
+        "--bin", choices=BINS, default=BINS[0],
+        help=f"benchmark binary to build (default: {BINS[0]})",
+    )
+    parser.add_argument(
+        "--features", default="",
+        help="comma-separated remoc crate features to enable, e.g. explicit-auto-traits",
+    )
     args = parser.parse_args()
+
+    global BIN, SRC, FEATURES
+    BIN = args.bin
+    SRC = HERE / "src" / f"{BIN}.rs"
+    FEATURES = [f for f in args.features.split(",") if f]
 
     if args.print_files:
         print_report([(result_name(load(p), p), load(p)) for p in args.print_files])
@@ -478,6 +512,8 @@ def main() -> None:
         die("--repeat must be at least 1")
 
     save = args.save.resolve() if args.save else None
+    if args.baseline is None:
+        args.baseline = DEFAULT_BASELINE if BIN == BINS[0] else HERE / f"baseline-{BIN}.json"
     baseline = args.baseline.resolve()
 
     profiles = ["debug", "release"] if args.profile == "both" else [args.profile]

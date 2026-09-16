@@ -54,8 +54,8 @@
 //!
 //! For that it uses Serde and the [Postbag] binary codec to
 //! serialize and deserialize data as it is transmitted over an underlying
-//! transport, which might be a [TCP network connection], a [WebSocket],
-//! [UNIX pipe], or even a [serial link].
+//! transport, which might be a [TCP network connection], a [QUIC stream], a
+//! [WebSocket], [UNIX pipe], or even a [serial link].
 //! Postbag is designed for protocol evolution, allowing many changes to message
 //! types without requiring both endpoints to be upgraded at once.
 //!
@@ -104,6 +104,7 @@ while let Some(i) = seq_rx.recv().await.unwrap() {
 //! calling (RPC) model; see the [RPC example](#remote-procedure-calls) below.
 //!
 //! [TCP network connection]: transports::tcp
+//! [QUIC stream]: transports::quic
 //! [WebSocket]: transports::websocket
 //! [UNIX pipe]: transports::process
 //! [serial link]: https://docs.rs/tokio-serial
@@ -175,7 +176,7 @@ while let Some(i) = seq_rx.recv().await.unwrap() {
 //! [ConnectExt::provide] and [ConnectExt::consume] establish the connection, transfer that
 //! value and spawn the connection dispatcher for you.
 //!
-//! The [transports] module contains worked examples for TCP, TLS, WebSocket,
+//! The [transports] module contains worked examples for TCP, TLS, QUIC, WebSocket,
 //! pipes to a child process and aggregated, failure-resilient links.
 //!
 //! [AsyncRead]: tokio::io::AsyncRead
@@ -454,8 +455,8 @@ async fn use_counter(mut counter: CounterClient) -> Result<(), CallError> {
 //!
 //! ## Transports
 //!
-//! Browse the [transports module](transports) for adaptable TCP, TLS, WebSocket and
-//! child-process examples, including a resilient, reconnecting transport
+//! Browse the [transports module](transports) for adaptable TCP, TLS, QUIC, WebSocket
+//! and child-process examples, including a resilient, reconnecting transport
 //! for unreliable networks.
 //!
 

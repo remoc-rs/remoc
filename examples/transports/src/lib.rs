@@ -20,6 +20,12 @@ pub mod aggligator;
 #[path = "../../../remoc/src/connect/transports/process.rs"]
 pub mod process;
 
+#[path = "../../../remoc/src/connect/transports/quic_client.rs"]
+pub mod quic_client;
+
+#[path = "../../../remoc/src/connect/transports/quic_server.rs"]
+pub mod quic_server;
+
 #[path = "../../../remoc/src/connect/transports/tcp.rs"]
 pub mod tcp;
 

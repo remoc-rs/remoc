@@ -53,8 +53,8 @@ channels that work seamlessly over remote connections.
 
 For that it uses Serde and the [Postbag] binary codec to serialize
 and deserialize data as it is transmitted over an underlying transport, which
-might be a [TCP network connection], a [WebSocket], [UNIX pipe], or even a
-[serial link]. Postbag is designed for protocol evolution, allowing many changes
+might be a [TCP network connection], a [QUIC stream], a [WebSocket], [UNIX pipe],
+or even a [serial link]. Postbag is designed for protocol evolution, allowing many changes
 to message types without requiring both endpoints to be upgraded at once.
 
 Opening a new channel is straightforward, just send the sender or receiver half
@@ -96,6 +96,7 @@ When an RPC method returns another remote object, [pipelining] can send
 dependent calls without waiting for each intermediate response.
 
 [TCP network connection]: https://docs.rs/remoc/latest/remoc/transports/tcp/index.html
+[QUIC stream]: https://docs.rs/remoc/latest/remoc/transports/quic/index.html
 [WebSocket]: https://docs.rs/remoc/latest/remoc/transports/websocket/index.html
 [UNIX pipe]: https://docs.rs/remoc/latest/remoc/transports/process/index.html
 [serial link]: https://docs.rs/tokio-serial
@@ -181,8 +182,8 @@ to [`Connect::framed`].
 Both hand you a base channel, over which all further channels and remote objects
 are exchanged.
 
-The [transports] module contains worked examples for TCP, TLS, WebSocket, pipes
-to a child process and aggregated, failure-resilient links.
+The [transports] module contains worked examples for TCP, TLS, QUIC, WebSocket,
+pipes to a child process and aggregated, failure-resilient links.
 
 [`Connect::io`]: https://docs.rs/remoc/latest/remoc/struct.Connect.html#method.io
 [`Connect::framed`]: https://docs.rs/remoc/latest/remoc/struct.Connect.html#method.framed

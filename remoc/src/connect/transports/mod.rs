@@ -51,8 +51,8 @@
 //! The two directions of a base channel carry independent types, so the client
 //! sends `MyInitialReq` and receives `MyInitialRsp`, while the server does the
 //! reverse.
-//! Everything else -- further [channels](crate::rch), [RTC](crate::rtc) clients
-//! and [remote objects](crate::robj) -- is sent over the connection afterwards,
+//! Everything else, i.e. further [channels](crate::rch), [RTC](crate::rtc) clients
+//! and [remote objects](crate::robj), is sent over the connection afterwards,
 //! so the initial types are often just a handshake.
 //!
 //! # A single initial value
@@ -121,6 +121,24 @@ pub mod tcp {}
 #[doc = include_str!("tls_server.rs")]
 #[doc = "```"]
 pub mod tls {}
+
+/// QUIC, using [quinn](https://docs.rs/quinn).
+///
+/// The two halves of a QUIC stream implement [AsyncRead](tokio::io::AsyncRead) and
+/// [AsyncWrite](tokio::io::AsyncWrite) and hence can be handed to
+/// [Connect::io](super::Connect::io) unchanged.
+/// TLS is part of QUIC, thus the server needs a certificate and key as for [TLS](tls).
+///
+/// # Client
+#[doc = "```ignore"]
+#[doc = include_str!("quic_client.rs")]
+#[doc = "```"]
+///
+/// # Server
+#[doc = "```ignore"]
+#[doc = include_str!("quic_server.rs")]
+#[doc = "```"]
+pub mod quic {}
 
 /// WebSocket, using [tokio-tungstenite](https://docs.rs/tokio-tungstenite),
 /// [axum](https://docs.rs/axum) or [websocket-web](https://docs.rs/websocket-web).

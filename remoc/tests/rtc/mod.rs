@@ -5,6 +5,7 @@ mod assoc_multiple;
 mod assoc_qualified;
 mod assoc_simple;
 mod async_trait;
+mod auto_traits;
 mod call_options;
 mod debug;
 mod default;

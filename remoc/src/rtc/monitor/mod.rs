@@ -287,7 +287,7 @@ pub trait MonitorableServer {
 }
 
 /// Allows monitoring each request a server handles.
-pub trait ServerMonitor<Value, Ref, RefMut>: Send
+pub trait ServerMonitor<Value, Ref, RefMut>: Send + Sync
 where
     Value: ReqEnum,
     Ref: ReqEnum,
@@ -335,7 +335,7 @@ pub trait MonitorableReqReceiver {
 /// Unlike a [server monitor](ServerMonitor), it cannot guard a request or stop
 /// the receiver with a custom error; it can only let a request [pass](RecvDecision::Pass)
 /// or [drop](RecvDecision::Drop) it.
-pub trait ReqReceiverMonitor<Value, Ref, RefMut>: Send
+pub trait ReqReceiverMonitor<Value, Ref, RefMut>: Send + Sync
 where
     Value: ReqEnum,
     Ref: ReqEnum,

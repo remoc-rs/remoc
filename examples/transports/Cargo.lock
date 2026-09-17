@@ -1081,7 +1081,7 @@ dependencies = [
 
 [[package]]
 name = "remoc"
-version = "0.20.2"
+version = "0.20.4"
 dependencies = [
  "byteorder",
  "bytes",
@@ -1119,7 +1119,7 @@ dependencies = [
 
 [[package]]
 name = "remoc_macro"
-version = "0.20.2"
+version = "0.20.4"
 dependencies = [
  "proc-macro2",
  "quote",

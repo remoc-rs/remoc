@@ -113,9 +113,11 @@ fn ciborium() {
     roundtrip::<TestStruct, codec::Ciborium>()
 }
 
+// Panics do not unwind on WebAssembly, thus the guard allowing codec use would
+// never be released and make the following tests fail.
 #[cfg(feature = "codec-json")]
-#[cfg_attr(not(all(target_family = "wasm", feature = "js")), test)]
-#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
+#[cfg(not(target_family = "wasm"))]
+#[test]
 #[should_panic]
 fn json_without_attr() {
     roundtrip::<TestStruct, codec::Json>()

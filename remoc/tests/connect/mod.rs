@@ -156,3 +156,116 @@ async fn silent_transport_times_out() {
         Err(_) => panic!("connecting to a silent transport did not honor the connection timeout"),
     }
 }
+
+/// Reader delivering only a few bytes per read, to exercise partial reads.
+#[cfg(not(target_family = "wasm"))]
+struct TrickleRead<R> {
+    inner: R,
+    max: usize,
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl<R: tokio::io::AsyncRead + Unpin> tokio::io::AsyncRead for TrickleRead<R> {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>, buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        let max = self.max;
+        let mut part = buf.take(max);
+        std::task::ready!(std::pin::Pin::new(&mut self.inner).poll_read(cx, &mut part))?;
+        let n = part.filled().len();
+        // SAFETY: the inner reader has initialized the bytes it filled.
+        unsafe { buf.assume_init(n) };
+        buf.advance(n);
+        std::task::Poll::Ready(Ok(()))
+    }
+}
+
+/// Writer accepting only a few bytes per write, to exercise partial writes.
+#[cfg(not(target_family = "wasm"))]
+struct Trickle<W> {
+    inner: W,
+    max: usize,
+    vectored: bool,
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl<W: tokio::io::AsyncWrite + Unpin> tokio::io::AsyncWrite for Trickle<W> {
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>, buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        let len = buf.len().min(self.max);
+        std::pin::Pin::new(&mut self.inner).poll_write(cx, &buf[..len])
+    }
+
+    fn poll_write_vectored(
+        mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>, bufs: &[std::io::IoSlice<'_>],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        if !self.vectored {
+            let buf = bufs.iter().find(|buf| !buf.is_empty()).map_or(&[][..], |buf| &**buf);
+            return self.poll_write(cx, buf);
+        }
+
+        let mut data = Vec::new();
+        for buf in bufs {
+            let n = buf.len().min(self.max - data.len());
+            data.extend_from_slice(&buf[..n]);
+        }
+        std::pin::Pin::new(&mut self.inner).poll_write(cx, &data)
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        self.vectored
+    }
+
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
+}
+
+/// Values of all sizes arrive intact over an IO transport whose writer accepts
+/// only a few bytes at a time, with and without vectored writes, and whose
+/// reader delivers whole buffers or only a few bytes at a time.
+#[cfg(not(target_family = "wasm"))]
+#[tokio::test]
+async fn io_transport_partial_writes() {
+    crate::init();
+
+    for (vectored, read_max) in [(false, usize::MAX), (true, usize::MAX), (false, 5), (true, 5)] {
+        println!("Vectored writes: {vectored}, maximum read: {read_max}");
+        let (a, b) = tokio::io::duplex(65_536);
+        let (a_rd, a_wr) = tokio::io::split(a);
+        let (b_rd, b_wr) = tokio::io::split(b);
+        let a_rd = TrickleRead { inner: a_rd, max: read_max };
+        let b_rd = TrickleRead { inner: b_rd, max: read_max };
+        let a_wr = Trickle { inner: a_wr, max: 7, vectored };
+        let b_wr = Trickle { inner: b_wr, max: 7, vectored };
+
+        let a = Connect::io::<_, _, Vec<u8>, Vec<u8>, remoc::codec::Default>(Cfg::default(), a_rd, a_wr);
+        let b = Connect::io::<_, _, Vec<u8>, Vec<u8>, remoc::codec::Default>(Cfg::default(), b_rd, b_wr);
+        let ((a_conn, mut a_tx, mut a_rx), (b_conn, mut b_tx, mut b_rx)) = try_join(a, b).await.unwrap();
+
+        wokio::spawn(async move {
+            let _ = a_conn.await;
+        });
+        wokio::spawn(async move {
+            let _ = b_conn.await;
+        });
+
+        for size in [0, 1, 100, 4_095, 4_096, 4_097, 40_000, 300_000] {
+            let sent = payload(size);
+            a_tx.send(sent.clone()).await.unwrap();
+            assert_eq!(b_rx.recv().await.unwrap().unwrap(), sent, "value of {size} bytes was altered");
+
+            b_tx.send(sent.clone()).await.unwrap();
+            assert_eq!(a_rx.recv().await.unwrap().unwrap(), sent, "value of {size} bytes was altered");
+        }
+    }
+}

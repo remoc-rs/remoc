@@ -55,12 +55,14 @@ pub(crate) struct VarintDecoder {
 }
 
 impl VarintDecoder {
-    /// Maximum length of one variable integer.
-    pub const MAX_LENGTH: usize = varint_max::<u32>();
-
     /// Creates a new instance.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Whether no part of a value has been decoded.
+    pub fn is_empty(&self) -> bool {
+        self.pos == 0
     }
 
     /// Decode value.

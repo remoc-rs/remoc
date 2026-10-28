@@ -37,7 +37,7 @@
 
 use bytes::Bytes;
 use futures::{
-    Future, FutureExt, Sink, Stream, StreamExt, TryStreamExt,
+    Future, FutureExt, Sink, Stream, StreamExt,
     future::{BoxFuture, LocalBoxFuture},
 };
 use std::{
@@ -49,7 +49,6 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio_util::codec::{FramedRead, FramedWrite};
 
 use crate::{
     RemoteSend,
@@ -333,15 +332,10 @@ impl Connect<()> {
         let varint = Arc::new(AtomicBool::new(false));
 
         let encoder = io_transport::LengthCodec::new(u32::MAX, varint.clone());
-        let transport_sink = io_transport::FilterFlushOuter(FramedWrite::with_capacity(
-            io_transport::FilterFlushInner::new(output),
-            encoder,
-            cfg.io_buffer_size,
-        ));
+        let transport_sink = io_transport::FrameSink::new(output, encoder, cfg.io_buffer_size);
 
         let decoder = io_transport::LengthCodec::new(cfg.max_frame_length(), varint.clone());
-        let transport_stream =
-            FramedRead::with_capacity(input, decoder, cfg.io_buffer_size).map_ok(|item| item.freeze());
+        let transport_stream = io_transport::FrameStream::new(input, decoder);
 
         cfg.io_frame_len_varint = Some(varint);
 

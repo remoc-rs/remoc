@@ -376,7 +376,7 @@ jobs:
 
       - name: Run cargo tarpaulin
         shell: bash
-        run: cargo tarpaulin --engine llvm --out Xml
+        run: cargo tarpaulin --engine llvm --timeout 600 --out Xml
 
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}

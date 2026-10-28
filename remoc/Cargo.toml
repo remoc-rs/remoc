@@ -15,14 +15,32 @@ authors = { workspace = true }
 
 [features]
 default = ["full"]
+
+# Enables all features below, but no additional codecs.
 full = ["otel", "serde", "rch", "rfn", "robj", "robs", "rtc"]
+
+# Links the spans of remote calls into OpenTelemetry traces.
 otel = ["dep:opentelemetry", "dep:tracing-opentelemetry"]
+
+# Codec module and serialization of configuration and error types.
 serde = ["dep:serde", "dep:postbag"]
+
+# Remote channels.
 rch = ["serde", "tokio-util/io", "tokio/io-util"]
+
+# Remote functions.
 rfn = ["rch"]
+
+# Remote object utilities.
 robj = ["rch"]
+
+# Remotely observable collections.
 robs = ["rch"]
+
+# Remote trait calling.
 rtc = ["rch", "remoc_macro"]
+
+# Support for JavaScript runtime environments, such as web browsers.
 js = [
     "wokio/web",
     "dep:getrandom",
@@ -34,19 +52,34 @@ js = [
 ]
 
 # Codecs
+
+# The `default-codec-*` features are deprecated. Each makes the named codec
+# the default codec instead of Postbag.
 default-codec-postbag = []
 default-codec-postbag-slim = []
+
+# Bincode 1 and 2 formats.
 codec-bincode = ["bincode"]
 default-codec-bincode = ["codec-bincode"]
 default-codec-bincode2 = ["codec-bincode"]
+
+# CBOR format.
 codec-ciborium = ["ciborium"]
 default-codec-ciborium = ["codec-ciborium"]
+
+# JSON format.
 codec-json = ["serde_json"]
 default-codec-json = ["codec-json"]
+
+# MessagePack format.
 codec-message-pack = ["rmp-serde"]
 default-codec-message-pack = ["codec-message-pack"]
+
+# Postcard format.
 codec-postcard = ["postcard"]
 default-codec-postcard = ["codec-postcard"]
+
+# Enables all additional codecs.
 full-codecs = [
     "codec-bincode",
     "codec-ciborium",
@@ -54,9 +87,11 @@ full-codecs = [
     "codec-message-pack",
     "codec-postcard",
 ]
+
+# Silences the deprecation warning of the `default-codec-*` features.
 default-codec-no-warn = []
 
-# Provides explicit `Send` and `Sync` implementations for channel types to 
+# Provides explicit `Send` and `Sync` implementations for channel types to
 # reduce trait solver recursion depth and thus compile time.
 explicit-auto-traits = []
 

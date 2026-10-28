@@ -550,7 +550,10 @@ async fn tcp_struct<C: codec::Codec>(link: Link, msg_size: usize, limit: Duratio
             let batch = payload.clone();
 
             buf.clear();
-            <C as codec::Codec>::serialize(&mut buf, &batch).map_err(io::Error::other)?;
+            {
+                let _allowed = codec::allow_outside();
+                <C as codec::Codec>::serialize(&mut buf, &batch).map_err(io::Error::other)?;
+            }
             client_writer.write_u32(buf.len() as u32).await?;
             client_writer.write_all(&buf).await?;
         }
@@ -569,7 +572,10 @@ async fn tcp_struct<C: codec::Codec>(link: Link, msg_size: usize, limit: Duratio
             buf.resize(len, 0);
             server_reader.read_exact(&mut buf).await?;
 
-            let batch: Vec<Sample> = <C as codec::Codec>::deserialize(&buf[..])?;
+            let batch: Vec<Sample> = {
+                let _allowed = codec::allow_outside();
+                <C as codec::Codec>::deserialize(&buf[..])?
+            };
             meter.record(sample_len * batch.len());
         }
     });

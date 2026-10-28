@@ -4,6 +4,15 @@ All notable changes to Remoc will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.20.5 - 2026-10-28
+### Added
+- codec: `Codec::deserialize_buf_read` and `ErasedDeserializer::deserialize_buf_read`
+  allow codecs to deserialize from a buffered reader with known length
+
+### Changed
+- connect: faster encoding and decoding of frames on IO transports
+- rch: Postbag codec avoids copies when deserializing received data
+
 ## 0.20.4 - 2026-09-17
 ### Fixed
 - rtc: servers and request receivers are Sync again

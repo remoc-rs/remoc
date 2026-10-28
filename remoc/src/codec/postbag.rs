@@ -219,6 +219,18 @@ impl<const WITH_IDENTS: bool, const DEPTH_LIMIT: usize> Codec for PostbagWith<WI
         Ok(value)
     }
 
+    fn deserialize_buf_read<Reader, Item>(
+        reader: Reader, len: Option<usize>,
+    ) -> Result<Item, DeserializationError>
+    where
+        Reader: std::io::BufRead,
+        Item: serde::de::DeserializeOwned,
+    {
+        let value = postbag::deserialize_buf_read(cfg::<WITH_IDENTS, DEPTH_LIMIT>()?, reader, len)
+            .map_err(DeserializationError::new)?;
+        Ok(value)
+    }
+
     fn is_skipping_fields_supported() -> bool {
         cfg::<WITH_IDENTS, DEPTH_LIMIT>().is_ok_and(|cfg| cfg.allow_skip()) && remote_allows_skip()
     }

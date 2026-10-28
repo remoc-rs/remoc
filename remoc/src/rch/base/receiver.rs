@@ -355,7 +355,7 @@ impl ErasedReceiver {
 
                                 let _storage_ref = register_storage(storage);
                                 let pds_ref = PortDeserializer::start();
-                                let item = deserializer.deserialize(&mut cbr)?;
+                                let item = deserializer.deserialize_buf_read(&mut cbr, None)?;
                                 let pds = PortDeserializer::finish(pds_ref);
 
                                 Ok((item, pds))
@@ -385,7 +385,8 @@ impl ErasedReceiver {
 
                         let _storage_ref = register_storage(self.receiver.storage());
                         let pdf_ref = PortDeserializer::start();
-                        let item_res = self.deserializer.deserialize(&mut data.reader());
+                        let len = data.remaining();
+                        let item_res = self.deserializer.deserialize_buf_read(&mut data.reader(), Some(len));
                         self.data = DataSource::None;
                         self.item = Some(item_res?);
                         self.port_deser = Some(PortDeserializer::finish(pdf_ref));

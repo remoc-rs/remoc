@@ -98,6 +98,16 @@ impl ChannelBytesReader {
 
 impl io::Read for ChannelBytesReader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let data = io::BufRead::fill_buf(self)?;
+        let len = buf.len().min(data.len());
+        buf[..len].copy_from_slice(&data[..len]);
+        io::BufRead::consume(self, len);
+        Ok(len)
+    }
+}
+
+impl io::BufRead for ChannelBytesReader {
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
         while self.buf.is_empty() {
             if self.failed {
                 return Err(io::Error::new(io::ErrorKind::BrokenPipe, "channel closed"));
@@ -106,13 +116,14 @@ impl io::Read for ChannelBytesReader {
             match self.rx.blocking_recv() {
                 Some(Ok(buf)) => self.buf = buf,
                 Some(Err(())) => self.failed = true,
-                None => return Ok(0),
+                None => break,
             }
         }
 
-        let len = buf.len().min(self.buf.len());
-        buf[..len].copy_from_slice(&self.buf[..len]);
-        self.buf.advance(len);
-        Ok(len)
+        Ok(&self.buf)
+    }
+
+    fn consume(&mut self, amt: usize) {
+        self.buf.advance(amt);
     }
 }

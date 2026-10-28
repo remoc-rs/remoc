@@ -91,7 +91,7 @@ use std::{
     cell::Cell,
     error::Error,
     fmt,
-    io::{BufWriter, Read, Write},
+    io::{BufRead, BufWriter, Read, Write},
     sync::Arc,
 };
 
@@ -241,6 +241,22 @@ pub trait Codec: Send + Sync + Serialize + for<'de> Deserialize<'de> + Clone + U
     where
         Reader: Read,
         Item: DeserializeOwned;
+
+    /// Deserializes the data from a buffered reader into an item.
+    ///
+    /// `len` is the number of bytes the reader delivers at most, if known.
+    /// A codec can use both to read the data more efficiently.
+    /// By default this calls [`deserialize`](Self::deserialize).
+    fn deserialize_buf_read<Reader, Item>(
+        reader: Reader, len: Option<usize>,
+    ) -> Result<Item, DeserializationError>
+    where
+        Reader: BufRead,
+        Item: DeserializeOwned,
+    {
+        let _ = len;
+        <Self as Codec>::deserialize(reader)
+    }
 
     /// Whether skipping struct fields using #[serde(skip_serializing_if = "...")] is allowed.
     fn is_skipping_fields_supported() -> bool {
@@ -443,11 +459,25 @@ impl ErasedDeserializer {
     pub fn deserialize(&self, reader: &mut dyn Read) -> Result<AnySend, DeserializationError> {
         self.inner.deserialize(reader)
     }
+
+    /// Deserialize the item of type `T` used for calling [`ErasedDeserializer::new`] from the given
+    /// buffered reader, which delivers at most `len` bytes, if known.
+    ///
+    /// This allows the codec to read the data more efficiently, see [`Codec::deserialize_buf_read`].
+    /// The deserialized item is returned type erased.
+    pub fn deserialize_buf_read(
+        &self, reader: &mut dyn BufRead, len: Option<usize>,
+    ) -> Result<AnySend, DeserializationError> {
+        self.inner.deserialize_buf_read(reader, len)
+    }
 }
 
 trait ErasedDeserializerMethods: Send + Sync {
     fn clone(&self) -> Box<dyn ErasedDeserializerMethods>;
     fn deserialize(&self, reader: &mut dyn Read) -> Result<AnySend, DeserializationError>;
+    fn deserialize_buf_read(
+        &self, reader: &mut dyn BufRead, len: Option<usize>,
+    ) -> Result<AnySend, DeserializationError>;
 }
 
 #[expect(dead_code)]
@@ -464,6 +494,13 @@ where
 
     fn deserialize(&self, reader: &mut dyn Read) -> Result<AnySend, DeserializationError> {
         let item: T = <C as Codec>::deserialize(reader)?;
+        Ok(Box::new(item))
+    }
+
+    fn deserialize_buf_read(
+        &self, reader: &mut dyn BufRead, len: Option<usize>,
+    ) -> Result<AnySend, DeserializationError> {
+        let item: T = <C as Codec>::deserialize_buf_read(reader, len)?;
         Ok(Box::new(item))
     }
 }

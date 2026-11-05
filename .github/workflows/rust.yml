@@ -25,6 +25,7 @@ jobs:
       - name: Run cargo fmt for examples
         run: |
           cargo fmt --all --manifest-path examples/channels/Cargo.toml -- --check
+          cargo fmt --all --manifest-path examples/daemon/Cargo.toml -- --check
           cargo fmt --all --manifest-path examples/rtc/Cargo.toml -- --check
           cargo fmt --all --manifest-path examples/rtc-web/Cargo.toml -- --check
           cargo fmt --all --manifest-path examples/transports/Cargo.toml -- --check
@@ -114,6 +115,30 @@ jobs:
 
       - name: Check transport examples
         run: cargo check --manifest-path examples/transports/Cargo.toml
+
+  test-daemon-example:
+    name: Run daemon example on ${{ matrix.os }}
+    needs: [msrv]
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v7
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            examples/daemon
+
+      - name: Run daemon and CLI smoke check
+        run: cargo test --manifest-path examples/daemon/Cargo.toml --test smoke --locked
 
   build-examples-web:
     name: Build web examples

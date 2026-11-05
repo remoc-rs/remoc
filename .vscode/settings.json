@@ -48,9 +48,16 @@
     },
     "rust-analyzer.linkedProjects": [
         "Cargo.toml",
+        "bench/compile/Cargo.toml",
+        "bench/perf/Cargo.toml",
+        "examples/channels/Cargo.toml",
+        "examples/daemon/Cargo.toml",
+        "examples/pipelining/Cargo.toml",
         "examples/rtc/Cargo.toml",
+        "examples/rtc-web/Cargo.toml",
         "examples/tracing/Cargo.toml",
         "examples/transports/Cargo.toml",
+        "examples/transports-web/Cargo.toml",
     ],
     // "rust-analyzer.cargo.features": [
     //     "full",

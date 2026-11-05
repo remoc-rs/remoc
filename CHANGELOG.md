@@ -6,8 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## 0.20.6 - 2026-11-05
 ### Added
-- transport examples: Windows named-pipe client and server, with documentation
-  available on all platforms, including docs.rs
+- transport examples: Windows named-pipe client and server
 
 ## 0.20.5 - 2026-10-28
 ### Added

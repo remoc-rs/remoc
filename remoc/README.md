@@ -164,12 +164,28 @@ A Remoc application normally follows these steps:
 
 The [channel example](#channels) below demonstrates the base-channel approach
 in one process; the [rtc module documentation][rtc docs] does the same for the
-remote trait calling approach. For separate client and server crates, see the
-[RTC example]. The [web RTC example] runs a Rust client in the browser over a
-WebSocket.
+remote trait calling approach.
 
-[RTC example]: https://github.com/remoc-rs/remoc/tree/master/examples/rtc
-[web RTC example]: https://github.com/remoc-rs/remoc/tree/master/examples/rtc-web
+
+## Runnable examples
+
+The following examples demonstrate channel passing, RPC, and transport setup.
+
+  * [Channels over TCP](https://remoc.rs/examples/channels.html):
+    send an mpsc sender inside a request and stream a sequence back.
+  * [Trait-based RPC returning channels](https://remoc.rs/examples/rtc.html):
+    query and update a shared counter, then receive watch updates and streamed values.
+  * [RPC callbacks and distributed tracing](https://remoc.rs/examples/tracing.html):
+    a pizzeria calls back into its client to report progress, with linked tracing spans.
+  * [WebAssembly browser client](https://remoc.rs/examples/rtc-web.html):
+    control a shared counter from a Rust browser client over WebSockets.
+  * [Local timer daemon](https://remoc.rs/examples/daemon.html):
+    schedule reminders over Unix sockets or Windows named pipes, with optional oneshot
+    replies and broadcast notifications. Timers keep running after the adding client exits.
+  * [RPC pipelining](https://remoc.rs/examples/pipelining.html):
+    compare sequential and pipelined calls over a simulated high-latency connection.
+
+[RTC example]: https://remoc.rs/examples/rtc.html
 
 
 ## Connecting

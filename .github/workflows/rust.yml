@@ -96,6 +96,25 @@ jobs:
           cargo build --manifest-path examples/rtc/Cargo.toml --workspace
           cargo build --manifest-path examples/transports/Cargo.toml
 
+  check-transports-windows:
+    name: Check transport examples on Windows
+    needs: [msrv]
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v7
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            examples/transports
+
+      - name: Check transport examples
+        run: cargo check --manifest-path examples/transports/Cargo.toml
+
   build-examples-web:
     name: Build web examples
     needs: [msrv]

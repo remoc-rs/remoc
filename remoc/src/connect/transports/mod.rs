@@ -183,3 +183,19 @@ pub mod websocket {}
 #[doc = include_str!("process.rs")]
 #[doc = "```"]
 pub mod process {}
+
+/// Windows named pipes, using [Tokio](https://docs.rs/tokio/latest/tokio/net/windows/named_pipe/index.html).
+///
+/// Use a local pipe name such as `r"\\.\pipe\remoc-example"`. Both ends are split
+/// into reading and writing halves and passed to [Connect::io](super::Connect::io).
+///
+/// The server checks that no pipe instance already exists when it starts.
+/// It creates a new listening instance before handling each
+/// connected client. The client retries when all instances are busy; other open
+/// errors, such as a missing server, are returned to the caller.
+///
+/// Tokio's default settings use byte mode and reject remote clients.
+#[doc = "```ignore"]
+#[doc = include_str!("named_pipe.rs")]
+#[doc = "```"]
+pub mod named_pipe {}

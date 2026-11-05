@@ -17,6 +17,10 @@ pub struct MyInitialRsp {}
 #[path = "../../../remoc/src/connect/transports/aggligator.rs"]
 pub mod aggligator;
 
+#[cfg(windows)]
+#[path = "../../../remoc/src/connect/transports/named_pipe.rs"]
+pub mod named_pipe;
+
 #[path = "../../../remoc/src/connect/transports/process.rs"]
 pub mod process;
 

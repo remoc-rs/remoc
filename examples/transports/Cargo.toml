@@ -15,7 +15,7 @@ remoc = { path = "../../remoc" }
 bytes = "1"
 futures = "0.3"
 serde = { version = "1", features = ["derive"] }
-tokio = { version = "1", features = ["io-std", "io-util", "net", "process", "rt"] }
+tokio = { version = "1", features = ["io-std", "io-util", "net", "process", "rt", "time"] }
 
 aggligator-transport-tcp = { version = "0.6", default-features = false }
 axum = { version = "0.8", features = ["ws"] }

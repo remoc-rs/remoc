@@ -12,6 +12,11 @@
 //! is used exactly like [TCP](tcp), and any other [AsyncRead] and [AsyncWrite] pair,
 //! such as a [serial link](https://docs.rs/tokio-serial) or a
 //! [Bluetooth L2CAP stream](https://docs.rs/bluer), follows the same pattern.
+//! On Windows, [named pipes](named_pipe) provide a local byte-stream transport.
+//!
+//! For local processes, the guide to
+//! [Rust IPC over Unix sockets and child-process pipes](https://remoc.rs/ipc.html)
+//! explains how to use these transports for daemon clients and parent-child RPC.
 //!
 //! If the underlying network is unreliable, see [aggligator], which keeps a Remoc
 //! connection alive across link failures.

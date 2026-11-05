@@ -22,6 +22,11 @@
 //! Arguments are transferred to that endpoint and the return value is transferred
 //! back to the caller.
 //!
+//! For a server-to-client callback using this pattern, see
+//! [bidirectional RPC with client callbacks over one connection](https://remoc.rs/server-push.html).
+//! The guide links to the pizzeria example, where the server calls a client-provided
+//! remote function to report progress.
+//!
 //! # Return type
 //!
 //! Since a remote function call can fail due to connection problems, the return type

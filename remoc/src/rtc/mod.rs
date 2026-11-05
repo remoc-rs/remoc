@@ -13,6 +13,10 @@
 //! implementing that trait located on the server.
 //! It then transmits the result back to the client.
 //!
+//! The guide to [bidirectional RPC, server push and client callbacks](https://remoc.rs/server-push.html)
+//! shows how methods can return channels for streamed updates or accept callbacks
+//! that the server invokes over the same connection.
+//!
 //! # Client type
 //!
 //! Assuming that the trait is called `Trait`, the client will be called `TraitClient`.

@@ -50,7 +50,7 @@
 //! Setting up a channel is done in a single line and it largely avoids the need
 //! for shared state and the associated complexity.
 //! Remoc extends this programming model to distributed systems by providing
-//! channels that work seamlessly over remote connections.
+//! [Tokio-style channels between processes and machines](https://remoc.rs/remote-channels.html).
 //!
 //! For that it uses Serde and the [Postbag] binary codec to
 //! serialize and deserialize data as it is transmitted over an underlying
@@ -62,7 +62,7 @@
 //! Opening a new [channel] is straightforward, just send the sender or receiver half
 //! of the new channel over an existing channel, like you would do between local
 //! threads and tasks.
-//! All channels are multiplexed over the same remote connection, with data being
+//! All channels are [multiplexed over the same remote connection](https://remoc.rs/multiplexing.html), with data being
 //! transmitted in chunks to avoid one channel blocking another if a large message
 //! is transmitted.
 //!
@@ -98,7 +98,7 @@ while let Some(i) = seq_rx.recv().await.unwrap() {
 //! including establishing the connection and the code of the remote endpoint.
 //!
 //! Building upon its remote channels, Remoc allows calling of [remote functions] and
-//! closures.
+//! closures, including [server-to-client callbacks over the same connection](https://remoc.rs/server-push.html).
 //! Furthermore, a trait can be made [remotely callable] with automatically generated
 //! client and server implementations, resembling a classical remote procedure
 //! calling (RPC) model; see the [RPC example](#remote-procedure-calls) below.
@@ -177,7 +177,9 @@ while let Some(i) = seq_rx.recv().await.unwrap() {
 //! value and spawn the connection dispatcher for you.
 //!
 //! The [transports] module contains worked examples for TCP, TLS, QUIC, WebSocket,
-//! pipes to a child process and aggregated, failure-resilient links.
+//! Windows named pipes, pipes to a child process and aggregated, failure-resilient links.
+//! For daemon and parent-child applications, see
+//! [IPC over Unix sockets and child-process pipes](https://remoc.rs/ipc.html).
 //!
 //! [AsyncRead]: tokio::io::AsyncRead
 //! [AsyncWrite]: tokio::io::AsyncWrite

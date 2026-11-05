@@ -6,6 +6,11 @@
 //! and their sender and receiver halves can themselves be sent to another process
 //! or machine, inside a message or as the argument of a remote call.
 //!
+//! For an illustrated introduction, see
+//! [Tokio-style channels between processes over TCP](https://remoc.rs/remote-channels.html).
+//! The guide to [multiplexing typed channels over one connection](https://remoc.rs/multiplexing.html)
+//! explains how independent conversations share the transport.
+//!
 //! The data type must be serializable and deserializable by [serde] and
 //! [sendable across thread boundaries](Send).
 //! The [RemoteSend](crate::RemoteSend) trait is implemented automatically

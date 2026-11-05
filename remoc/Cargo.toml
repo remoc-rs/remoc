@@ -96,7 +96,7 @@ default-codec-no-warn = []
 explicit-auto-traits = []
 
 [dependencies]
-remoc_macro = { version = "=0.20.5", path = "../remoc_macro", optional = true }
+remoc_macro = { version = "=0.20.6", path = "../remoc_macro", optional = true }
 
 custom_debug = "0.6"
 futures = { version = "0.3.31", default-features = false, features = ["std"] }

@@ -1220,3 +1220,70 @@ async fn forwarding_ends_when_remote_receiver_is_dropped() {
     fwd.await.expect("forwarding to a dropped receiver reported an error");
     drop(local_tx);
 }
+
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
+async fn sender_new_without_receivers() {
+    crate::init();
+
+    let tx: watch::Sender<i32> = watch::Sender::new(1);
+    assert_eq!(*tx.borrow(), 1);
+
+    // Without receivers the channel is closed.
+    assert!(tx.is_closed());
+    tx.closed().await;
+    assert!(matches!(tx.send(2), Err(SendError::Closed)));
+    assert_eq!(*tx.borrow(), 1);
+
+    // Infallible updates still change the value.
+    assert_eq!(tx.send_replace(3), 1);
+    tx.send_modify(|v| *v += 1);
+    assert_eq!(*tx.borrow(), 4);
+
+    // Subscribing opens the channel and observes the current value.
+    let mut rx = tx.subscribe();
+    assert!(!tx.is_closed());
+    assert_eq!(*rx.borrow().unwrap(), 4);
+
+    tx.send(5).unwrap();
+    rx.changed().await.unwrap();
+    assert_eq!(*rx.borrow_and_update().unwrap(), 5);
+
+    // Dropping the last receiver closes the channel again.
+    drop(rx);
+    assert!(tx.is_closed());
+    assert!(matches!(tx.send(6), Err(SendError::Closed)));
+}
+
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
+async fn sender_default() {
+    crate::init();
+
+    let tx: watch::Sender<String> = Default::default();
+    assert!(tx.is_closed());
+    assert_eq!(*tx.borrow(), "");
+
+    let rx = tx.subscribe();
+    assert_eq!(*rx.borrow().unwrap(), "");
+    assert!(!tx.is_closed());
+}
+
+#[cfg_attr(not(all(target_family = "wasm", feature = "js")), tokio::test)]
+#[cfg_attr(all(target_family = "wasm", feature = "js"), wasm_bindgen_test)]
+async fn sender_new_transported_is_closed() {
+    crate::init();
+    let ((mut a_tx, _), (_, mut b_rx)) = loop_channel::<watch::Sender<i32>>().await;
+
+    println!("Sending remote watch channel sender without receivers");
+    a_tx.send(watch::Sender::new(1)).await.unwrap();
+    println!("Receiving remote watch channel sender");
+    let remote_tx = b_rx.recv().await.unwrap().unwrap();
+    assert_eq!(*remote_tx.borrow(), 1);
+
+    // The remote sender is closed, since there is no receiver.
+    println!("Waiting for remote sender to be closed");
+    remote_tx.closed().await;
+    assert!(remote_tx.is_closed());
+    assert!(remote_tx.send(2).is_err());
+}

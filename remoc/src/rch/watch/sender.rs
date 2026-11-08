@@ -127,7 +127,12 @@ impl From<RemoteSendError> for SendError {
 /// observe the newest value and may skip intermediate updates. The sender may be
 /// transferred to another endpoint but is not cloneable; receivers can be cloned.
 ///
-/// Instances are created by [`channel`](super::channel).
+/// To share a sender locally, wrap it in an [`Arc`](std::sync::Arc). To send it
+/// to a remote endpoint, take it out of the `Arc` first, since the transfer only
+/// completes once the sender itself is dropped.
+///
+/// Instances are created by [`channel`](super::channel) or, without an initial
+/// receiver, by [`Sender::new`].
 pub struct Sender<T, Codec = codec::Default> {
     pub(super) inner: Option<SenderInner<T, Codec>>,
     successor_tx: Mutex<Option<tokio::sync::oneshot::Sender<SenderInner<T, Codec>>>>,
@@ -197,11 +202,46 @@ crate::versioned::compact::impl_struct! {
 
 impl<T, Codec> Sender<T, Codec>
 where
+    T: RemoteSend,
+{
+    /// Creates a new sender with the given initial value and no receivers.
+    ///
+    /// Since there are no receivers, the channel is closed until a receiver is
+    /// created using [`subscribe`](Self::subscribe): [`is_closed`](Self::is_closed)
+    /// returns `true` and [`send`](Self::send) fails with [`SendError::Closed`].
+    /// [`send_modify`](Self::send_modify), [`send_replace`](Self::send_replace) and
+    /// related methods still update the value, which is observed by receivers
+    /// subscribed later.
+    ///
+    /// If this sender is sent to a remote endpoint while it has no receivers,
+    /// the remote sender is closed as well.
+    ///
+    /// This is equivalent to calling [`channel`](super::channel) and dropping the
+    /// receiver.
+    pub fn new(init: T) -> Self {
+        super::channel(init).0
+    }
+}
+
+impl<T, Codec> Default for Sender<T, Codec>
+where
+    T: RemoteSend + Default,
+{
+    /// Creates a new sender with the default value and no receivers.
+    ///
+    /// See [`new`](Self::new) for details.
+    fn default() -> Self {
+        Self::new(T::default())
+    }
+}
+
+impl<T, Codec> Sender<T, Codec>
+where
     T: Send + 'static,
 {
-    /// Creates a new sender.
+    /// Creates a new sender from its internal parts.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
+    pub(crate) fn from_parts(
         tx: tokio::sync::watch::Sender<Result<T, RecvError>>,
         remote_send_err_tx: tokio::sync::mpsc::UnboundedSender<RemoteSendError>,
         remote_send_err_rx: tokio::sync::mpsc::UnboundedReceiver<RemoteSendError>, max_item_size: usize,
@@ -571,7 +611,7 @@ where
             .await;
         })?;
 
-        Ok(Self::new(
+        Ok(Self::from_parts(
             tx,
             remote_send_err_tx2,
             remote_send_err_rx,

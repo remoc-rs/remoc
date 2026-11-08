@@ -147,7 +147,7 @@ where
     let (sender_rate_limit_tx, sender_rate_limit_rx) = tokio::sync::watch::channel(Duration::ZERO);
     let (receiver_rate_limit_tx, receiver_rate_limit_rx) = rate_limit_channel(Duration::ZERO);
 
-    let sender = Sender::new(
+    let sender = Sender::from_parts(
         tx,
         remote_send_err_tx.clone(),
         remote_send_err_rx,

@@ -7,11 +7,12 @@
     html_favicon_url = "https://raw.githubusercontent.com/remoc-rs/remoc/master/.misc/Remoc.png"
 )]
 
-//! Remoc 🦑 — Rust RPC with remote channels and objects
+//! Remoc 🦑 — Rust-native RPC with remote channels and objects
 //!
-//! Remoc is an async RPC and IPC library for Rust. Unlike conventional RPC,
-//! calls can pass live Tokio-style channels and remote objects that remain usable
-//! after the call returns.
+//! Remoc provides async Rust-native RPC and IPC. Interfaces use Rust traits
+//! and [Serde] types, without a separate schema. Unlike conventional RPC, calls can
+//! pass live Tokio-style channels and remote objects that remain usable after the
+//! call returns.
 //!
 //! Over a [single underlying transport], such as TCP or TLS, it provides:
 //!

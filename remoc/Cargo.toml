@@ -1,6 +1,6 @@
 [package]
 name = "remoc"
-description = "🦑 Async Rust RPC and IPC where calls can pass live channels and remote objects over a single multiplexed connection."
+description = "🦑 Rust-native RPC and IPC using Rust traits and Serde types, with live channels and remote objects over one multiplexed connection."
 keywords = ["rpc", "ipc", "channel", "tokio", "distributed"]
 categories = ["asynchronous", "network-programming"]
 
